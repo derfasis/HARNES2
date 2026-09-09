@@ -1,0 +1,91 @@
+{
+  "repositories": [
+    {
+      "license": "MIT",
+      "license_evidence": "Root LICENSE read",
+      "tree_sha256": "a9a947a11d3d3c2b295c733e035ee056ad9c5828b5be1fae702c0836a226ab9c",
+      "tree_truncated": false,
+      "repository": "https://github.com/NousResearch/hermes-agent",
+      "tree_blob_count": 12172,
+      "name": "Hermes Agent",
+      "commit": "4810074d73d9419dc82545202d595507a73f4f0e"
+    },
+    {
+      "license": "MIT",
+      "license_evidence": "Root LICENSE read; API returned NOASSERTION",
+      "tree_sha256": "b9dbd5241e7865fc1919962f5b2b1b205d6c8b2af968092c1e455f895a7bd3a1",
+      "tree_truncated": false,
+      "repository": "https://github.com/openclaw/openclaw",
+      "tree_blob_count": 39399,
+      "name": "OpenClaw",
+      "commit": "f166d5c43df68dd366ea4984e8e1d95d1691d11d"
+    },
+    {
+      "license": "MIT",
+      "license_evidence": "GitHub repository metadata",
+      "tree_sha256": "f583ff1db7cdd881c1e05e602a6254fcd61d46628252e4ae1649a983cbc2d6af",
+      "tree_truncated": false,
+      "repository": "https://github.com/HKUDS/nanobot",
+      "tree_blob_count": 1367,
+      "name": "nanobot",
+      "commit": "c4a25c9a0977f5729ffabde0b10f641dae08774d"
+    },
+    {
+      "license": "MIT",
+      "license_evidence": "GitHub repository metadata",
+      "tree_sha256": "e1ab3aadb9176516ffbf807f7381476166f9a4825dbe8e4ccc329dd2ae336459",
+      "tree_truncated": false,
+      "repository": "https://github.com/AmplifyCo/novabot",
+      "tree_blob_count": 200,
+      "name": "NovaBot",
+      "commit": "6d7a135c7c4595ae7c93b975b49dce5d2c1f2d89"
+    }
+  ],
+  "recommendation": "Hermes Agent for first integration prototype; OpenClaw challenger; nanobot smaller-fork alternative",
+  "local_source_hashes": [
+    {
+      "path": "digital_ai_partner_idea_for_astra.md",
+      "sha256": "8ea551f21bca123a91f37b9ad2e700f14509db1991d7b4a1e987332c542515c7"
+    },
+    {
+      "path": "PROJECT_HANDOFF_FOR_AI.md",
+      "sha256": "99737c9d68e5aa7bcb8d2c86ee476f12c0c7ca4daa9f296f7be1fcce5d62eff1"
+    },
+    {
+      "path": "ОпенсорсыСкоторыхМожноЛепитьСвое.md",
+      "sha256": "18791deb50a3f69ce55109f3e891920d27530234c13136ede75737ac790e3175"
+    },
+    {
+      "path": "1.md",
+      "sha256": "2dc3f1adf4d0db11271c427f8c971793f70f7628e2da0d68cc0a29be6c93bc5d"
+    },
+    {
+      "path": "2.md",
+      "sha256": "ae68a946837c1e3da96c10d584215b949da13446bfaedf402842bc39029be9b1"
+    }
+  ],
+  "review_date": "2026-09-07",
+  "scope": "Documentation, complete recursive Git trees, selected source reads. No runtime installation, execution, comparative eval or live messaging.",
+  "exceptions": [
+    {
+      "repository": "https://github.com/ShubhamTuts/enverif",
+      "observation": "Public repository API returned 404; indexed README still available. Cause unknown."
+    },
+    {
+      "observation": "README references path; missing from complete tree; raw URL returns 404. No assertion about all possible deduplication implementations.",
+      "repository": "https://github.com/AmplifyCo/novabot",
+      "commit": "6d7a135c7c4595ae7c93b975b49dce5d2c1f2d89",
+      "path": "src/core/nervous_system/outbox.py"
+    },
+    {
+      "repository": "https://github.com/crediblemark-official/WAGENT",
+      "observation": "Repository metadata license null; root LICENSE raw URL returned 404. MIT claim in supplied note not verified."
+    }
+  ],
+  "old_project_verification": {
+    "rerun_in_this_review": false,
+    "path": "D:\\HARNES\\lead-search\\docs\\prototype-verification.json",
+    "reported_tests": "51/51",
+    "reported_date": "2026-09-06T12:33:26.872Z"
+  }
+}

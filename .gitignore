@@ -1,0 +1,14 @@
+.env
+.env.*
+!.env.example
+.venv/
+node_modules/
+data/
+exports/
+.cache/
+config/local.json
+__pycache__/
+*.pyc
+*.log
+runtime/hermes-agent/
+!runtime/README.md

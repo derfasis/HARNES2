@@ -1,0 +1,10 @@
+{
+  "name": "Hermes Agent",
+  "repository": "https://github.com/NousResearch/hermes-agent.git",
+  "commit": "4810074d73d9419dc82545202d595507a73f4f0e",
+  "version": "0.21.0",
+  "license": "MIT",
+  "python": "3.11",
+  "extras": ["mcp", "messaging"],
+  "checkout": "runtime/hermes-agent"
+}

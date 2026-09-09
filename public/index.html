@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ru">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Digital AI Partner</title><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/styles.css"></head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="#overview"><span class="brand-icon">D<span>·</span></span><span>Digital Partner<small>Личное рабочее пространство</small></span></a>
+    <div class="nav-label">ПАРТНЁР</div>
+    <nav aria-label="Основная навигация">
+      <button data-tab="overview" class="nav-item active"><span>◈</span>Обзор</button>
+      <button data-tab="people" class="nav-item"><span>◎</span>Люди и диалоги</button>
+      <button data-tab="tasks" class="nav-item"><span>☷</span>Задачи</button>
+      <button data-tab="experience" class="nav-item"><span>◇</span>Память и опыт</button>
+      <button data-tab="capabilities" class="nav-item"><span>✧</span>Способности</button>
+      <button data-tab="runs" class="nav-item"><span>↗</span>История работы</button>
+      <button data-tab="settings" class="nav-item"><span>⚙</span>Подключения</button>
+    </nav>
+    <div class="sidebar-foot"><span class="dot"></span> Локально · Ваши данные<br><small>Hermes + Partner Core · v0.1</small></div>
+  </aside>
+  <main>
+    <header class="topbar"><div><span class="eyebrow">ВАШ ЦИФРОВОЙ ПАРТНЁР</span><h1 id="page-title">Обзор</h1></div><div class="header-actions"><span id="model-status" class="pill">Загрузка…</span><button id="export-button" class="button secondary">Экспорт данных ↗</button></div></header>
+    <div id="notice" role="status" aria-live="polite"></div>
+    <div id="content"><div class="empty">Открываем рабочее пространство…</div></div>
+    <footer>Один партнёр. Общая цель, память и опыт.</footer>
+  </main>
+  <dialog id="modal"><div class="modal-header"><h2 id="modal-title"></h2><button id="close-modal" aria-label="Закрыть">✕</button></div><div id="modal-body"></div></dialog>
+  <script src="/app.js" type="module"></script>
+</body></html>
