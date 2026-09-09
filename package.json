@@ -1,0 +1,22 @@
+{
+  "name": "digital-ai-partner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A persistent business partner built on Hermes with portable business state",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env business/server.mjs",
+    "setup": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup.ps1",
+    "build": "node scripts/build.mjs",
+    "export": "node --env-file-if-exists=.env scripts/export.mjs",
+    "import": "node --env-file-if-exists=.env scripts/import.mjs",
+    "mcp": ".venv\\Scripts\\python.exe adapters/mcp/server.py"
+  },
+  "dependencies": {
+    "ajv": "8.17.1",
+    "telegram": "2.26.22"
+  }
+}

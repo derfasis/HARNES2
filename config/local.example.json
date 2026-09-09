@@ -1,0 +1,13 @@
+{
+  "runtime": {
+    "enabled": false,
+    "provider": "custom",
+    "apiMode": "chat_completions",
+    "baseUrl": "https://api.apinex.bond/v1",
+    "model": "claude/opus-5",
+    "inputUsdPerMillion": null,
+    "outputUsdPerMillion": null
+  },
+  "telegram": { "enabled": false, "liveSending": false, "transport": "bot_api", "allowedChatIds": [] },
+  "scheduler": { "dailyPlanning": false }
+}

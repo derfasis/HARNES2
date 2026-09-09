@@ -1,0 +1,22 @@
+{
+  "server": { "host": "127.0.0.1", "port": 8790 },
+  "runtime": {
+    "enabled": false,
+    "adapter": "hermes",
+    "provider": "custom",
+    "apiMode": "chat_completions",
+    "baseUrl": "",
+    "model": "",
+    "maxIterations": 12,
+    "maxOutputTokens": 3000,
+    "timeoutSeconds": 180,
+    "maxRunsPerDay": 30,
+    "dailyBudgetUsd": 5,
+    "inputUsdPerMillion": null,
+    "outputUsdPerMillion": null
+  },
+  "scheduler": { "enabled": true, "tickSeconds": 20, "dailyPlanning": false, "planningHour": 9, "timezone": "Europe/Warsaw" },
+  "telegram": { "enabled": false, "liveSending": false, "transport": "bot_api", "allowedChatIds": [], "pollSeconds": 20 },
+  "context": { "maxRecentMessages": 30, "maxMessageCharacters": 4000, "maxLessons": 5 },
+  "partnerId": "partner-001"
+}

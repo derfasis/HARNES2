@@ -1,0 +1,10 @@
+[
+  { "id": "business", "name": "Люди, диалоги и задачи", "version": "1.0.0", "status": "available", "effect": "internal_proposal", "implementation": "business/tools.mjs" },
+  { "id": "experience", "name": "Память и рассмотренный опыт", "version": "1.0.0", "status": "available", "effect": "read_and_propose", "implementation": "business/context.mjs" },
+  { "id": "telegram", "name": "Telegram Bot API / MTProto", "version": "1.1.0", "status": "needs_configuration", "effect": "external_write", "implementation": "business/channels/telegram.mjs,business/channels/telegram-mtproto.mjs" },
+  { "id": "research", "name": "Исследование источников", "version": "1.0.0", "status": "available_manual_sources", "effect": "read", "implementation": "business/service.mjs" },
+  { "id": "browser", "name": "Браузер и веб-поиск", "status": "planned", "effect": "network" },
+  { "id": "email", "name": "Email", "status": "planned", "effect": "external_write" },
+  { "id": "calendar", "name": "Календарь", "status": "planned", "effect": "external_write" },
+  { "id": "social", "name": "Публикации и входящие соцсетей", "status": "planned", "effect": "external_write" }
+]
