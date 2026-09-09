@@ -45,6 +45,7 @@ def main():
         "memory:\n  memory_enabled: false\n  user_profile_enabled: false\n  write_approval: true\n"
         "skills:\n  write_approval: true\n"
         "agent:\n  skip_memory: true\n"
+        "tools:\n  tool_search:\n    enabled: off\n"
         "checkpoints:\n  enabled: false\n", encoding="utf-8"
     )
     (hermes_home / ".no-bundled-skills").touch()
@@ -52,6 +53,7 @@ def main():
     with contextlib.redirect_stdout(sys.stderr):
         from run_agent import AIAgent
         from tools.registry import registry
+        from toolsets import create_custom_toolset
 
         allowed = {tool["name"] for tool in envelope["tools"]}
         for tool in envelope["tools"]:
@@ -62,6 +64,7 @@ def main():
                 schema={"name": tool["name"], "description": tool["description"], "parameters": tool["inputSchema"]},
                 handler=handler, check_fn=lambda: True,
             )
+        create_custom_toolset("partner_business", "HARNES2 business tools for this isolated run", sorted(allowed))
         cfg = envelope["model"]
         context = envelope["context"]
         system = context["identity"] + "\n\n" + "\n\n".join(s["content"] for s in context["skills"])
