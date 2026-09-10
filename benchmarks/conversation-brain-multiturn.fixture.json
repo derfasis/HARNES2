@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "id": "recruiting-continuity-to-call",
+  "title": "Conversation continuity from first question to call timing",
+  "started_at": "2026-09-10T16:00:00.000Z",
+  "conversation": {
+    "id": "benchmark-conversation-multiturn",
+    "person_id": "benchmark-person-multiturn",
+    "channel": "telegram",
+    "ownership": "AI_OWNED",
+    "mode": "REVIEW",
+    "stage": "new",
+    "revision": 1
+  },
+  "person": {
+    "id": "benchmark-person-multiturn",
+    "name": "Алексей (benchmark)",
+    "source": "offline benchmark fixture",
+    "permission": "offline benchmark only; no contact permission",
+    "suppressed": 0
+  },
+  "turns": [
+    { "inbound": "Привет. Чем занимаешься?" },
+    { "inbound": "Понял. А что это за проект?" },
+    { "inbound": "Это сетевой? Я раньше пробовал, опыт был так себе." },
+    { "inbound": "Но сейчас мне всё же интересно понять, как это работает." },
+    { "inbound": "Хорошо, давай лучше коротко созвонимся." },
+    { "inbound": "Завтра после 18:00 мне удобно." }
+  ]
+}
