@@ -18,6 +18,7 @@ export class MtprotoTelegramChannel {
     this.polling = false;
     this.lastError = null;
     this.lastEvent = null;
+    this.peerEntities = new Map();
   }
 
   sessionString() {
@@ -87,6 +88,10 @@ export class MtprotoTelegramChannel {
 
     this.polling = true;
     try {
+      try {
+        const peer = typeof message.getInputChat === 'function' ? await message.getInputChat() : null;
+        if (peer) this.peerEntities.set(chatId, peer);
+      } catch { /* The numeric ID remains available for the fallback lookup on send. */ }
       const sender = typeof message.getSender === 'function' ? await message.getSender() : null;
       const name = [sender?.firstName, sender?.lastName].filter(Boolean).join(' ') || chatId;
       const account = this.service.telegramAccount();
@@ -115,7 +120,21 @@ export class MtprotoTelegramChannel {
     } finally { this.polling = false; }
   }
 
-  async sendApproved(draftId) {
+  async resolvePeer(chatId) {
+    const cached = this.peerEntities.get(String(chatId));
+    if (cached) return cached;
+    const numericId = Number(chatId);
+    ensure(Number.isSafeInteger(numericId), 'MTProto Telegram: некорректный ID собеседника', 409);
+    try {
+      const peer = await this.client.getInputEntity(numericId);
+      this.peerEntities.set(String(chatId), peer);
+      return peer;
+    } catch (error) {
+      throw new AppError(`MTProto Telegram: не удалось найти собеседника (${error.message})`, 502, 'telegram_unknown');
+    }
+  }
+
+  async sendApproved(draftId, { autopilot = false } = {}) {
     return this.service.exclusive(async () => {
       const cfg = this.service.config.telegram;
       ensure(cfg.enabled && cfg.liveSending, 'Живая отправка Telegram выключена в конфигурации', 409);
@@ -130,22 +149,25 @@ export class MtprotoTelegramChannel {
         this.service.store.run('INSERT INTO delivery_attempts(id,draft_id,draft_version,channel,recipient,status,created_at) VALUES(?,?,?,?,?,?,?)', attempt, draft.id, draft.current_version, 'telegram', identity.external_id, 'sending', now());
       });
       let message;
-      try { message = await this.client.sendMessage(identity.external_id, { message: draft.text }); }
+      try {
+        const peer = await this.resolvePeer(identity.external_id);
+        message = await this.client.sendMessage(peer, { message: draft.text });
+      }
       catch (error) {
         const wrapped = error instanceof AppError ? error : new AppError(`MTProto Telegram: ${error.message}`, 502, 'telegram_unknown');
         const status = wrapped.code === 'telegram_rejected' ? 'failed' : 'delivery_unknown';
         this.service.store.transaction(() => {
           this.service.store.run('UPDATE drafts SET status=? WHERE id=?', status, draft.id);
           this.service.store.run('UPDATE delivery_attempts SET status=?,error=?,finished_at=? WHERE id=?', status, wrapped.message, now(), attempt);
-          this.service.store.event(this.service.config.partnerId, conversation.id, `delivery.${status}`, 'system', { draft_id: draft.id, attempt_id: attempt });
+          this.service.store.event(this.service.config.partnerId, conversation.id, `delivery.${status}`, 'system', { draft_id: draft.id, attempt_id: attempt, autopilot, run_id: draft.run_id, model: this.service.config.runtime.model, conversation_revision: draft.context_revision });
         });
         return { status, error: wrapped.message };
       }
       try {
         this.service.store.transaction(() => {
           this.service.store.run("UPDATE delivery_attempts SET status='sent',external_id=?,finished_at=? WHERE id=?", String(message.id), now(), attempt);
-          this.service.recordDelivered(draft, String(message.id), 'telegram');
-          this.service.store.event(this.service.config.partnerId, conversation.id, 'delivery.sent', 'system', { draft_id: draft.id, external_id: String(message.id) });
+          this.service.recordDelivered(draft, String(message.id), autopilot ? 'telegram_autopilot' : 'telegram');
+          this.service.store.event(this.service.config.partnerId, conversation.id, 'delivery.sent', 'system', { draft_id: draft.id, draft_version: draft.current_version, external_id: String(message.id), autopilot, run_id: draft.run_id, model: this.service.config.runtime.model, conversation_revision: draft.context_revision, model_text: draft.text, sent_text: draft.text });
         });
       } catch {
         this.service.store.run("UPDATE drafts SET status='delivery_unknown' WHERE id=?", draft.id);

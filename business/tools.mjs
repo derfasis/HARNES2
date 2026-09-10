@@ -1,7 +1,7 @@
 import path from 'node:path';
 import Ajv from 'ajv';
 import { ROOT, readJson } from './config.mjs';
-import { contextFor, searchExperience } from './context.mjs';
+import { compactPromptContext, contextFor, searchExperience } from './context.mjs';
 import { ensure, now } from './errors.mjs';
 import { id } from './store.mjs';
 
@@ -20,7 +20,7 @@ export async function callTool(service, scope, name, args, requestId) {
     if (run.task_id) ensure(service.store.get('SELECT status FROM tasks WHERE id=?', run.task_id)?.status === 'running', 'Задача отменена', 409);
   }
   let result;
-  if (name === 'partner_get_context') result = contextFor(service, scope.conversationId ?? null);
+  if (name === 'partner_get_context') result = compactPromptContext(contextFor(service, scope.conversationId ?? null));
   else if (name === 'partner_list_work') result = scope.conversationId
     ? service.store.all("SELECT * FROM tasks WHERE conversation_id=? AND status IN ('pending','proposed','running') ORDER BY due_at LIMIT 50", scope.conversationId)
     : service.store.all("SELECT * FROM tasks WHERE partner_id=? AND status IN ('pending','proposed','running') ORDER BY due_at LIMIT 100", service.config.partnerId);

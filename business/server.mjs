@@ -29,8 +29,8 @@ export async function start() {
   const config = loadConfig(), store = new Store(), service = new BusinessService(store,config);
   ensure(service.partner(), 'partnerId не совпадает с профилем', 500);
   const operatorToken = randomBytes(32).toString('hex'), mcpToken = randomBytes(32).toString('hex'), runTokens = new Map();
-  const runtime = new HermesAdapter(service,runTokens), scheduler = new Scheduler(service,runtime);
   const telegram = config.telegram.transport === 'mtproto' ? new MtprotoTelegramChannel(service) : new TelegramChannel(service);
+  const runtime = new HermesAdapter(service,runTokens), scheduler = new Scheduler(service,runtime,telegram);
   let shuttingDown = false;
   const server = http.createServer(async (req,res) => {
     const send = (code,value) => { res.writeHead(code, {'Content-Type':'application/json; charset=utf-8'}); res.end(JSON.stringify(value)); };

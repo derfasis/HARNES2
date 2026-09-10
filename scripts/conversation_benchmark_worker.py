@@ -1,8 +1,4 @@
-"""Private single-run adapter. Hermes owns the model/tool loop; business owns effects.
-
-One process per run prevents profile/scope sharing. Stdin is the request envelope;
-stdout is one JSON result, while upstream console output is redirected to stderr.
-"""
+"""One isolated, side-effect-free Conversation Brain benchmark turn."""
 from __future__ import annotations
 
 import contextlib
@@ -10,26 +6,9 @@ import json
 import os
 from pathlib import Path
 import sys
-import uuid
-import urllib.error
-import urllib.request
-
-ROOT = Path(__file__).resolve().parents[2]
 
 
-def business_call(envelope, name, args):
-    payload = json.dumps({"name": name, "arguments": args, "request_id": str(uuid.uuid4())}).encode()
-    request = urllib.request.Request(
-        envelope["business_url"] + "/internal/tools/call", data=payload,
-        headers={"Content-Type": "application/json", "Authorization": "Bearer " + os.environ["PARTNER_RUN_TOKEN"]},
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            return response.read().decode()
-    except urllib.error.HTTPError as error:
-        return json.dumps({"error": error.read(8192).decode(errors="replace"), "status": error.code})
-    except (OSError, TimeoutError):
-        return json.dumps({"error": "Business service unavailable; action was not confirmed"})
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def compact_prompt_context(context):
@@ -55,11 +34,26 @@ def compact_prompt_context(context):
     return compact
 
 
+def safe_benchmark_tool(context, compact_context, name):
+    """Return read context and explicit no-op results for effect tools."""
+    if name == "partner_get_context":
+        return json.dumps(compact_context, ensure_ascii=False)
+    if name == "partner_list_work":
+        return json.dumps(context.get("tasks", []), ensure_ascii=False)
+    if name == "partner_search_experience":
+        return json.dumps(context.get("lessons", []), ensure_ascii=False)
+    return json.dumps({
+        "benchmark_only": True,
+        "executed": False,
+        "tool": name,
+        "message": "Offline benchmark: this proposal was not saved and no external action was taken.",
+    }, ensure_ascii=False)
+
+
 def main():
     envelope = json.load(sys.stdin)
-    run_id = str(uuid.UUID(envelope["run_id"]))
-    # Every run has a private home; no existing user Hermes/Codex credentials or memory.
-    hermes_home = ROOT / "data" / "runtime" / "hermes" / run_id
+    run_id = envelope["run_id"]
+    hermes_home = ROOT / "data" / "runtime" / "benchmarks" / run_id
     hermes_home.mkdir(parents=True, exist_ok=True)
     os.environ["HERMES_HOME"] = str(hermes_home)
     os.environ["HERMES_CWD"] = str(hermes_home)
@@ -76,27 +70,30 @@ def main():
     )
     (hermes_home / ".no-bundled-skills").touch()
     sys.path.insert(0, str(ROOT / "runtime" / "hermes-agent"))
+
     with contextlib.redirect_stdout(sys.stderr):
         from run_agent import AIAgent
-        from tools.registry import registry
         from toolsets import create_custom_toolset
+        from tools.registry import registry
 
+        context = envelope["context"]
+        model_context = compact_prompt_context(context)
         allowed = {tool["name"] for tool in envelope["tools"]}
         for tool in envelope["tools"]:
             def handler(args, _name=tool["name"], **kwargs):
-                return business_call(envelope, _name, args)
+                return safe_benchmark_tool(context, model_context, _name)
+
             registry.register(
                 name=tool["name"], toolset="partner_business",
                 schema={"name": tool["name"], "description": tool["description"], "parameters": tool["inputSchema"]},
                 handler=handler, check_fn=lambda: True,
             )
-        create_custom_toolset("partner_business", "HARNES2 business tools for this isolated run", sorted(allowed))
+        create_custom_toolset("partner_business", "Offline HARNES2 business tools", sorted(allowed))
+
         cfg = envelope["model"]
-        context = envelope["context"]
         system_parts = [context.get("behavioral_examples", "")]
-        system_parts.extend(s["content"] for s in context["skills"])
-        system = "\n\n".join(part for part in system_parts if part.strip())
-        model_context = compact_prompt_context(context)
+        system_parts.extend(skill["content"] for skill in context["skills"])
+        partner_system = "\n\n".join(part for part in system_parts if part.strip())
         agent = AIAgent(
             model=cfg["model"], provider=cfg["provider"], api_mode=cfg["apiMode"],
             base_url=cfg["baseUrl"], api_key=os.environ["PARTNER_MODEL_API_KEY"],
@@ -105,21 +102,36 @@ def main():
             skip_background_review=True, save_trajectories=False, quiet_mode=True,
             max_iterations=cfg["maxIterations"], max_tokens=cfg["maxOutputTokens"],
             run_budget_seconds=cfg["timeoutSeconds"], session_id=run_id,
-            ephemeral_system_prompt=system, checkpoints_enabled=False,
+            ephemeral_system_prompt=partner_system, checkpoints_enabled=False,
             fallback_model=None, credential_pool=None,
         )
-        advertised = {tool["function"]["name"] for tool in agent.tools}
-        if advertised != allowed:
-            raise RuntimeError("Hermes tool surface differs from the explicit business allowlist")
+        if {tool["function"]["name"] for tool in agent.tools} != allowed:
+            raise RuntimeError("Hermes tool surface differs from the benchmark allowlist")
         result = agent.run_conversation(
             user_message=json.dumps(model_context, ensure_ascii=False), task_id=run_id,
         )
+        base_system = agent._cached_system_prompt or ""
+        effective_system = (base_system + "\n\n" + partner_system).strip()
+        raw_messages = result.get("messages", [])
+        assistant_texts = []
+        tool_calls = []
+        for message in raw_messages:
+            if not isinstance(message, dict) or message.get("role") != "assistant":
+                continue
+            if message.get("content"):
+                assistant_texts.append(message["content"])
+            if message.get("tool_calls"):
+                tool_calls.extend(message["tool_calls"])
         output = {
-            "schema_version": 1, "run_id": run_id,
+            "schema_version": 1,
+            "scenario_id": envelope["scenario_id"],
+            "run_id": run_id,
             "completed": bool(result.get("completed", False)) and not result.get("error"),
             "final_response": result.get("final_response") or "",
-            "error": str(result.get("error"))[:2000] if result.get("error") else None,
-            "messages": result.get("messages", []),
+            "assistant_texts": assistant_texts,
+            "tool_calls": tool_calls,
+            "error": str(result.get("error"))[:4000] if result.get("error") else None,
+            "messages": raw_messages,
             "api_calls": result.get("api_calls"),
             "usage": {
                 "input_tokens": getattr(agent, "session_input_tokens", None),
@@ -128,6 +140,15 @@ def main():
                 "cost_status": getattr(agent, "session_cost_status", "unknown"),
             },
         }
+        if envelope.get("include_prompt"):
+            output["prompt"] = {
+                "hermes_base_system": base_system,
+                "partner_ephemeral_system": partner_system,
+                "effective_system": effective_system,
+                "user_context": json.dumps(model_context, ensure_ascii=False),
+                "tool_schemas": agent.tools,
+            }
+        agent.close()
     print(json.dumps(output, ensure_ascii=False, default=str))
 
 
@@ -135,6 +156,5 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as error:
-        # Never print provider request objects, keys, environment or a traceback.
-        print(json.dumps({"completed": False, "error": "Hermes adapter failed: " + type(error).__name__}))
+        print(json.dumps({"completed": False, "error": "Benchmark worker failed: " + type(error).__name__}))
         sys.exit(1)

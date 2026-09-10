@@ -5,7 +5,7 @@ export class TelegramChannel {
   constructor(service) { this.service = service; this.polling = false; this.stopped = false; this.lastError = null; this.lastPoll = null; }
   readiness() {
     const cfg = this.service.config.telegram;
-    return { enabled: cfg.enabled, configured: Boolean(process.env.PARTNER_TELEGRAM_BOT_TOKEN), live_sending: cfg.liveSending,
+    return { enabled: cfg.enabled, transport: 'bot_api', configured: Boolean(process.env.PARTNER_TELEGRAM_BOT_TOKEN), live_sending: cfg.liveSending,
       allowed_chats: cfg.allowedChatIds.length, account_id: this.service.telegramAccount(), last_poll: this.lastPoll, error: this.lastError };
   }
   async api(method, body, timeout = 12000) {
@@ -47,7 +47,7 @@ export class TelegramChannel {
     } catch (error) { this.lastError = error instanceof AppError ? error.message : 'Ошибка обработки Telegram'; }
     finally { this.polling = false; }
   }
-  sendApproved(draftId) {
+  sendApproved(draftId, { autopilot = false } = {}) {
     return this.service.exclusive(async () => {
       const cfg = this.service.config.telegram;
       ensure(cfg.enabled && cfg.liveSending, 'Живая отправка Telegram выключена в конфигурации', 409);
@@ -67,15 +67,15 @@ export class TelegramChannel {
         this.service.store.transaction(() => {
           this.service.store.run('UPDATE drafts SET status=? WHERE id=?', status, draft.id);
           this.service.store.run('UPDATE delivery_attempts SET status=?,error=?,finished_at=? WHERE id=?', status, error.message, now(), attempt);
-          this.service.store.event(this.service.config.partnerId, conversation.id, `delivery.${status}`, 'system', { draft_id: draft.id, attempt_id: attempt });
+          this.service.store.event(this.service.config.partnerId, conversation.id, `delivery.${status}`, 'system', { draft_id: draft.id, attempt_id: attempt, autopilot, run_id: draft.run_id, model: this.service.config.runtime.model, conversation_revision: draft.context_revision });
         });
         return { status, error: error.message };
       }
       try {
         this.service.store.transaction(() => {
           this.service.store.run("UPDATE delivery_attempts SET status='sent',external_id=?,finished_at=? WHERE id=?", String(message.message_id), now(), attempt);
-          this.service.recordDelivered(draft, String(message.message_id), 'telegram');
-          this.service.store.event(this.service.config.partnerId, conversation.id, 'delivery.sent', 'system', { draft_id: draft.id, external_id: String(message.message_id) });
+          this.service.recordDelivered(draft, String(message.message_id), autopilot ? 'telegram_autopilot' : 'telegram');
+          this.service.store.event(this.service.config.partnerId, conversation.id, 'delivery.sent', 'system', { draft_id: draft.id, draft_version: draft.current_version, external_id: String(message.message_id), autopilot, run_id: draft.run_id, model: this.service.config.runtime.model, conversation_revision: draft.context_revision, model_text: draft.text, sent_text: draft.text });
         });
       } catch {
         this.service.store.run("UPDATE drafts SET status='delivery_unknown' WHERE id=?", draft.id);

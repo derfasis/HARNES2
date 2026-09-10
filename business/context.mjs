@@ -16,14 +16,17 @@ export function searchExperience(service, query = '', conversationId = null, lim
 export function contextFor(service, conversationId = null, task = null) {
   const profile = readJson(path.join(ROOT, 'partner/profile.json'));
   const identity = fs.readFileSync(path.join(ROOT, 'partner/identity.md'), 'utf8');
+  const behavioralExamples = fs.readFileSync(path.join(ROOT, 'partner/behavioral_examples.md'), 'utf8');
   const knowledge = fs.readdirSync(path.join(ROOT, 'partner/knowledge')).filter(x => x.endsWith('.json')).map(x => readJson(path.join(ROOT, 'partner/knowledge', x)));
   const skillName = conversationId ? 'recruiting' : 'planning';
   const skill = fs.readFileSync(path.join(ROOT, 'partner/skills', skillName, 'SKILL.md'), 'utf8');
-  const skills = [{ name: skillName, content: skill, sha256: hash(skill) },
+  const skillVersion = skill.match(/^version:\s*(.+)$/m)?.[1]?.trim() ?? null;
+  const skills = [{ name: skillName, content: skill, ...(skillVersion ? { version: skillVersion } : {}), sha256: hash(skill) },
     ...service.store.all("SELECT name,version,content,sha256 FROM skill_versions WHERE status='approved' ORDER BY name").slice(0,10)];
-  const context = { schema_version: 1, generated_at: now(), partner: { ...profile, ...service.partner() }, identity, identity_sha256: hash(identity), knowledge,
+  const context = { schema_version: 1, generated_at: now(), partner: { ...profile, ...service.partner() }, identity, identity_sha256: hash(identity),
+    behavioral_examples: behavioralExamples, behavioral_examples_sha256: hash(behavioralExamples), knowledge,
     knowledge_sha256: hash(JSON.stringify(knowledge)), skills, task,
-    instructions: 'Choose useful work inside this scope. Use business tools for proposals. Final text is an internal note, never delivery. Missing evidence is unknown, not permission.' };
+    instructions: 'Choose the best next step inside this scope. Before responding, use one internal objective: discover, answer, clarify, advance, handoff, or stop. Answer direct questions directly; when interest or a call is explicit, move to a concrete next step. Use business tools for proposals. Final text is an internal note, never delivery. Missing evidence is unknown, not permission. In AUTOPILOT, reply only inside the existing permitted conversation; create reply, clarify, or propose_call drafts for ordinary responses, and use handoff when the owner must participate. Never initiate a first contact or cold outreach.' };
   if (conversationId) {
     const conv = service.conversation(conversationId), person = service.person(conv.person_id);
     const messages = service.store.all('SELECT id,direction,author,text,source,created_at FROM messages WHERE conversation_id=? ORDER BY created_at DESC,rowid DESC LIMIT ?', conv.id, service.config.context.maxRecentMessages).reverse();
@@ -38,4 +41,21 @@ export function contextFor(service, conversationId = null, task = null) {
     context.lessons = searchExperience(service, task?.instructions ?? '', null, service.config.context.maxLessons);
   }
   return context;
+}
+
+export function compactPromptContext(context) {
+  const compact = { ...context };
+  compact.prompt_assets = {
+    identity: { source: 'partner/identity.md', sha256: context.identity_sha256 },
+    behavioral_examples: { source: 'partner/behavioral_examples.md', sha256: context.behavioral_examples_sha256 },
+    skills: (context.skills ?? []).map(skill => ({
+      name: skill.name,
+      ...(skill.version ? { version: skill.version } : {}),
+      ...(skill.sha256 ? { sha256: skill.sha256 } : {}),
+    })),
+  };
+  delete compact.identity;
+  delete compact.behavioral_examples;
+  delete compact.skills;
+  return compact;
 }

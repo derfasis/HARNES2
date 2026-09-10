@@ -46,7 +46,7 @@ export class BusinessService {
     const agentActions = new Set(['draft.create','fact.propose','lesson.propose','task.propose','capability.propose']);
     ensure(actor.kind === 'operator' || (actor.kind === 'agent' && agentActions.has(action)) || (actor.kind === 'channel' && ['person.create','message.record'].includes(action)), 'Операция доступна только владельцу', 403);
     let conversationId = p.conversation_id ?? null;
-    if (['person.permission','person.stop','person.resume','conversation.takeover','conversation.release','message.record','draft.create','fact.propose','fact.create','outcome.record'].includes(action)) requiredText(conversationId, 'conversation_id', 100);
+    if (['person.permission','person.stop','person.resume','conversation.mode','conversation.takeover','conversation.release','message.record','draft.create','fact.propose','fact.create','outcome.record'].includes(action)) requiredText(conversationId, 'conversation_id', 100);
     if (conversationId) this.assertScope(actor, conversationId);
     let result;
     switch (action) {
@@ -100,6 +100,13 @@ export class BusinessService {
         this.invalidate(conversationId, ownership);
         if (ownership === 'HUMAN_OWNED') this.store.run("UPDATE tasks SET status='cancelled' WHERE conversation_id=? AND status IN ('pending','proposed','running')", conversationId);
         result = { ownership }; break;
+      }
+      case 'conversation.mode': {
+        const mode = String(p.mode ?? ''); ensure(['REVIEW','AUTOPILOT'].includes(mode), 'Неизвестный режим разговора');
+        this.conversation(conversationId);
+        this.store.run('UPDATE conversations SET mode=? WHERE id=?', mode, conversationId);
+        this.invalidate(conversationId, `mode_${mode.toLowerCase()}`);
+        result = { mode }; break;
       }
       case 'message.record': {
         const text = requiredText(p.text, 'Текст', 16000), source = requiredText(p.source ?? 'operator_record', 'Источник', 2000);
@@ -302,6 +309,42 @@ export class BusinessService {
       this.store.run("UPDATE conversations SET ownership='HUMAN_OWNED' WHERE id=?", draft.conversation_id);
       this.store.run("UPDATE tasks SET status='cancelled' WHERE conversation_id=? AND status IN ('pending','proposed','running')", draft.conversation_id);
     }
+  }
+  autopilotCandidates(runId) {
+    const allowed = this.config.telegram.allowedChatIds.map(String);
+    if (!allowed.length) return [];
+    const slots = allowed.map(() => '?').join(',');
+    return this.store.all(`SELECT d.* FROM drafts d JOIN conversations c ON c.id=d.conversation_id JOIN persons p ON p.id=c.person_id JOIN channel_identities ci ON ci.id=c.channel_identity_id WHERE d.run_id=? AND d.status='pending' AND d.action IN ('reply','clarify','propose_call') AND c.mode='AUTOPILOT' AND c.ownership='AI_OWNED' AND p.suppressed=0 AND trim(p.permission)<>'' AND ci.channel='telegram' AND ci.account_id=? AND ci.external_id IN (${slots}) AND EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id=c.id AND m.direction='in') ORDER BY d.created_at`, runId, this.telegramAccount(), ...allowed);
+  }
+  approveAutopilot(draftId, runId) {
+    const draft = this.draft(draftId);
+    ensure(draft.run_id === runId, 'Черновик не принадлежит этому запуску', 409);
+    ensure(draft.status === 'pending', 'Автономно отправляется только ожидающий черновик', 409);
+    ensure(['reply','clarify','propose_call'].includes(draft.action), 'Действие требует участия владельца', 409);
+    const { conversation } = this.active(draft.conversation_id, { permission: true });
+    ensure(conversation.mode === 'AUTOPILOT', 'Автопилот выключен для разговора', 409);
+    ensure(this.autopilotCandidates(runId).some(candidate => candidate.id === draft.id), 'Разговор не отвечает условиям автономной отправки', 409);
+    this.store.run('INSERT INTO approvals VALUES(?,?,?,?,?,?)', id(), draft.id, draft.current_version, conversation.revision, 'autopilot', now());
+    this.store.run("UPDATE drafts SET status='approved' WHERE id=?", draft.id);
+    this.store.event(this.config.partnerId, conversation.id, 'autopilot.approved', 'system', {
+      draft_id: draft.id, draft_version: draft.current_version, run_id: runId,
+      model: this.config.runtime.model, conversation_revision: conversation.revision,
+      model_text: draft.text
+    });
+    return { draft_id: draft.id, status: 'approved' };
+  }
+  autopilotHandoff(runId) {
+    const draft = this.store.get("SELECT d.*,c.mode,c.ownership,p.suppressed FROM drafts d JOIN conversations c ON c.id=d.conversation_id JOIN persons p ON p.id=c.person_id WHERE d.run_id=? AND d.status='pending' AND d.action='handoff' LIMIT 1", runId);
+    if (!draft || draft.mode !== 'AUTOPILOT' || draft.ownership !== 'AI_OWNED' || draft.suppressed) return null;
+    this.store.run("UPDATE conversations SET ownership='HUMAN_OWNED',revision=revision+1 WHERE id=?", draft.conversation_id);
+    this.store.run("UPDATE drafts SET status='stale' WHERE conversation_id=? AND status IN ('pending','approved','sending')", draft.conversation_id);
+    this.store.run("UPDATE tasks SET status='cancelled' WHERE conversation_id=? AND status IN ('pending','proposed','running','interrupted')", draft.conversation_id);
+    this.store.event(this.config.partnerId, draft.conversation_id, 'conversation.handoff_required', 'system', {
+      draft_id: draft.id, draft_version: draft.current_version, run_id: runId,
+      model: this.config.runtime.model, conversation_revision: draft.context_revision,
+      model_text: draft.text
+    });
+    return draft;
   }
   setTelegramAccount(accountId) { this.telegramAccountId = accountId ? String(accountId) : null; }
   telegramAccount() { return this.telegramAccountId || process.env.PARTNER_TELEGRAM_ACCOUNT_ID || process.env.PARTNER_TELEGRAM_BOT_TOKEN?.split(':')[0] || 'unconfigured'; }

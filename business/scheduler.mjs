@@ -4,7 +4,7 @@ import { id } from './store.mjs';
 import { now } from './errors.mjs';
 
 export class Scheduler {
-  constructor(service, runtime) { this.service = service; this.runtime = runtime; this.busy = false; this.stopped = false; this.lastReason = null; this.activeRun = null; }
+  constructor(service, runtime, telegram) { this.service = service; this.runtime = runtime; this.telegram = telegram; this.busy = false; this.stopped = false; this.lastReason = null; this.activeRun = null; }
   start() { this.timer = setInterval(() => this.tick().catch(() => { this.lastReason = 'Ошибка обработки очереди; подробности в журнале запуска'; }), this.service.config.scheduler.tickSeconds * 1000); }
   status() { return { enabled: this.service.config.scheduler.enabled, busy: this.busy, active_run: this.activeRun, reason: this.lastReason, model: runtimeReadiness(this.service.config) }; }
   async tick() {
@@ -52,6 +52,19 @@ export class Scheduler {
         if (!cancelled) this.service.store.run('UPDATE tasks SET status=? WHERE id=?', status === 'completed' ? 'done' : 'failed', task.id);
         this.service.store.event(cfg.partnerId, run.conversation_id, `run.${status}`, 'system', { run_id: run.id, task_id: task.id, cost_status: costStatus });
       }));
+      if (run.conversation_id && result.completed && !result.error) {
+        await this.service.exclusive(() => this.service.store.transaction(() => this.service.autopilotHandoff(run.id)));
+        const readiness = this.telegram?.readiness();
+        const sendReady = readiness?.enabled && readiness.live_sending && (readiness.configured || readiness.connected);
+        if (sendReady) for (const draft of this.service.autopilotCandidates(run.id)) {
+          try {
+            await this.service.exclusive(() => this.service.store.transaction(() => this.service.approveAutopilot(draft.id, run.id)));
+            await this.telegram.sendApproved(draft.id, { autopilot: true });
+          } catch (error) {
+            await this.service.exclusive(() => this.service.store.transaction(() => this.service.store.event(cfg.partnerId, run.conversation_id, 'autopilot.blocked', 'system', { draft_id: draft.id, run_id: run.id, model: cfg.runtime.model, reason: error.message })));
+          }
+        }
+      }
     } finally { this.busy = false; this.activeRun = null; }
   }
   async ensurePlanningTask() {
