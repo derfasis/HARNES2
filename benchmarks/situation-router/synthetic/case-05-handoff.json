@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "situation_id": "case-05",
+  "source": { "kind": "sanitized_fixture", "ref": "fixture://case-05", "captured_at": "2026-01-01T00:00:00Z" },
+  "message": { "id": "m-006", "channel": "public", "direction": "in", "author_id": "user-05", "text": "Мне обещали конкретный доход, а теперь требуют оплатить срочно. Что делать?", "created_at": "2026-01-01T00:06:00Z", "reply_to_id": null },
+  "snapshot": { "messages": [{ "id": "m-006", "channel": "public", "direction": "in", "author_id": "user-05", "text": "Мне обещали конкретный доход, а теперь требуют оплатить срочно. Что делать?", "created_at": "2026-01-01T00:06:00Z", "reply_to_id": null }], "total_count": 1, "truncated": false },
+  "person": { "person_id": "user-05", "relationship": "unknown", "known_facts": [] },
+  "public_profile": null,
+  "goal": { "text": "Понимать, когда есть естественный повод быть полезным в разговоре о wellness и партнёрстве.", "allowed_channels": ["public", "dm"] },
+  "constraints": { "review_required": true, "never_send": true, "no_cold_outreach": true, "call_time_unconfirmed": true }
+}

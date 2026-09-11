@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "situation_id": "case-03",
+  "source": { "kind": "sanitized_fixture", "ref": "fixture://case-03", "captured_at": "2026-01-01T00:00:00Z" },
+  "message": { "id": "m-003", "channel": "public", "direction": "in", "author_id": "user-03", "text": "Кто-нибудь знает нормальный способ добавить продукты для клиентов без навязчивых продаж?", "created_at": "2026-01-01T00:03:00Z", "reply_to_id": null },
+  "snapshot": { "messages": [{ "id": "m-003", "channel": "public", "direction": "in", "author_id": "user-03", "text": "Кто-нибудь знает нормальный способ добавить продукты для клиентов без навязчивых продаж?", "created_at": "2026-01-01T00:03:00Z", "reply_to_id": null }], "total_count": 1, "truncated": false },
+  "person": { "person_id": "user-03", "relationship": "unknown", "known_facts": [] },
+  "public_profile": { "display_name": "Участник 03", "username": "user_03", "bio": "Работает с клиентами и тренирует людей.", "links": [], "source_message_ids": ["m-003"] },
+  "goal": { "text": "Понимать, когда есть естественный повод быть полезным в разговоре о wellness и партнёрстве.", "allowed_channels": ["public", "dm"] },
+  "constraints": { "review_required": true, "never_send": true, "no_cold_outreach": true, "call_time_unconfirmed": true }
+}

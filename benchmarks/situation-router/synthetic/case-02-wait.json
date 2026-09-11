@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "situation_id": "case-02",
+  "source": { "kind": "sanitized_fixture", "ref": "fixture://case-02", "captured_at": "2026-01-01T00:00:00Z" },
+  "message": { "id": "m-002", "channel": "public", "direction": "in", "author_id": "user-02", "text": "Не знаю, наверное потом разберусь.", "created_at": "2026-01-01T00:02:00Z", "reply_to_id": "m-001" },
+  "snapshot": { "messages": [
+    { "id": "m-001", "channel": "public", "direction": "in", "author_id": "user-02", "text": "Есть ли тут кто-то, кто разбирается в дополнительных проектах?", "created_at": "2026-01-01T00:01:00Z", "reply_to_id": null },
+    { "id": "m-002", "channel": "public", "direction": "in", "author_id": "user-02", "text": "Не знаю, наверное потом разберусь.", "created_at": "2026-01-01T00:02:00Z", "reply_to_id": "m-001" }
+  ], "total_count": 2, "truncated": false },
+  "person": { "person_id": "user-02", "relationship": "unknown", "known_facts": [] },
+  "public_profile": null,
+  "goal": { "text": "Понимать, когда есть естественный повод быть полезным в разговоре о wellness и партнёрстве.", "allowed_channels": ["public", "dm"] },
+  "constraints": { "review_required": true, "never_send": true, "no_cold_outreach": true, "call_time_unconfirmed": true }
+}
