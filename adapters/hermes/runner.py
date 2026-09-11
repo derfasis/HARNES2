@@ -80,6 +80,7 @@ def main():
         from run_agent import AIAgent
         from tools.registry import registry
         from toolsets import create_custom_toolset
+        from credentials import runtime_credentials
 
         allowed = {tool["name"] for tool in envelope["tools"]}
         for tool in envelope["tools"]:
@@ -97,16 +98,17 @@ def main():
         system_parts.extend(s["content"] for s in context["skills"])
         system = "\n\n".join(part for part in system_parts if part.strip())
         model_context = compact_prompt_context(context)
+        api_key, credential_pool = runtime_credentials(cfg["baseUrl"])
         agent = AIAgent(
             model=cfg["model"], provider=cfg["provider"], api_mode=cfg["apiMode"],
-            base_url=cfg["baseUrl"], api_key=os.environ["PARTNER_MODEL_API_KEY"],
+            base_url=cfg["baseUrl"], api_key=api_key,
             enabled_toolsets=["partner_business"],
             skip_context_files=True, load_soul_identity=True, skip_memory=True,
             skip_background_review=True, save_trajectories=False, quiet_mode=True,
             max_iterations=cfg["maxIterations"], max_tokens=cfg["maxOutputTokens"],
             run_budget_seconds=cfg["timeoutSeconds"], session_id=run_id,
             ephemeral_system_prompt=system, checkpoints_enabled=False,
-            fallback_model=None, credential_pool=None,
+            fallback_model=None, credential_pool=credential_pool,
         )
         advertised = {tool["function"]["name"] for tool in agent.tools}
         if advertised != allowed:

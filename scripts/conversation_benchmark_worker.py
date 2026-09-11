@@ -70,11 +70,13 @@ def main():
     )
     (hermes_home / ".no-bundled-skills").touch()
     sys.path.insert(0, str(ROOT / "runtime" / "hermes-agent"))
+    sys.path.insert(0, str(ROOT / "adapters" / "hermes"))
 
     with contextlib.redirect_stdout(sys.stderr):
         from run_agent import AIAgent
         from toolsets import create_custom_toolset
         from tools.registry import registry
+        from credentials import runtime_credentials
 
         context = envelope["context"]
         model_context = compact_prompt_context(context)
@@ -94,16 +96,17 @@ def main():
         system_parts = [context.get("behavioral_examples", "")]
         system_parts.extend(skill["content"] for skill in context["skills"])
         partner_system = "\n\n".join(part for part in system_parts if part.strip())
+        api_key, credential_pool = runtime_credentials(cfg["baseUrl"])
         agent = AIAgent(
             model=cfg["model"], provider=cfg["provider"], api_mode=cfg["apiMode"],
-            base_url=cfg["baseUrl"], api_key=os.environ["PARTNER_MODEL_API_KEY"],
+            base_url=cfg["baseUrl"], api_key=api_key,
             enabled_toolsets=["partner_business"],
             skip_context_files=True, load_soul_identity=True, skip_memory=True,
             skip_background_review=True, save_trajectories=False, quiet_mode=True,
             max_iterations=cfg["maxIterations"], max_tokens=cfg["maxOutputTokens"],
             run_budget_seconds=cfg["timeoutSeconds"], session_id=run_id,
             ephemeral_system_prompt=partner_system, checkpoints_enabled=False,
-            fallback_model=None, credential_pool=None,
+            fallback_model=None, credential_pool=credential_pool,
         )
         if {tool["function"]["name"] for tool in agent.tools} != allowed:
             raise RuntimeError("Hermes tool surface differs from the benchmark allowlist")

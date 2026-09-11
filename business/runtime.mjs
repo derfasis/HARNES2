@@ -9,8 +9,12 @@ function childEnvironment(token) {
   const env = {};
   for (const key of ['PATH','Path','SystemRoot','SYSTEMROOT','WINDIR','TEMP','TMP','USERPROFILE','HOME','LOCALAPPDATA','APPDATA','PROGRAMFILES','ProgramFiles','PATHEXT']) if (process.env[key]) env[key] = process.env[key];
   // Do not inherit ambient provider, Telegram, Codex or Hermes credentials/configuration.
-  return { ...env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1',
-    PARTNER_MODEL_API_KEY: process.env.PARTNER_MODEL_API_KEY, PARTNER_RUN_TOKEN: token };
+  const modelCredentials = {};
+  for (const key of ['PARTNER_MODEL_API_KEY', 'PARTNER_MODEL_API_KEY_SECONDARY']) {
+    if (process.env[key]) modelCredentials[key] = process.env[key];
+  }
+  return { ...env, ...modelCredentials, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1',
+    PARTNER_RUN_TOKEN: token };
 }
 export class HermesAdapter {
   constructor(service, tokens) { this.service = service; this.tokens = tokens; this.children = new Map(); }
