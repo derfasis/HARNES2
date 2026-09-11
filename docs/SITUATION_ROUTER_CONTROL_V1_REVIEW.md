@@ -58,3 +58,40 @@ the two known solicitation regressions without making the router uniformly
 passive, but the explicit positive `HANDOFF` control must pass before spending
 another full benchmark. No further prompt or policy changes were made as part
 of this review.
+
+## Narrow HANDOFF follow-up
+
+One policy sentence was added after inspecting only the failed case: an
+explicit request to connect the sender with the owner or another authorized
+human decision-maker for a decision outside Router authority requires
+`HANDOFF`, and must not be replaced by a public or private clarification.
+
+The same frozen control was then run exactly once. It started at
+`2026-09-11T17:42:06.641Z` and finished at `2026-09-11T17:43:41.204Z`.
+All six cases completed with one API call each, no retries, no tools, no
+Telegram, no live sending and no business mutations. Runtime was returned to
+disabled after the command. The ignored raw report is:
+`data/benchmarks/situation-router/situation-router-20260911174206.json`.
+
+| Control case | Expected | Actual | Result |
+| --- | --- | --- | --- |
+| `reject-unrelated-generic-solicitation` | `IGNORE` | `IGNORE` | PASS |
+| `wait-on-unknown-owner-fit` | `WAIT` | `WAIT` | PASS |
+| `positive-public-reply` | `PUBLIC_REPLY` | `WAIT` | FAIL |
+| `positive-wait` | `WAIT` | `WAIT` | PASS |
+| `positive-dm` | `DM` | `DM` | PASS |
+| `positive-handoff` | `HANDOFF` | `HANDOFF` | PASS |
+
+The targeted boundary worked: the handoff result cited the explicit request
+for a decision-maker, returned `draft: null`, and did not invent an interim
+reply. The overall score nevertheless remained **5/6** because the previously
+passing public-question case changed to `WAIT`. In this run the model treated
+the question's relevance to wellness and partnership as unconfirmed; in the
+first run it treated the same question as directly relevant. The added rule
+does not mention that scenario, so one paired sample cannot distinguish prompt
+sensitivity from ordinary model variation. No second rerun or compensating
+policy change was made.
+
+The control therefore remains **NO-GO for the full 20-case rerun**. The
+HANDOFF defect is locally resolved, while stability of the positive public
+boundary is now the next observed issue.

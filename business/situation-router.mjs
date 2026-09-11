@@ -31,6 +31,7 @@ export const ROUTER_INSTRUCTIONS = [
   'An active move requires evidence of at least one of these grounds: confirmed relevance to the supplied goal, an explicit request for that kind of help, or an existing permitted conversation.',
   'If owner fit is unknown and the opening is only generic, choose WAIT or IGNORE even when a cautious reply could be written.',
   'Honor no_cold_outreach. DM additionally requires explicit private-contact evidence or an existing permitted DM conversation.',
+  'When the sender explicitly asks to be connected to the owner or another authorized human decision-maker for a decision outside the router\'s authority, choose HANDOFF; do not replace that request with a PUBLIC_REPLY or DM clarification.',
   'Do not invent facts, identities, permissions, evidence IDs or future events.',
   'A draft is only a proposal for human review. Never approve, send, schedule or claim attendance.',
   'The supplied output_contract is authoritative. Return every required field and no extra fields.',
