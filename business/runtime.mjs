@@ -10,7 +10,7 @@ function childEnvironment(token) {
   for (const key of ['PATH','Path','SystemRoot','SYSTEMROOT','WINDIR','TEMP','TMP','USERPROFILE','HOME','LOCALAPPDATA','APPDATA','PROGRAMFILES','ProgramFiles','PATHEXT']) if (process.env[key]) env[key] = process.env[key];
   // Do not inherit ambient provider, Telegram, Codex or Hermes credentials/configuration.
   const modelCredentials = {};
-  for (const key of ['PARTNER_MODEL_API_KEY', 'PARTNER_MODEL_API_KEY_SECONDARY']) {
+  for (const key of ['PARTNER_MODEL_API_KEY', 'PARTNER_MODEL_API_KEY_SECONDARY', 'PARTNER_MODEL_API_KEY_TERTIARY']) {
     if (process.env[key]) modelCredentials[key] = process.env[key];
   }
   return { ...env, ...modelCredentials, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1',

@@ -22,6 +22,7 @@ class EphemeralCredentialPool(CredentialPool):
 def runtime_credentials(base_url: str) -> Tuple[str, Optional[CredentialPool]]:
     primary = os.environ.get("PARTNER_MODEL_API_KEY", "").strip()
     secondary = os.environ.get("PARTNER_MODEL_API_KEY_SECONDARY", "").strip()
+    tertiary = os.environ.get("PARTNER_MODEL_API_KEY_TERTIARY", "").strip()
     if not primary:
         raise RuntimeError("PARTNER_MODEL_API_KEY is required")
 
@@ -30,6 +31,7 @@ def runtime_credentials(base_url: str) -> Tuple[str, Optional[CredentialPool]]:
     for credential_id, label, api_key in (
         ("primary", "primary", primary),
         ("secondary", "secondary", secondary),
+        ("tertiary", "tertiary", tertiary),
     ):
         if not api_key or api_key in seen:
             continue
