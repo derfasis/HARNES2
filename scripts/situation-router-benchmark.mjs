@@ -20,17 +20,66 @@ if (!readiness.ready) throw new Error(`Модель не готова: ${readine
 if (cfg.telegram.enabled || cfg.telegram.liveSending) throw new Error('Telegram должен быть выключен для Situation Router benchmark.');
 
 const args = process.argv.slice(2);
-const fixtureArgIndex = args.indexOf('--fixtures');
-const fixtureDir = path.resolve(fixtureArgIndex >= 0 ? args[fixtureArgIndex + 1] : process.env.SITUATION_ROUTER_FIXTURES ?? path.join(ROOT, 'benchmarks/situation-router/synthetic'));
-if (!fixtureDir || !fs.existsSync(fixtureDir) || !fs.statSync(fixtureDir).isDirectory()) throw new Error(`Каталог fixtures не найден: ${fixtureDir}`);
+function optionValue(name) {
+  const index = args.indexOf(name);
+  if (index < 0) return null;
+  const value = args[index + 1];
+  if (!value || value.startsWith('--')) throw new Error(`${name} требует путь.`);
+  return value;
+}
 
-const fixtureFiles = fs.readdirSync(fixtureDir).filter(file => file.endsWith('.json')).sort();
-if (!fixtureFiles.length) throw new Error('Каталог fixtures пуст.');
-const fixtures = fixtureFiles.map(file => {
-  const fullPath = path.join(fixtureDir, file);
+const fixtureArg = optionValue('--fixtures');
+const manifestArg = optionValue('--manifest');
+if (fixtureArg && manifestArg) throw new Error('Используйте только один из --fixtures или --manifest.');
+
+let fixtureDir = null;
+let manifestPath = null;
+let controlManifest = null;
+let fixtureSpecs;
+if (manifestArg) {
+  manifestPath = path.resolve(manifestArg);
+  if (!fs.existsSync(manifestPath) || !fs.statSync(manifestPath).isFile()) throw new Error(`Manifest не найден: ${manifestPath}`);
+  controlManifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  if (controlManifest.schema_version !== 1 || typeof controlManifest.control_id !== 'string' || !controlManifest.frozen) {
+    throw new Error('Control manifest должен иметь schema_version=1, control_id и frozen=true.');
+  }
+  if (!Array.isArray(controlManifest.cases) || !controlManifest.cases.length) throw new Error('Control manifest не содержит cases.');
+  const decisions = new Set(['IGNORE', 'WAIT', 'PUBLIC_REPLY', 'DM', 'HANDOFF']);
+  fixtureSpecs = controlManifest.cases.map(entry => {
+    if (!entry || typeof entry !== 'object' || typeof entry.case_id !== 'string' || typeof entry.fixture !== 'string') {
+      throw new Error('Каждый control case должен содержать case_id и fixture.');
+    }
+    if (path.isAbsolute(entry.fixture)) throw new Error(`Control fixture должен быть ROOT-relative: ${entry.fixture}`);
+    if (!Array.isArray(entry.expected_decisions) || !entry.expected_decisions.length || entry.expected_decisions.some(decision => !decisions.has(decision))) {
+      throw new Error(`Некорректные expected_decisions для ${entry.case_id}.`);
+    }
+    const fullPath = path.resolve(ROOT, entry.fixture);
+    const relative = path.relative(ROOT, fullPath);
+    if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error(`Control fixture выходит за пределы workspace: ${entry.fixture}`);
+    if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isFile()) throw new Error(`Control fixture не найден: ${entry.fixture}`);
+    return {
+      file: entry.fixture.replaceAll('\\', '/'),
+      fullPath,
+      control: {
+        case_id: entry.case_id,
+        expected_decisions: [...entry.expected_decisions],
+        purpose: typeof entry.purpose === 'string' ? entry.purpose : '',
+      },
+    };
+  });
+  if (new Set(fixtureSpecs.map(spec => spec.control.case_id)).size !== fixtureSpecs.length) throw new Error('case_id в control manifest должны быть уникальны.');
+} else {
+  fixtureDir = path.resolve(fixtureArg ?? process.env.SITUATION_ROUTER_FIXTURES ?? path.join(ROOT, 'benchmarks/situation-router/synthetic'));
+  if (!fs.existsSync(fixtureDir) || !fs.statSync(fixtureDir).isDirectory()) throw new Error(`Каталог fixtures не найден: ${fixtureDir}`);
+  const fixtureFiles = fs.readdirSync(fixtureDir).filter(file => file.endsWith('.json')).sort();
+  if (!fixtureFiles.length) throw new Error('Каталог fixtures пуст.');
+  fixtureSpecs = fixtureFiles.map(file => ({ file, fullPath: path.join(fixtureDir, file), control: null }));
+}
+
+const fixtures = fixtureSpecs.map(({ file, fullPath, control }) => {
   const parsed = JSON.parse(fs.readFileSync(fullPath, 'utf8'));
   const input = normalizeSituationInput(parsed, { maxMessageCharacters: cfg.context.maxMessageCharacters });
-  return { file, input, context: buildRouterContext(input, { maxMessageCharacters: cfg.context.maxMessageCharacters }) };
+  return { file, control, input, context: buildRouterContext(input, { maxMessageCharacters: cfg.context.maxMessageCharacters }) };
 });
 if (new Set(fixtures.map(fixture => fixture.input.situation_id)).size !== fixtures.length) throw new Error('situation_id должен быть уникальным.');
 
@@ -83,7 +132,12 @@ for (const [index, fixture] of fixtures.entries()) {
     model: { ...cfg.runtime, maxOutputTokens },
     tools: [],
   });
-  const record = { file: fixture.file, input: fixture.input, ...result };
+  const record = {
+    file: fixture.file,
+    ...(fixture.control ? { control: fixture.control } : {}),
+    input: fixture.input,
+    ...result,
+  };
   if (result.completed && !result.error) {
     try {
       record.router_output = parseSituationOutput(result.final_response, fixture.input);
@@ -105,6 +159,8 @@ const output = {
   started_at: startedAt,
   finished_at: new Date().toISOString(),
   fixture_dir: fixtureDir,
+  fixture_manifest: manifestPath,
+  control_id: controlManifest?.control_id ?? null,
   fixture_count: fixtures.length,
   model: { provider: cfg.runtime.provider, model: cfg.runtime.model, api_mode: cfg.runtime.apiMode, base_url: cfg.runtime.baseUrl, max_output_tokens: maxOutputTokens },
   safety: {
