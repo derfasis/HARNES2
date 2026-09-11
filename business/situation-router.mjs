@@ -5,8 +5,19 @@ import { ROOT, readJson } from './config.mjs';
 
 const schema = readJson(path.join(ROOT, 'contracts/situation-router.schema.json'));
 const ajv = new Ajv({ allErrors: true, strict: true, allowUnionTypes: true });
-const validateInputSchema = ajv.compile(schema.$defs.input);
-const validateOutputSchema = ajv.compile(schema.$defs.output);
+ajv.addSchema(schema);
+const validateInputSchema = ajv.getSchema(`${schema.$id}#/$defs/input`);
+const validateOutputSchema = ajv.getSchema(`${schema.$id}#/$defs/output`);
+if (!validateInputSchema || !validateOutputSchema) throw new Error('Не удалось зарегистрировать Situation Router schema');
+
+const outputContract = {
+  $schema: schema.$schema,
+  $ref: '#/$defs/output',
+  $defs: Object.fromEntries(
+    ['id', 'timestamp', 'draft', 'output'].map(key => [key, schema.$defs[key]]),
+  ),
+};
+const MESSAGE_FIELDS = ['id', 'channel', 'direction', 'author_id', 'text', 'truncated', 'created_at', 'reply_to_id'];
 
 export const MAX_SITUATION_MESSAGES = 100;
 export const DEFAULT_MESSAGE_CHARACTERS = 4000;
@@ -17,7 +28,9 @@ export const ROUTER_INSTRUCTIONS = [
   'Choose the socially appropriate next move: IGNORE, WAIT, PUBLIC_REPLY, DM or HANDOFF.',
   'Do not invent facts, identities, permissions, evidence IDs or future events.',
   'A draft is only a proposal for human review. Never approve, send, schedule or claim attendance.',
-  'Return one JSON object matching the Situation Router output contract.'
+  'The supplied output_contract is authoritative. Return every required field and no extra fields.',
+  'PUBLIC_REPLY and DM require a draft; IGNORE, WAIT and HANDOFF require draft to be null.',
+  'Return only one JSON object and do not call tools.'
 ].join(' ');
 
 function fail(message, details = []) {
@@ -91,6 +104,9 @@ export function normalizeSituationInput(raw, {
   };
   if (normalized.message.id !== boundedMessages.at(-1).id) fail('message должен быть последним сообщением snapshot');
   if (!validateInputSchema(normalized)) fail('Situation input не соответствует schema', errorsOf(validateInputSchema));
+  const currentMessage = boundedMessages.at(-1);
+  const mismatchedFields = MESSAGE_FIELDS.filter(field => normalized.message[field] !== currentMessage[field]);
+  if (mismatchedFields.length) fail('message не совпадает с последним сообщением snapshot', mismatchedFields);
 
   const ids = collectMessageIds(normalized);
   if (normalized.message.direction !== 'in') fail('Текущее сообщение должно быть входящим');
@@ -107,6 +123,7 @@ export function buildRouterContext(raw, options = {}) {
   return {
     router_instructions: ROUTER_INSTRUCTIONS,
     contract: 'situation-router-v1',
+    output_contract: outputContract,
     input,
   };
 }
@@ -123,6 +140,7 @@ export function validateSituationOutput(raw, input) {
   if (!requiresDraft && raw.draft !== null) fail(`${raw.decision} не должен содержать draft`);
   if (raw.decision === 'PUBLIC_REPLY' && raw.draft?.channel !== 'public') fail('PUBLIC_REPLY требует public draft');
   if (raw.decision === 'DM' && raw.draft?.channel !== 'dm') fail('DM требует dm draft');
+  if (raw.draft && !input.goal.allowed_channels.includes(raw.draft.channel)) fail('Draft использует запрещённый goal.allowed_channels канал');
   if (raw.decision === 'HANDOFF' && raw.strategy.trim().length < 1) fail('HANDOFF требует объяснимую strategy');
   return raw;
 }

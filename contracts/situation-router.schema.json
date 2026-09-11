@@ -1,5 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://harnes.local/contracts/situation-router.schema.json",
   "title": "Situation Router contract v1",
   "$defs": {
     "id": {

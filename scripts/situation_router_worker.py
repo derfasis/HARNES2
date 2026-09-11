@@ -22,7 +22,6 @@ def main():
     os.environ["HERMES_HOME"] = str(hermes_home)
     os.environ["HERMES_CWD"] = str(hermes_home)
     os.chdir(hermes_home)
-    (hermes_home / "SOUL.md").write_bytes((ROOT / "partner" / "identity.md").read_bytes())
     (hermes_home / "config.yaml").write_text(
         "memory:\n  memory_enabled: false\n  user_profile_enabled: false\n  write_approval: true\n"
         "skills:\n  write_approval: true\n"
@@ -47,7 +46,7 @@ def main():
             model=cfg["model"], provider=cfg["provider"], api_mode=cfg["apiMode"],
             base_url=cfg["baseUrl"], api_key=api_key,
             enabled_toolsets=[],
-            skip_context_files=True, load_soul_identity=True, skip_memory=True,
+            skip_context_files=True, load_soul_identity=False, skip_memory=True,
             skip_background_review=True, save_trajectories=False, quiet_mode=True,
             max_iterations=cfg["maxIterations"], max_tokens=cfg["maxOutputTokens"],
             run_budget_seconds=cfg["timeoutSeconds"], session_id=run_id,

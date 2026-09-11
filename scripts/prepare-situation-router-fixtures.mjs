@@ -44,6 +44,7 @@ const safeText = value => {
   let text = String(value ?? '').trim();
   for (const token of textTokens) text = text.replace(new RegExp(escapeRegex(token), 'giu'), '[PERSON]');
   text = text
+    .replace(/\b(?:t\.me|telegram\.me)\/[A-Za-z0-9_+/?=&%#.-]+/giu, '[URL]')
     .replace(/https?:\/\/\S+|www\.\S+/giu, '[URL]')
     .replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/gu, '[EMAIL]')
     .replace(/@[A-Za-z0-9_]{3,}/gu, '[HANDLE]')
@@ -150,6 +151,9 @@ const fixtures = chooseRows().map((row, index) => makeFixture(row, index + 1));
 const serialized = JSON.stringify(fixtures);
 const leaked = rawValues.filter(value => value.length >= 5 && serialized.toLocaleLowerCase().includes(value.toLocaleLowerCase()));
 if (leaked.length) throw new Error('Sanitization verification failed for one or more source identifiers.');
+if (/\b(?:t\.me|telegram\.me)\/[A-Za-z0-9_+/?=&%#.-]+/iu.test(serialized)) {
+  throw new Error('Sanitization verification failed for a Telegram link.');
+}
 
 db.close();
 fs.rmSync(destination, { recursive: true, force: true });
