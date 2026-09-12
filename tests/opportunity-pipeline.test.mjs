@@ -189,3 +189,59 @@ test('cancelled result replay does not depend on model key still being configure
   h.service.addTask=add;const key=process.env.PARTNER_MODEL_API_KEY;delete process.env.PARTNER_MODEL_API_KEY;
   try{await h.tick();assert.equal(h.cards().length,1);assert.equal(h.calls,1);}finally{process.env.PARTNER_MODEL_API_KEY=key;}noEffects(h);
 });
+
+test('concurrent duplicate delivery and scheduler ticks reserve only one inference and review', async t => {
+  const h = harness(t), delivered = await Promise.all([h.ingest(), h.ingest(), h.ingest()]);
+  assert.equal(new Set(delivered.map(r => r.source_event_id)).size, 1);
+  let release, started;
+  const gate = new Promise(resolve => { release = resolve; });
+  const ready = new Promise(resolve => { started = resolve; });
+  h.respond(async context => { started(); await gate; return output(context); });
+  const first = h.tick();
+  try {
+    await ready;
+    const competing = new Scheduler(h.service, { decide: () => assert.fail('Duplicate inference forbidden') });
+    await competing.tick();
+    assert.equal(h.store.get('SELECT COUNT(*) AS n FROM runs').n, 1);
+    assert.equal(h.calls, 1);
+  } finally { release(); await first; }
+  assert.equal(h.cards().length, 1);
+  assert.equal(h.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='source.message'").n, 1);
+  assert.equal(h.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='opportunity.pipeline.finished'").n, 1);
+  noEffects(h);
+});
+
+test('terminal run update failure rolls back card and marker; analyzed retry does not infer again', async t => {
+  const h = harness(t); await h.ingest();
+  const receipts = h.store.get('SELECT COUNT(*) AS n FROM command_receipts').n;
+  const run = h.store.run.bind(h.store);
+  h.store.run = (sql, ...args) => {
+    if (sql.startsWith('UPDATE runs SET status=?,error=?,finished_at=?')) throw Error('terminal commit failure');
+    return run(sql, ...args);
+  };
+  try { await assert.rejects(h.tick(), /terminal commit failure/); }
+  finally { h.store.run = run; }
+  assert.equal(h.cards().length, 0);
+  assert.equal(h.store.get("SELECT COUNT(*) AS n FROM events WHERE kind IN ('opportunity.candidate','opportunity.pipeline.finished')").n, 0);
+  assert.equal(h.store.get('SELECT status FROM runs').status, 'analyzed');
+  assert.equal(h.store.get('SELECT COUNT(*) AS n FROM command_receipts').n, receipts);
+  h.restart(); await h.tick();
+  assert.equal(h.calls, 1); assert.equal(h.cards().length, 1);
+  assert.equal(h.store.get('SELECT status FROM runs').status, 'completed');
+  assert.equal(h.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='opportunity.pipeline.finished'").n, 1);
+  noEffects(h);
+});
+
+test('recovery of in-flight claim discards late result and permits only a bounded fresh attempt', async t => {
+  const h = harness(t); await h.ingest();
+  h.respond(context => { h.store.recover(); return output(context); });
+  await h.tick();
+  assert.equal(h.calls, 1); assert.equal(h.cards().length, 0);
+  assert.equal(h.store.get('SELECT status FROM runs').status, 'interrupted');
+  assert.equal(h.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='opportunity.pipeline.finished'").n, 0);
+  h.retryDue(); h.respond(context => output(context)); await h.tick();
+  assert.equal(h.calls, 2); assert.equal(h.cards().length, 1);
+  assert.equal(h.store.get('SELECT COUNT(*) AS n FROM runs').n, 2);
+  assert.equal(h.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='opportunity.pipeline.finished'").n, 1);
+  noEffects(h);
+});
