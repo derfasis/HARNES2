@@ -1,5 +1,6 @@
 import { contextFor } from './context.mjs';
-import { runtimeReadiness } from './config.mjs';
+import { runtimeReadiness, usageAccounting } from './config.mjs';
+import { processSourceOpportunity } from './opportunity-pipeline.mjs';
 import { id } from './store.mjs';
 import { now } from './errors.mjs';
 
@@ -12,6 +13,10 @@ export class Scheduler {
     this.busy = true;
     try {
       const cfg = this.service.config;
+      if (cfg.opportunity?.automatic) {
+        const result = await processSourceOpportunity(this.service, this.runtime);
+        this.lastReason = result.disposition; return;
+      }
       if (!runtimeReadiness(cfg).ready) { this.lastReason = 'Задачи сохранены. Ожидается подключение модели.'; return; }
       const day = now().slice(0,10), count = this.service.store.get('SELECT COUNT(*) AS n,COALESCE(SUM(estimated_cost_usd),0) AS cost,SUM(CASE WHEN cost_status=\'unknown\' THEN 1 ELSE 0 END) AS unknown FROM runs WHERE created_at>=?', day);
       if (count.n >= cfg.runtime.maxRunsPerDay) { this.lastReason = 'Достигнут дневной лимит запусков (UTC)'; return; }
@@ -40,14 +45,7 @@ export class Scheduler {
       await this.service.exclusive(() => this.service.store.transaction(() => {
         const task = this.service.store.get('SELECT * FROM tasks WHERE id=?', run.task_id);
         const cancelled = task.status === 'cancelled', status = cancelled ? 'cancelled' : result.completed && !result.error ? 'completed' : 'failed';
-        const u = result.usage ?? {};
-        const numeric = value => typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
-        const input = numeric(u.input_tokens), output = numeric(u.output_tokens);
-        let cost = null, costStatus = 'unknown';
-        if (u.cost_status && u.cost_status !== 'unknown' && numeric(u.estimated_cost_usd) !== null) { cost = u.estimated_cost_usd; costStatus = 'runtime_estimate'; }
-        else if (input !== null && output !== null && numeric(cfg.runtime.inputUsdPerMillion) !== null && numeric(cfg.runtime.outputUsdPerMillion) !== null) {
-          cost = (input * cfg.runtime.inputUsdPerMillion + output * cfg.runtime.outputUsdPerMillion) / 1e6; costStatus = 'configured_estimate';
-        }
+        const { input, output, cost, costStatus } = usageAccounting(cfg.runtime, result.usage);
         this.service.store.run('UPDATE runs SET status=?,result_json=?,error=?,input_tokens=?,output_tokens=?,estimated_cost_usd=?,cost_status=?,finished_at=? WHERE id=?', status, JSON.stringify(result), result.error ? String(result.error).slice(0,2000) : null, input, output, cost, costStatus, now(), run.id);
         if (!cancelled) this.service.store.run('UPDATE tasks SET status=? WHERE id=?', status === 'completed' ? 'done' : 'failed', task.id);
         this.service.store.event(cfg.partnerId, run.conversation_id, `run.${status}`, 'system', { run_id: run.id, task_id: task.id, cost_status: costStatus });
