@@ -65,6 +65,7 @@ function prepare(service) {
         return { result: { disposition: 'budget_blocked' } };
       capture = captureOpportunity(service, { snapshot: state.snapshot, ...(state.conversation_id ? { conversation_id: state.conversation_id } : {}) }, state.source_state);
     } catch (error) {
+      if (['SOURCE_TRANSPORT_POLICY_UNAVAILABLE','SOURCE_TRANSPORT_NOT_READY','SOURCE_TRANSPORT_NOT_CURRENT','SOURCE_TRANSPORT_STALE'].includes(error.code)) continue;
       if (!terminalSource.has(error.code) && error.code !== 'STALE_OR_FUTURE_SNAPSHOT') throw error;
       finishSource(service, eventId, error.code); return { result: { disposition: error.code } };
     }

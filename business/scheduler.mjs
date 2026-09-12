@@ -1,11 +1,12 @@
 import { contextFor } from './context.mjs';
 import { runtimeReadiness, usageAccounting } from './config.mjs';
 import { processSourceOpportunity } from './opportunity-pipeline.mjs';
+import { pollTelegramSource } from './sources/telegram-readonly.mjs';
 import { id } from './store.mjs';
 import { now } from './errors.mjs';
 
 export class Scheduler {
-  constructor(service, runtime, telegram) { this.service = service; this.runtime = runtime; this.telegram = telegram; this.busy = false; this.stopped = false; this.lastReason = null; this.activeRun = null; }
+  constructor(service, runtime, telegram, sourceReaders = []) { this.sourceReaders = sourceReaders; this.service = service; this.runtime = runtime; this.telegram = telegram; this.busy = false; this.stopped = false; this.lastReason = null; this.activeRun = null; }
   start() { this.timer = setInterval(() => this.tick().catch(() => { this.lastReason = 'Ошибка обработки очереди; подробности в журнале запуска'; }), this.service.config.scheduler.tickSeconds * 1000); }
   status() { return { enabled: this.service.config.scheduler.enabled, busy: this.busy, active_run: this.activeRun, reason: this.lastReason, model: runtimeReadiness(this.service.config) }; }
   async tick() {
@@ -14,6 +15,9 @@ export class Scheduler {
     try {
       const cfg = this.service.config;
       if (cfg.opportunity?.automatic) {
+        // Empty by default. Only a trusted bootstrap can supply narrowed read-only
+        // transport capabilities. Reuse this tick, never the private-chat adapter.
+        for (const { sourceId, transport } of this.sourceReaders) await pollTelegramSource(this.service, sourceId, transport);
         const result = await processSourceOpportunity(this.service, this.runtime);
         this.lastReason = result.disposition; return;
       }

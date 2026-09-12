@@ -7,6 +7,40 @@ export const stable = value => JSON.stringify(value, (_, item) => item && typeof
   ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item);
 export const digest = value => hash(stable(value));
 const check = (condition, code) => ensure(condition, `Source pipeline: ${code}`, 409, code);
+// Dedicated read-only source cursors share the existing offset table, not private-chat offsets.
+export const SOURCE_CHECKPOINT_CHANNEL = 'telegram-source-v0';
+export function sourceCheckpoint(service, sourceId) {
+  const row = service.store.get('SELECT cursor FROM channel_offsets WHERE channel=? AND account_id=?',
+    SOURCE_CHECKPOINT_CHANNEL, digest([service.config.partnerId, sourceId]));
+  return row ? JSON.parse(row.cursor) : null;
+}
+export function validateSourceCheckpoint(state, p) {
+  const keys=['source_id','account_id','channel_id','policy_hash','baseline_hash','pts','phase','confirmed_at','reason'];
+  check(state && typeof state==='object' && !Array.isArray(state)
+    && Object.keys(state).length===keys.length && Object.keys(state).every(k=>keys.includes(k))
+    && state.source_id===p.sourceId && state.account_id===p.accountId && state.channel_id===p.channelId
+    && state.policy_hash===digest(p) && typeof state.baseline_hash==='string' && /^[a-f0-9]{64}$/.test(state.baseline_hash)
+    && Number.isInteger(state.pts) && state.pts>0 && state.pts<=2147483647
+    && ['current','catching_up','blocked'].includes(state.phase)
+    && (state.phase==='current' ? state.reason===null : typeof state.reason==='string' && state.reason.length>0 && state.reason.length<=100)
+    && (state.phase==='current' ? typeof state.confirmed_at==='string' && Number.isFinite(Date.parse(state.confirmed_at))
+      : state.confirmed_at===null), 'SOURCE_TRANSPORT_CORRUPT_CHECKPOINT');
+}
+function sourceTransportBoundary(service, sourceId) {
+  const bindings = service.config.opportunity.telegramSources ?? [];
+  const configured = Array.isArray(bindings) ? bindings.filter(p => p.sourceId === sourceId) : [];
+  const state = sourceCheckpoint(service, sourceId);
+  if (!configured.length && !state) return; // Existing operator/fixture sources remain unchanged.
+  check(configured.length === 1, 'SOURCE_TRANSPORT_POLICY_UNAVAILABLE');
+  const p = configured[0];
+  check(state && state.policy_hash === digest(p), 'SOURCE_TRANSPORT_NOT_READY');
+  validateSourceCheckpoint(state,p);
+  check(state.phase === 'current', 'SOURCE_TRANSPORT_NOT_CURRENT');
+  const age = Date.now() - Date.parse(state.confirmed_at);
+  check(Number.isInteger(p.maxLagSeconds) && p.maxLagSeconds > 0 && p.maxLagSeconds <= 3600
+    && Number.isFinite(age) && age >= 0 && age <= p.maxLagSeconds * 1000, 'SOURCE_TRANSPORT_STALE');
+}
+
 const validId = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,149}$/.test(value);
 const nullableId = value => value === null || validId(value);
 export function automaticBoundary(service) {
@@ -76,6 +110,11 @@ export function ingestSource(service, raw) {
   service.store.event(service.config.partnerId, null, SOURCE_MESSAGE, 'system', message);
   return { source_event_id: String(service.store.get('SELECT last_insert_rowid() AS id').id), duplicate: false, disposition: 'registered' };
 }
+function isTelegramChannelAuthor(service, message) {
+  return Array.isArray(service.config.opportunity.telegramSources)
+    && service.config.opportunity.telegramSources.some(p=>p.sourceId===message.source_id)
+    && message.author_id?.startsWith('channel:');
+}
 function authorBinding(service, message) {
   const bindings = service.config.opportunity.authorBindings ?? [];
   check(Array.isArray(bindings) && bindings.every(b => b && typeof b === 'object'
@@ -83,18 +122,21 @@ function authorBinding(service, message) {
     && typeof b.source_id === 'string' && validId(b.author_id) && typeof b.conversation_id === 'string'), 'INVALID_AUTHOR_BINDINGS');
   const matches = bindings.filter(b => b.source_id === message.source_id && b.author_id === message.author_id);
   check(matches.length <= 1, 'AMBIGUOUS_AUTHOR_BINDING');
+  check(!isTelegramChannelAuthor(service,message) || matches.length===0,'CHANNEL_AUTHOR_CRM_BINDING_FORBIDDEN');
   return matches[0] ? structuredClone(matches[0]) : null;
 }
 export function sourceContextState(service, eventId) {
   const event = sourceEvent(service, eventId), anchor = event.message;
   allowed(service, anchor.source_id);
+  sourceTransportBoundary(service, anchor.source_id);
   const rows = sourceRows(service, anchor.source_id);
   check(rows.length <= 1000, 'SOURCE_CAPACITY_EXCEEDED');
   check(rows.find(r => r.message.message_id === anchor.message_id)?.event_id === eventId, 'SOURCE_MESSAGE_SUPERSEDED');
   check(anchor.operation !== 'delete', 'SOURCE_MESSAGE_DELETED');
   check(anchor.author_id !== null, 'UNKNOWN_SOURCE_AUTHOR');
   const byId = new Map(rows.map(r => [r.message.message_id, r]));
-  const selected = new Map(rows.filter(r => r.message.author_id === anchor.author_id
+  const selected = new Map(rows.filter(r => r.message.message_id === anchor.message_id
+    || !isTelegramChannelAuthor(service,anchor) && r.message.author_id === anchor.author_id
     || anchor.thread_id !== null && r.message.thread_id === anchor.thread_id).map(r => [r.message.message_id,r]));
   // Include actual ancestry without assuming that a display name identifies anyone.
   for (const row of [...selected.values()]) {

@@ -18,6 +18,6 @@
   "scheduler": { "enabled": true, "tickSeconds": 20, "dailyPlanning": false, "planningHour": 9, "timezone": "Europe/Warsaw" },
   "telegram": { "enabled": false, "liveSending": false, "transport": "bot_api", "allowedChatIds": [], "pollSeconds": 20 },
   "context": { "maxRecentMessages": 30, "maxMessageCharacters": 4000, "maxLessons": 5 },
-  "opportunity": { "automatic": false, "authorBindings": [], "allowedSourceRefs": [], "activeOffer": null, "goalText": "Assess usefulness of the active offer for operator review only.", "allowedChannels": ["public"], "maxAgeSeconds": 86400 },
+  "opportunity": { "automatic": false, "telegramSources": [], "authorBindings": [], "allowedSourceRefs": [], "activeOffer": null, "goalText": "Assess usefulness of the active offer for operator review only.", "allowedChannels": ["public"], "maxAgeSeconds": 86400 },
   "partnerId": "partner-001"
 }

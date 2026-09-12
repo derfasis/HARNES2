@@ -3,7 +3,7 @@ import { AppError, ensure, requiredText, dateTime, now } from './errors.mjs';
 
 import { captureOpportunity, consumeOpportunity, opportunityDetail, opportunityCapture, OPPORTUNITY_TASK } from './opportunity-consumer.mjs';
 
-import { ingestSource } from './source-ingestion.mjs';
+import { ingestSource, sourceCheckpoint } from './source-ingestion.mjs';
 
 const OUTCOMES = new Set(['qualified','call_proposed','call_accepted','call_booked','call_attended','no_show','joined','declined','business_value']);
 export class BusinessService {
@@ -45,7 +45,13 @@ export class BusinessService {
     requiredText(requestId, 'request_id', 150);
     ensure(p && typeof p === 'object' && !Array.isArray(p), 'payload должен быть объектом');
     const fingerprint = hash(JSON.stringify({ action, p, actor: actor.kind, run: actor.runId ?? null, scope: actor.conversationId ?? null }));
-    if (action === 'source.ingest') ensure(actor.kind === 'operator' || actor.kind === 'channel' && actor.sourceId === p.source_id, 'Источник вне области adapter', 403);
+    if (action === 'source.ingest') {
+      ensure(actor.kind === 'operator' || actor.kind === 'channel' && actor.sourceId === p.source_id, 'Источник вне области adapter', 403);
+      // Transport-owned sources must commit messages, native receipts and cursor together.
+      const sources = this.config.opportunity?.telegramSources;
+      ensure(!(Array.isArray(sources) && sources.some(s => s.sourceId === p.source_id)) && !sourceCheckpoint(this, p.source_id),
+        'Источник требует transactional Telegram intake', 409, 'SOURCE_TRANSPORT_INGEST_REQUIRED');
+    }
     const previous = this.store.get('SELECT * FROM command_receipts WHERE id=?', requestId);
     if (previous) { ensure(previous.fingerprint === fingerprint, 'request_id использован для другой операции', 409); return JSON.parse(previous.result_json); }
     const agentActions = new Set(['draft.create','fact.propose','lesson.propose','task.propose','capability.propose']);

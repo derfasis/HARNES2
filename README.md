@@ -122,3 +122,17 @@ npm run import -- exports/partner-DATE.json exports/restore-new
 MCP запускается командой `npm run mcp` при работающем локальном сервере. Для MCP-клиента предпочтительно указать напрямую абсолютный путь к `.venv/Scripts/python.exe` и аргумент `adapters/mcp/server.py` с абсолютным путём. Адаптер получает отдельный служебный токен и не может одобрять или отправлять сообщения.
 
 Подробное обоснование решений — `DIGITAL_AI_PARTNER_ARCHITECTURE.md`. Фактический состав поставки и ограничения — `IMPLEMENTATION_STATUS.md`. Лицензии — `THIRD_PARTY_NOTICES.md`.
+
+
+## Read-only source intake checkpoint (2026-09-12)
+
+Added a bounded Telegram difference intake with transactional native receipts/checkpoints,
+identity/edit/delete normalization and transport freshness gating. This is NOT live Telegram
+monitoring: the raw MTProto client/mapper is not implemented or configured. Source readers
+are empty by default; old Telegram sending flags remain disabled.
+Independent acceptance: **READY WITH CONDITIONS** for offline intake only.
+Node 201/201, Python 5/5, build green; no live Telegram/model calls.
+See [independent audit and single-process requirement](docs/TELEGRAM_SOURCE_AUDIT_V0.md).
+See [runbook and honest verification limits](docs/TELEGRAM_SOURCE_RUNBOOK_V0.md),
+[pre-implementation decision](docs/TELEGRAM_SOURCE_SLICE_V0.md), and
+[ready-made client research](docs/TELEGRAM_CLIENT_RESEARCH_2026-09-12.md).
