@@ -8,7 +8,7 @@ import childProcess from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
 import { Store, id } from '../business/store.mjs';
 import { BusinessService } from '../business/service.mjs';
-import { ROOT, readJson } from '../business/config.mjs';
+import { ROOT, readJson, runtimeReadiness } from '../business/config.mjs';
 import { contextFor } from '../business/context.mjs';
 import { callTool } from '../business/tools.mjs';
 import { Scheduler } from '../business/scheduler.mjs';
@@ -42,8 +42,9 @@ function harness(t) {
   const capture = (snapshot = input, extra = {}) => command('opportunity.capture', { snapshot, ...extra });
   const consume = (c, output = result(c.context)) => command('opportunity.consume', { capture_id: c.capture_id, output });
   const detail = task => service.opportunityDetail(task.task_id);
-  const noEffects = () => {
-    for (const table of ['drafts', 'approvals', 'delivery_attempts', 'runs', 'outcome_events']) assert.equal(store.get(`SELECT COUNT(*) AS n FROM ${table}`).n, 0, table);
+  const noEffects = (expectedRuns = 0) => {
+    for (const table of ['drafts', 'approvals', 'delivery_attempts', 'outcome_events']) assert.equal(store.get(`SELECT COUNT(*) AS n FROM ${table}`).n, 0, table);
+    assert.equal(store.get('SELECT COUNT(*) AS n FROM runs').n, expectedRuns);
     assert.equal(store.get("SELECT COUNT(*) AS n FROM persons WHERE trim(permission)<>''").n, 0);
     assert.equal(config.runtime.enabled, false); assert.equal(config.telegram.enabled, false); assert.equal(config.telegram.liveSending, false);
   };
@@ -258,15 +259,63 @@ test('disabled scheduler leaves review cards untouched and never calls any adapt
   await scheduler.tick(); assert.equal(h.detail(saved).task.status, 'proposed'); h.noEffects();
 });
 
+test('ready scheduler excludes a corrupted pending review while ordinary work still runs through a stub', async t => {
+  const h = harness(t), person = await h.command('person.create', { name: 'Invented queue link', source: 'operator assertion' });
+  const c = await h.capture(h.input, { conversation_id: person.conversation_id }), saved = await h.consume(c);
+  h.store.run("UPDATE tasks SET status='pending',due_at='2000-01-01T00:00:00.000Z' WHERE id=?", saved.task_id);
+  assert.deepEqual(contextFor(h.service).work, []);
+  assert.deepEqual(contextFor(h.service, person.conversation_id).tasks, []);
+  for (const scope of [{ kind: 'agent' }, { kind: 'agent', conversationId: person.conversation_id }]) {
+    assert.deepEqual(await callTool(h.service, scope, 'partner_list_work', {}, id()), []);
+  }
+  const previousKey = process.env.PARTNER_MODEL_API_KEY, previousRuntime = structuredClone(h.config.runtime);
+  process.env.PARTNER_MODEL_API_KEY = 'invented-consumer-stub-key';
+  Object.assign(h.config.runtime, { enabled: true, model: 'invented-model', baseUrl: 'https://invalid.example/v1' });
+  const python = path.join(ROOT, '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
+  const exists = fs.existsSync;
+  const pythonGuard = t.mock.method(fs, 'existsSync', file => file === python || exists(file));
+  const restore = () => {
+    if (previousKey === undefined) delete process.env.PARTNER_MODEL_API_KEY; else process.env.PARTNER_MODEL_API_KEY = previousKey;
+    h.config.runtime = previousRuntime; pythonGuard.mock.restore();
+  };
+  let ordinary, turns = 0;
+  const runtime = { run: async (run, context) => {
+    turns++; assert.equal(run.task_id, ordinary?.task_id);
+    assert.doesNotMatch(JSON.stringify(context), /opportunity_review|opportunity\.candidate|Operator-only Opportunity review/);
+    return { completed: true };
+  } };
+  const never = () => assert.fail('Telegram must not be invoked');
+  const scheduler = new Scheduler(h.service, runtime, { readiness: never, sendApproved: never });
+  try {
+    assert.equal(runtimeReadiness(h.config).ready, true);
+    await scheduler.tick(); assert.equal(turns, 0);
+    assert.equal(h.store.get('SELECT COUNT(*) AS n FROM runs').n, 0);
+    ordinary = await h.command('task.create', { kind: 'research', title: 'Invented normal work', instructions: 'Read only synthetic data.' });
+    await scheduler.tick(); assert.equal(turns, 1);
+    assert.equal(h.store.get('SELECT status FROM tasks WHERE id=?', ordinary.task_id).status, 'done');
+    assert.equal(h.detail(saved).task.status, 'pending');
+    assert.equal(h.store.get('SELECT COUNT(*) AS n FROM runs WHERE task_id=?', saved.task_id).n, 0);
+  } finally { restore(); }
+  h.noEffects(1);
+});
+
 test('rollback covers the candidate event, task, audit event and command receipt together', async t => {
   const h = harness(t), c = await h.capture();
   const events = h.store.get('SELECT COUNT(*) AS n FROM events').n;
+  const receipts = h.store.get('SELECT COUNT(*) AS n FROM command_receipts').n, requestId = id();
+  const payload = { capture_id: c.capture_id, output: result(c.context) };
   const addTask = h.service.addTask; h.service.addTask = () => { throw new Error('simulated storage failure'); };
-  await assert.rejects(h.consume(c), /simulated storage failure/);
-  h.service.addTask = addTask;
+  try { await assert.rejects(h.command('opportunity.consume', payload, undefined, requestId), /simulated storage failure/); }
+  finally { h.service.addTask = addTask; }
   assert.equal(h.store.get('SELECT COUNT(*) AS n FROM events').n, events);
   assert.equal(h.store.get('SELECT COUNT(*) AS n FROM tasks').n, 0);
-  await h.consume(c); h.noEffects();
+  assert.equal(h.store.get('SELECT COUNT(*) AS n FROM command_receipts').n, receipts);
+  assert.equal(h.store.get('SELECT id FROM command_receipts WHERE id=?', requestId), undefined);
+  const saved = await h.command('opportunity.consume', payload, undefined, requestId);
+  assert.deepEqual(await h.command('opportunity.consume', payload, undefined, requestId), saved);
+  assert.equal(h.store.get('SELECT COUNT(*) AS n FROM command_receipts').n, receipts + 1);
+  assert.equal(h.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='opportunity.candidate'").n, 1);
+  assert.equal(h.store.get('SELECT COUNT(*) AS n FROM tasks').n, 1); h.noEffects();
 });
 
 test('stale capture response is historical; read endpoint always recomputes freshness', async t => {
