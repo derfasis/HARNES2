@@ -4,6 +4,11 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 import { createHash } from 'node:crypto';
 const read = name => fs.readFileSync(new URL(`../${name}`, import.meta.url), 'utf8');
+function textBlobHash(text) {
+  // Git's pinned text blobs use LF; Windows checkouts may use CRLF.
+  const bytes = Buffer.from(text.replace(/\r\n/g, '\n'), 'utf8');
+  return createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
+}
 const app = read('public/app.js');
 const ui = {};
 vm.runInNewContext(app.slice(0, app.indexOf("document.addEventListener('click'")) + `
@@ -77,6 +82,12 @@ test('default runtime, Telegram and liveSending stay false and sources stay clos
   assert.deepEqual(config.opportunity.allowedSourceRefs, []); assert.equal(config.opportunity.activeOffer, null);
 });
 
+test('pinned text blob checks accept CRLF checkouts but reject content changes', () => {
+  const text = 'frozen contract\nsecond line\n';
+  assert.equal(textBlobHash(text), textBlobHash(text.replace(/\n/g, '\r\n')));
+  assert.notEqual(textBlobHash(text), textBlobHash(text.replace('contract', 'changed')));
+});
+
 test('frozen Router, Projection, Store, migrations, Brain assets and runtime adapters match the exact base blobs', () => {
   const pinned = {
     "business/situation-router.mjs": "ef2a2b53f0cec4560920453c4ff5c1e3fd88df61",
@@ -111,8 +122,6 @@ test('frozen Router, Projection, Store, migrations, Brain assets and runtime ada
     "scripts/conversation_benchmark_worker.py": "a451187beec05ccddfca2417eb159b4821c15dc0"
 };
   for (const [name, expected] of Object.entries(pinned)) {
-    const bytes = fs.readFileSync(new URL(`../${name}`, import.meta.url));
-    const actual = createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
-    assert.equal(actual, expected, name);
+    assert.equal(textBlobHash(read(name)), expected, name);
   }
 });
