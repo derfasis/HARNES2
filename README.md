@@ -28,6 +28,10 @@ npm start
 
 Планировщик работает, пока запущен сервер: выполняет сохранённые задачи по сроку. `scheduler.dailyPlanning: true` добавляет ежедневное планирование по `timezone` и `planningHour`. Предложенные агентом новые задачи сначала рассматриваются владельцем.
 
+## Opportunity Projection v0
+
+[Opportunity Projection v0](docs/OPPORTUNITY_PROJECTION_V0.md) — read-only расширение настоящего Situation Router: разрешённый public snapshot и active offer дают гипотезу с evidence, unknowns и решением Router за один turn. Frozen v1 не изменён; отправка, сбор данных и отдельное хранилище не добавлены.
+
 ## Telegram
 
 Поддерживаются два транспорта: `telegram.transport: "bot_api"` и `telegram.transport: "mtproto"`. Bot API использует `PARTNER_TELEGRAM_BOT_TOKEN`. MTProto использует GramJS (`telegram`/`TelegramClient`) и `PARTNER_TELEGRAM_API_ID`, `PARTNER_TELEGRAM_API_HASH` плюс `PARTNER_TELEGRAM_SESSION` или `PARTNER_TELEGRAM_SESSION_FILE`. В обоих режимах нужны числовые chat ID в `telegram.allowedChatIds` и `telegram.enabled: true`.

@@ -12,7 +12,7 @@ function walk(dir) {
     if (entry.isDirectory()) walk(file); else files.push(file);
   }
 }
-for (const dir of ['business','adapters','public','scripts','config','contracts','partner']) walk(path.join(root,dir));
+for (const dir of ['business','adapters','public','scripts','config','contracts','partner','tests','benchmarks/opportunity-projection-v0']) walk(path.join(root,dir));
 let checked = 0;
 for (const file of files) {
   if (/\.(js|mjs)$/.test(file)) {

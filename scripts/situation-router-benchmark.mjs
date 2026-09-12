@@ -9,6 +9,7 @@ import {
   parseSituationOutput,
   ROUTER_INSTRUCTIONS,
 } from '../business/situation-router.mjs';
+import { buildOpportunityContext, parseOpportunityOutput, PROJECTION_INSTRUCTIONS } from '../business/opportunity-projection.mjs';
 
 if (process.env.SITUATION_ROUTER_MODEL_RUN !== '1') {
   throw new Error('Model run disabled. Set SITUATION_ROUTER_MODEL_RUN=1 only after explicit approval.');
@@ -30,6 +31,10 @@ function optionValue(name) {
 
 const fixtureArg = optionValue('--fixtures');
 const manifestArg = optionValue('--manifest');
+const projectionMode = args.includes('--opportunity-v0');
+const allowedSource = optionValue('--allowed-source');
+if (projectionMode && (manifestArg || !allowedSource)) throw new Error('Opportunity v0 requires --allowed-source and does not use the frozen v1 manifest.');
+if (!projectionMode && allowedSource) throw new Error('--allowed-source requires --opportunity-v0.');
 if (fixtureArg && manifestArg) throw new Error('Используйте только один из --fixtures или --manifest.');
 
 let fixtureDir = null;
@@ -69,7 +74,8 @@ if (manifestArg) {
   });
   if (new Set(fixtureSpecs.map(spec => spec.control.case_id)).size !== fixtureSpecs.length) throw new Error('case_id в control manifest должны быть уникальны.');
 } else {
-  fixtureDir = path.resolve(fixtureArg ?? process.env.SITUATION_ROUTER_FIXTURES ?? path.join(ROOT, 'benchmarks/situation-router/synthetic'));
+  const defaultFixtures = projectionMode ? 'benchmarks/opportunity-projection-v0' : 'benchmarks/situation-router/synthetic';
+  fixtureDir = path.resolve(fixtureArg ?? process.env.SITUATION_ROUTER_FIXTURES ?? path.join(ROOT, defaultFixtures));
   if (!fs.existsSync(fixtureDir) || !fs.statSync(fixtureDir).isDirectory()) throw new Error(`Каталог fixtures не найден: ${fixtureDir}`);
   const fixtureFiles = fs.readdirSync(fixtureDir).filter(file => file.endsWith('.json')).sort();
   if (!fixtureFiles.length) throw new Error('Каталог fixtures пуст.');
@@ -78,6 +84,10 @@ if (manifestArg) {
 
 const fixtures = fixtureSpecs.map(({ file, fullPath, control }) => {
   const parsed = JSON.parse(fs.readFileSync(fullPath, 'utf8'));
+  if (projectionMode) {
+    const context = buildOpportunityContext(parsed, { allowedSourceRefs: [allowedSource] });
+    return { file, control, input: context.input, context };
+  }
   const input = normalizeSituationInput(parsed, { maxMessageCharacters: cfg.context.maxMessageCharacters });
   return { file, control, input, context: buildRouterContext(input, { maxMessageCharacters: cfg.context.maxMessageCharacters }) };
 });
@@ -86,7 +96,7 @@ if (new Set(fixtures.map(fixture => fixture.input.situation_id)).size !== fixtur
 const python = path.join(ROOT, '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
 const worker = path.join(ROOT, 'scripts/situation_router_worker.py');
 const timeoutMs = cfg.runtime.timeoutSeconds * 1000 + 15000;
-const maxOutputTokens = Number(process.env.SITUATION_ROUTER_MAX_OUTPUT_TOKENS ?? 700);
+const maxOutputTokens = Number(process.env.SITUATION_ROUTER_MAX_OUTPUT_TOKENS ?? (projectionMode ? 1400 : 700));
 if (!Number.isInteger(maxOutputTokens) || maxOutputTokens < 300 || maxOutputTokens > 4000) throw new Error('SITUATION_ROUTER_MAX_OUTPUT_TOKENS должен быть от 300 до 4000.');
 
 function runWorker(envelope) {
@@ -127,20 +137,24 @@ for (const [index, fixture] of fixtures.entries()) {
     run_id: runId,
     situation_id: fixture.input.situation_id,
     include_prompt: index === 0,
-    system_prompt: ROUTER_INSTRUCTIONS,
+    system_prompt: projectionMode ? `${ROUTER_INSTRUCTIONS} ${PROJECTION_INSTRUCTIONS}` : ROUTER_INSTRUCTIONS,
     context: fixture.context,
-    model: { ...cfg.runtime, maxOutputTokens },
+    model: { ...cfg.runtime, ...(projectionMode ? { maxIterations: 1 } : {}), maxOutputTokens },
     tools: [],
   });
   const record = {
     file: fixture.file,
     ...(fixture.control ? { control: fixture.control } : {}),
     input: fixture.input,
+    ...(projectionMode ? { projection_context: fixture.context } : {}),
     ...result,
   };
   if (result.completed && !result.error) {
     try {
-      record.router_output = parseSituationOutput(result.final_response, fixture.input);
+      if (projectionMode) {
+        record.opportunity_projection = parseOpportunityOutput(result.final_response, fixture.context);
+        record.router_output = record.opportunity_projection.next_action;
+      } else record.router_output = parseSituationOutput(result.final_response, fixture.input);
     } catch (error) {
       record.completed = false;
       record.error = `Invalid router output: ${error.message}`;
@@ -155,7 +169,7 @@ for (const [index, fixture] of fixtures.entries()) {
 
 const output = {
   schema_version: 1,
-  benchmark: 'situation-router-v1',
+  benchmark: projectionMode ? 'opportunity-projection-v0' : 'situation-router-v1',
   started_at: startedAt,
   finished_at: new Date().toISOString(),
   fixture_dir: fixtureDir,
