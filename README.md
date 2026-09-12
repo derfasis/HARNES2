@@ -32,6 +32,18 @@ npm start
 
 [Opportunity Projection v0](docs/OPPORTUNITY_PROJECTION_V0.md) — read-only расширение настоящего Situation Router: разрешённый public snapshot и active offer дают гипотезу с evidence, unknowns и решением Router за один turn. Frozen v1 не изменён; отправка, сбор данных и отдельное хранилище не добавлены.
 
+## Opportunity Consumer / Review Pipeline v0
+
+Локальная интеграция сохраняет зарегистрированный публичный snapshot и проверенный
+результат Projection/Router в существующих events, а оператор получает
+неисполняемую карточку в разделе «Задачи». Candidate не является approval или
+разрешением на контакт. Контракт, настройка, UI/API и известные ограничения:
+[Opportunity Consumer v0](docs/OPPORTUNITY_CONSUMER_V0.md).
+
+Статус этой реализации: **NOT READY** до полного integration regression с
+настоящими зависимостями и публикации audit branch. Пройденные syntax/UI/static
+проверки не означают, что весь продукт протестирован.
+
 ## Telegram
 
 Поддерживаются два транспорта: `telegram.transport: "bot_api"` и `telegram.transport: "mtproto"`. Bot API использует `PARTNER_TELEGRAM_BOT_TOKEN`. MTProto использует GramJS (`telegram`/`TelegramClient`) и `PARTNER_TELEGRAM_API_ID`, `PARTNER_TELEGRAM_API_HASH` плюс `PARTNER_TELEGRAM_SESSION` или `PARTNER_TELEGRAM_SESSION_FILE`. В обоих режимах нужны числовые chat ID в `telegram.allowedChatIds` и `telegram.enabled: true`.
