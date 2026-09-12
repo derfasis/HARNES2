@@ -245,3 +245,17 @@ test('a real sequential second Node process recovers the on-disk checkpoint safe
   assert.equal(h.state().pts,11);assert.throws(()=>current(h),/SOURCE_TRANSPORT_NOT_CURRENT/);
   await h.apply(empty(11));assert.equal(current(h).snapshot.messages.length,1);
 });
+test('broadcast channel is not a CRM person and unrelated posts are not personal context',async t=>{
+  const h=await harness(t);await h.apply(page([update(11,{message:msg({post:true,from_id:null})}),update(12,{message:msg({id:2,post:true,from_id:null})})],{to_pts:12}));
+  for(const r of h.rows())assert.equal(sourceContextState(h.service,r.event_id).snapshot.messages.length,1);
+  h.config.opportunity.authorBindings=[{source_id:sourceId,author_id:'channel:100',conversation_id:'invented-person'}];
+  assert.throws(()=>current(h),/CHANNEL_AUTHOR_CRM_BINDING_FORBIDDEN/);noEffects(h);
+});
+test('current checkpoint cannot coexist with latched integrity reason',async t=>{
+  const h=await harness(t);await h.apply(page());h.store.run("UPDATE channel_offsets SET cursor=json_set(cursor,'$.reason','INTEGRITY_RECONCILIATION_REQUIRED') WHERE channel=?",SOURCE_CHECKPOINT_CHANNEL);
+  assert.throws(()=>current(h),/SOURCE_TRANSPORT_CORRUPT_CHECKPOINT/);
+});
+test('mismatched response cursor records a durable integrity failure',async t=>{
+  const h=await harness(t);await assert.rejects(h.poll({readDifference:async()=>empty(9)}),/TELEGRAM_RESPONSE_CURSOR_MISMATCH/);
+  assert.equal(h.state().phase,'blocked');assert.equal(h.state().reason,'INTEGRITY_RECONCILIATION_REQUIRED');
+});

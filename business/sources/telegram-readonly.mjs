@@ -9,7 +9,7 @@ const MAX_PTS = 2147483647;
 const INTEGRITY = 'INTEGRITY_RECONCILIATION_REQUIRED';
 const integrityErrors = new Set(['TELEGRAM_PTS_COLLISION','SOURCE_VERSION_COLLISION','TELEGRAM_AUTHOR_IDENTITY_CHANGED',
   'SOURCE_CREATION_TIME_CHANGED','SOURCE_UPDATE_TIME_ROLLBACK','TELEGRAM_MESSAGE_DELETED','TELEGRAM_DIFFERENCE_TOO_LONG',
-  'SOURCE_TRANSPORT_CORRUPT_CHECKPOINT',INTEGRITY]);
+  'SOURCE_TRANSPORT_CORRUPT_CHECKPOINT','TELEGRAM_RESPONSE_CURSOR_MISMATCH',INTEGRITY]);
 const check = (ok, code) => ensure(ok, `Telegram source: ${code}`, 409, code);
 const integer = (n, min = 1) => Number.isInteger(n) && n >= min && n <= MAX_PTS;
 const numericId = x => typeof x === 'string' && /^[1-9][0-9]{0,18}$/.test(x);
@@ -154,7 +154,7 @@ export function disconnectTelegramSource(service,sourceId,reason='DISCONNECTED')
 
 // Durable ordered handoff. A page must account for ALL pts advances; opaque/unmapped
 // other_updates and DifferenceTooLong are deliberately rejected, never skipped.
-export function applyTelegramDifference(service,sourceId,page) {
+export function applyTelegramDifference(service,sourceId,page,expectedPts=null) {
   const frozen=structuredClone(page);
   return service.exclusive(()=>{
     const p=policy(service,sourceId);
@@ -162,6 +162,7 @@ export function applyTelegramDifference(service,sourceId,page) {
       const s=stateFor(service,p); fields(frozen,['kind','account_id','channel_id','from_pts','to_pts','final','updates']);bounded(frozen);
       check(frozen.kind!=='too_long','TELEGRAM_DIFFERENCE_TOO_LONG');
       check(frozen.account_id===p.accountId && frozen.channel_id===p.channelId,'TELEGRAM_RESPONSE_SCOPE_MISMATCH');
+      check(expectedPts===null || frozen.from_pts===expectedPts,'TELEGRAM_RESPONSE_CURSOR_MISMATCH');
       check(['difference','empty'].includes(frozen.kind) && integer(frozen.from_pts) && integer(frozen.to_pts)
         && frozen.to_pts>=frozen.from_pts && typeof frozen.final==='boolean' && Array.isArray(frozen.updates)
         && frozen.updates.length<=100,'INVALID_TELEGRAM_DIFFERENCE');
@@ -214,6 +215,5 @@ export async function pollTelegramSource(service,sourceId,transport) {
     await disconnectTelegramSource(service,sourceId,'READ_FAILED'); throw error;
   }
   // An intake failure is not a transient read failure. Preserve its blocked state.
-  check(page?.from_pts===s.pts,'TELEGRAM_RESPONSE_CURSOR_MISMATCH');
-  return applyTelegramDifference(service,sourceId,page);
+  return applyTelegramDifference(service,sourceId,page,s.pts);
 }

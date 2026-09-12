@@ -22,7 +22,7 @@ export function validateSourceCheckpoint(state, p) {
     && state.policy_hash===digest(p) && typeof state.baseline_hash==='string' && /^[a-f0-9]{64}$/.test(state.baseline_hash)
     && Number.isInteger(state.pts) && state.pts>0 && state.pts<=2147483647
     && ['current','catching_up','blocked'].includes(state.phase)
-    && (state.reason===null || typeof state.reason==='string' && state.reason.length<=100)
+    && (state.phase==='current' ? state.reason===null : typeof state.reason==='string' && state.reason.length>0 && state.reason.length<=100)
     && (state.phase==='current' ? typeof state.confirmed_at==='string' && Number.isFinite(Date.parse(state.confirmed_at))
       : state.confirmed_at===null), 'SOURCE_TRANSPORT_CORRUPT_CHECKPOINT');
 }
@@ -110,6 +110,11 @@ export function ingestSource(service, raw) {
   service.store.event(service.config.partnerId, null, SOURCE_MESSAGE, 'system', message);
   return { source_event_id: String(service.store.get('SELECT last_insert_rowid() AS id').id), duplicate: false, disposition: 'registered' };
 }
+function isTelegramChannelAuthor(service, message) {
+  return Array.isArray(service.config.opportunity.telegramSources)
+    && service.config.opportunity.telegramSources.some(p=>p.sourceId===message.source_id)
+    && message.author_id?.startsWith('channel:');
+}
 function authorBinding(service, message) {
   const bindings = service.config.opportunity.authorBindings ?? [];
   check(Array.isArray(bindings) && bindings.every(b => b && typeof b === 'object'
@@ -117,6 +122,7 @@ function authorBinding(service, message) {
     && typeof b.source_id === 'string' && validId(b.author_id) && typeof b.conversation_id === 'string'), 'INVALID_AUTHOR_BINDINGS');
   const matches = bindings.filter(b => b.source_id === message.source_id && b.author_id === message.author_id);
   check(matches.length <= 1, 'AMBIGUOUS_AUTHOR_BINDING');
+  check(!isTelegramChannelAuthor(service,message) || matches.length===0,'CHANNEL_AUTHOR_CRM_BINDING_FORBIDDEN');
   return matches[0] ? structuredClone(matches[0]) : null;
 }
 export function sourceContextState(service, eventId) {
@@ -129,7 +135,8 @@ export function sourceContextState(service, eventId) {
   check(anchor.operation !== 'delete', 'SOURCE_MESSAGE_DELETED');
   check(anchor.author_id !== null, 'UNKNOWN_SOURCE_AUTHOR');
   const byId = new Map(rows.map(r => [r.message.message_id, r]));
-  const selected = new Map(rows.filter(r => r.message.author_id === anchor.author_id
+  const selected = new Map(rows.filter(r => r.message.message_id === anchor.message_id
+    || !isTelegramChannelAuthor(service,anchor) && r.message.author_id === anchor.author_id
     || anchor.thread_id !== null && r.message.thread_id === anchor.thread_id).map(r => [r.message.message_id,r]));
   // Include actual ancestry without assuming that a display name identifies anyone.
   for (const row of [...selected.values()]) {
