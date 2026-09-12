@@ -22,8 +22,8 @@ export async function callTool(service, scope, name, args, requestId) {
   let result;
   if (name === 'partner_get_context') result = compactPromptContext(contextFor(service, scope.conversationId ?? null));
   else if (name === 'partner_list_work') result = scope.conversationId
-    ? service.store.all("SELECT * FROM tasks WHERE conversation_id=? AND status IN ('pending','proposed','running') ORDER BY due_at LIMIT 50", scope.conversationId)
-    : service.store.all("SELECT * FROM tasks WHERE partner_id=? AND status IN ('pending','proposed','running') ORDER BY due_at LIMIT 100", service.config.partnerId);
+    ? service.store.all("SELECT * FROM tasks WHERE conversation_id=? AND kind<>'opportunity_review' AND status IN ('pending','proposed','running') ORDER BY due_at LIMIT 50", scope.conversationId)
+    : service.store.all("SELECT * FROM tasks WHERE partner_id=? AND kind<>'opportunity_review' AND status IN ('pending','proposed','running') ORDER BY due_at LIMIT 100", service.config.partnerId);
   else if (name === 'partner_search_experience') result = searchExperience(service, args.query, scope.conversationId ?? null, service.config.context.maxLessons);
   else {
     const payload = { ...args };

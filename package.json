@@ -9,6 +9,8 @@
   },
   "scripts": {
     "start": "node --env-file-if-exists=.env business/server.mjs",
+    "test": "node --test \"tests/*.test.mjs\"",
+    "test:credentials": ".venv\\Scripts\\python.exe -m unittest discover -s tests -p test_*.py",
     "benchmark:conversation": "node --env-file-if-exists=.env scripts/conversation-benchmark.mjs",
     "benchmark:situation-router": "node --env-file-if-exists=.env scripts/situation-router-benchmark.mjs",
     "benchmark:situation-router:control": "node --env-file-if-exists=.env scripts/situation-router-benchmark.mjs --manifest benchmarks/situation-router/control-v1.json",

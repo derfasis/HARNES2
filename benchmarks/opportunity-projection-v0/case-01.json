@@ -1,0 +1,16 @@
+{
+  "situation_id": "projection-01",
+  "source": { "kind": "sanitized_fixture", "ref": "fixture://opportunity-projection-v0", "captured_at": "2026-01-01T00:03:00Z" },
+  "anchor_message_id": "m-103",
+  "messages": [
+    { "id": "m-101", "author_id": "user-01", "version": 1, "text": "Обсуждаем партнёрство в wellness. Какие вопросы хотите разобрать?", "created_at": "2026-01-01T00:01:00Z", "reply_to_id": null, "thread_id": "thread-01" },
+    { "id": "m-102", "author_id": "user-03", "version": 1, "text": "Продаю дизайн баннеров, пишите в личку.", "created_at": "2026-01-01T00:02:00Z", "reply_to_id": null, "thread_id": "thread-02" },
+    { "id": "m-103", "author_id": "user-02", "version": 2, "text": "Как устроено партнёрство и что нужно делать в начале? Хочу понять, подходит ли мне этот формат.", "created_at": "2026-01-01T00:03:00Z", "reply_to_id": "m-101", "thread_id": "thread-01" }
+  ],
+  "active_offer": {
+    "id": "synthetic-wellness-partnership", "version": "synthetic-v0",
+    "text": "Информационное знакомство с форматом wellness-партнёрства, без обещаний дохода и свойств продуктов.",
+    "criteria": ["Автор сам просит разобраться в формате wellness-партнёрства"],
+    "exclusions": ["Не считать рекламу или чужие цитаты намерением автора", "Не использовать финансовую или медицинскую уязвимость"]
+  }
+}

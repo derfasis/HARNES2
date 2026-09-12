@@ -28,6 +28,22 @@ npm start
 
 Планировщик работает, пока запущен сервер: выполняет сохранённые задачи по сроку. `scheduler.dailyPlanning: true` добавляет ежедневное планирование по `timezone` и `planningHour`. Предложенные агентом новые задачи сначала рассматриваются владельцем.
 
+## Opportunity Projection v0
+
+[Opportunity Projection v0](docs/OPPORTUNITY_PROJECTION_V0.md) — read-only расширение настоящего Situation Router: разрешённый public snapshot и active offer дают гипотезу с evidence, unknowns и решением Router за один turn. Frozen v1 не изменён; отправка, сбор данных и отдельное хранилище не добавлены.
+
+## Opportunity Consumer / Review Pipeline v0
+
+Локальная интеграция сохраняет зарегистрированный публичный snapshot и проверенный
+результат Projection/Router в существующих events, а оператор получает
+неисполняемую карточку в разделе «Задачи». Candidate не является approval или
+разрешением на контакт. Контракт, настройка, UI/API и известные ограничения:
+[Opportunity Consumer v0](docs/OPPORTUNITY_CONSUMER_V0.md).
+
+Статус локального checkpoint после независимой проверки: **READY WITH CONDITIONS**
+для ограниченного operator-only offline pilot. Node: 78/78, Python: 5/5, build green;
+условия и границы проверки описаны в отчёте. Это не проверка качества модели или live execution.
+
 ## Telegram
 
 Поддерживаются два транспорта: `telegram.transport: "bot_api"` и `telegram.transport: "mtproto"`. Bot API использует `PARTNER_TELEGRAM_BOT_TOKEN`. MTProto использует GramJS (`telegram`/`TelegramClient`) и `PARTNER_TELEGRAM_API_ID`, `PARTNER_TELEGRAM_API_HASH` плюс `PARTNER_TELEGRAM_SESSION` или `PARTNER_TELEGRAM_SESSION_FILE`. В обоих режимах нужны числовые chat ID в `telegram.allowedChatIds` и `telegram.enabled: true`.
@@ -92,7 +108,7 @@ npm run import -- exports/partner-DATE.json exports/restore-new
 
 Нужны Node.js 24+, Git и uv. `npm run setup` устанавливает Node-зависимости по `package-lock.json`, получает закреплённый Hermes и устанавливает Python-зависимости по upstream `uv.lock`. Имеющиеся `.env` и `config/local.json` сохраняются.
 
-`npm run build` проверяет синтаксис собственного JavaScript, JSON и Python без импорта приложения, создания тестовых данных и запросов к модели. Тестовой команды нет. Сценарии с моделью, Telegram, восстановлением и интерфейсом ещё предстоит проверять отдельно после разрешения владельца.
+`npm run build` проверяет синтаксис собственного JavaScript, JSON и Python без импорта приложения, создания тестовых данных и запросов к модели. После явного разрешения владельца локальная offline-регрессия запускается через `npm test` и `npm run test:credentials`: временные данные, без модели и внешних подключений. Результат и границы проверки описаны в [Opportunity integration checkpoint](docs/OPPORTUNITY_INTEGRATION_CHECKPOINT.md). Live-сценарии и интерфейс этим не проверяются.
 
 MCP запускается командой `npm run mcp` при работающем локальном сервере. Для MCP-клиента предпочтительно указать напрямую абсолютный путь к `.venv/Scripts/python.exe` и аргумент `adapters/mcp/server.py` с абсолютным путём. Адаптер получает отдельный служебный токен и не может одобрять или отправлять сообщения.
 

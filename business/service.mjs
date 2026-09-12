@@ -1,6 +1,8 @@
 import { id, hash } from './store.mjs';
 import { AppError, ensure, requiredText, dateTime, now } from './errors.mjs';
 
+import { captureOpportunity, consumeOpportunity, opportunityDetail, opportunityCapture, OPPORTUNITY_TASK } from './opportunity-consumer.mjs';
+
 const OUTCOMES = new Set(['qualified','call_proposed','call_accepted','call_booked','call_attended','no_show','joined','declined','business_value']);
 export class BusinessService {
   constructor(store, config) { this.store = store; this.config = config; this.tail = Promise.resolve(); this.telegramAccountId = null; }
@@ -50,6 +52,8 @@ export class BusinessService {
     if (conversationId) this.assertScope(actor, conversationId);
     let result;
     switch (action) {
+      case 'opportunity.capture': result = captureOpportunity(this, p); break;
+      case 'opportunity.consume': result = consumeOpportunity(this, p); break;
       case 'partner.update': {
         const mission = requiredText(p.mission, 'Цель', 5000);
         this.store.run('UPDATE partners SET mission=? WHERE id=?', mission, this.config.partnerId);
@@ -190,6 +194,7 @@ export class BusinessService {
       case 'task.retry': {
         const task = this.store.get('SELECT * FROM tasks WHERE id=? AND partner_id=?', p.task_id, this.config.partnerId);
         ensure(task, 'Задача не найдена', 404); conversationId = task.conversation_id;
+        ensure(task.kind !== OPPORTUNITY_TASK || action === 'task.cancel', 'Opportunity candidate нельзя одобрить или поставить на исполнение', 409, 'candidate_not_executable');
         if (action === 'task.approve') ensure(task.status === 'proposed', 'Задача уже рассмотрена', 409);
         if (action === 'task.retry') ensure(['failed','interrupted','cancelled','blocked'].includes(task.status), 'Повтор недоступен', 409);
         if (action === 'task.cancel') ensure(!['done','cancelled'].includes(task.status), 'Задача уже завершена', 409);
@@ -277,8 +282,10 @@ export class BusinessService {
     const taskId = id(), due = dateTime(p.due_at ?? now()), convId = p.conversation_id ?? null;
     if (convId) this.conversation(convId);
     const key = p.dedupe_key ? requiredText(p.dedupe_key, 'dedupe_key', 200) : null;
+    const kind = p.kind ?? 'research'; ensure(['reply','follow_up','research','planning','review',OPPORTUNITY_TASK].includes(kind), 'Неизвестный вид задачи');
+    if (kind === OPPORTUNITY_TASK) ensure(author === 'system' && status === 'proposed', 'Opportunity review создаёт только проверенный consumer', 403);
+    if (key?.startsWith('opportunity:')) ensure(kind === OPPORTUNITY_TASK && author === 'system' && status === 'proposed', 'Зарезервированный ключ consumer', 403);
     if (key) { const old = this.store.get('SELECT * FROM tasks WHERE dedupe_key=?', key); if (old) return { task_id: old.id, duplicate: true }; }
-    const kind = p.kind ?? 'research'; ensure(['reply','follow_up','research','planning','review'].includes(kind), 'Неизвестный вид задачи');
     if (kind === 'follow_up') { ensure(convId, 'Для follow-up нужен разговор'); requiredText(p.evidence, 'Основание follow-up', 2000); }
     this.store.run('INSERT INTO tasks(id,partner_id,conversation_id,kind,title,instructions,due_at,status,evidence,dedupe_key,author,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)', taskId, this.config.partnerId, convId, kind, requiredText(p.title, 'Задача', 200), requiredText(p.instructions, 'Цель действия', 6000), due, status, String(p.evidence ?? '').slice(0,2000), key, author, now());
     return { task_id: taskId, status };
@@ -348,6 +355,8 @@ export class BusinessService {
   }
   setTelegramAccount(accountId) { this.telegramAccountId = accountId ? String(accountId) : null; }
   telegramAccount() { return this.telegramAccountId || process.env.PARTNER_TELEGRAM_ACCOUNT_ID || process.env.PARTNER_TELEGRAM_BOT_TOKEN?.split(':')[0] || 'unconfigured'; }
+  opportunityCapture(captureId) { return opportunityCapture(this, captureId); }
+  opportunityDetail(taskId) { return opportunityDetail(this, taskId); }
   detail(conversationId) {
     const conversation = this.conversation(conversationId), person = this.person(conversation.person_id);
     return { conversation, person,
@@ -360,6 +369,7 @@ export class BusinessService {
   snapshot() {
     const partnerId = this.config.partnerId;
     return { partner: this.partner(),
+      opportunity_captures: this.store.all("SELECT id,created_at,json_extract(payload_json,'$.snapshot.source.ref') AS source FROM events WHERE partner_id=? AND kind='opportunity.snapshot' AND actor='system' ORDER BY id DESC LIMIT 20", partnerId),
       conversations: this.store.all('SELECT c.*,p.name,p.source,p.permission,p.suppressed,(SELECT text FROM messages WHERE conversation_id=c.id ORDER BY created_at DESC,rowid DESC LIMIT 1) AS last_message,(SELECT COUNT(*) FROM drafts WHERE conversation_id=c.id AND status=\'pending\') AS pending_drafts FROM conversations c JOIN persons p ON p.id=c.person_id WHERE p.partner_id=? ORDER BY c.created_at DESC', partnerId),
       tasks: this.store.all('SELECT * FROM tasks WHERE partner_id=? ORDER BY due_at DESC LIMIT 300', partnerId),
       runs: this.store.all('SELECT id,task_id,conversation_id,status,runtime,model,error,input_tokens,output_tokens,estimated_cost_usd,cost_status,created_at,finished_at FROM runs WHERE partner_id=? ORDER BY created_at DESC LIMIT 100', partnerId),
