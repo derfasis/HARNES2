@@ -1,0 +1,97 @@
+# Situation Router control v1 review
+
+## Run
+
+| Field | Value |
+| --- | --- |
+| Control | `situation-router-control-v1` |
+| Started | `2026-09-11T15:15:04.395Z` |
+| Finished | `2026-09-11T15:17:56.201Z` |
+| Model | `custom / free/gpt-5.6-luna` |
+| Cases | 6 |
+| Completed | 6 |
+| Errors | 0 |
+| Exact decision matches | 5/6 |
+
+The run used the frozen `control-v1.json` manifest exactly once. Expected
+decisions and control case IDs were absent from the model prompt. Retries,
+Telegram, live sending, business mutations and effect tools were disabled.
+Runtime was returned to disabled immediately after the run.
+
+The ignored raw report is:
+`data/benchmarks/situation-router/situation-router-20260911151504.json`.
+
+## Results
+
+| Control case | Expected | Actual | Result | Assessment |
+| --- | --- | --- | --- | --- |
+| `reject-unrelated-generic-solicitation` | `IGNORE` | `IGNORE` | PASS | The previous false active move disappeared. |
+| `wait-on-unknown-owner-fit` | `WAIT` | `WAIT` | PASS | Unknown fit no longer produced a cautious outreach draft. |
+| `positive-public-reply` | `PUBLIC_REPLY` | `PUBLIC_REPLY` | PASS | A relevant explicit public question still received a public draft. |
+| `positive-wait` | `WAIT` | `WAIT` | PASS | Deferred, ambiguous interest did not trigger contact. |
+| `positive-dm` | `DM` | `DM` | PASS | Explicit private-contact permission still produced a DM draft. |
+| `positive-handoff` | `HANDOFF` | `PUBLIC_REPLY` | FAIL | The router asked for more details publicly instead of escalating the explicit owner-level decision. |
+
+## Three checks
+
+1. **Generic solicitation boundary: PASS.** Both regression cases avoided
+   `PUBLIC_REPLY` and `DM`.
+2. **Positive active routes: PARTIAL.** `PUBLIC_REPLY` and `DM` passed;
+   `HANDOFF` failed.
+3. **Over-caution regression: PASS.** The router still selected active public
+   and private routes when permission and relevance were explicit.
+
+## Failure detail
+
+The failed handoff result proposed a public clarification draft and implied
+that the organization was ready to consider the proposal. That is weaker than
+the expected owner handoff: the request explicitly required a person with
+decision authority, while the router had no evidence that it could speak for
+that person or collect terms on their behalf. The output remained pending and
+was not sent, so this is a decision-policy failure rather than a delivery or
+approval breach.
+
+## Verdict
+
+**NO-GO for the full 20-case rerun.** The stricter active-move threshold fixed
+the two known solicitation regressions without making the router uniformly
+passive, but the explicit positive `HANDOFF` control must pass before spending
+another full benchmark. No further prompt or policy changes were made as part
+of this review.
+
+## Narrow HANDOFF follow-up
+
+One policy sentence was added after inspecting only the failed case: an
+explicit request to connect the sender with the owner or another authorized
+human decision-maker for a decision outside Router authority requires
+`HANDOFF`, and must not be replaced by a public or private clarification.
+
+The same frozen control was then run exactly once. It started at
+`2026-09-11T17:42:06.641Z` and finished at `2026-09-11T17:43:41.204Z`.
+All six cases completed with one API call each, no retries, no tools, no
+Telegram, no live sending and no business mutations. Runtime was returned to
+disabled after the command. The ignored raw report is:
+`data/benchmarks/situation-router/situation-router-20260911174206.json`.
+
+| Control case | Expected | Actual | Result |
+| --- | --- | --- | --- |
+| `reject-unrelated-generic-solicitation` | `IGNORE` | `IGNORE` | PASS |
+| `wait-on-unknown-owner-fit` | `WAIT` | `WAIT` | PASS |
+| `positive-public-reply` | `PUBLIC_REPLY` | `WAIT` | FAIL |
+| `positive-wait` | `WAIT` | `WAIT` | PASS |
+| `positive-dm` | `DM` | `DM` | PASS |
+| `positive-handoff` | `HANDOFF` | `HANDOFF` | PASS |
+
+The targeted boundary worked: the handoff result cited the explicit request
+for a decision-maker, returned `draft: null`, and did not invent an interim
+reply. The overall score nevertheless remained **5/6** because the previously
+passing public-question case changed to `WAIT`. In this run the model treated
+the question's relevance to wellness and partnership as unconfirmed; in the
+first run it treated the same question as directly relevant. The added rule
+does not mention that scenario, so one paired sample cannot distinguish prompt
+sensitivity from ordinary model variation. No second rerun or compensating
+policy change was made.
+
+The control therefore remains **NO-GO for the full 20-case rerun**. The
+HANDOFF defect is locally resolved, while stability of the positive public
+boundary is now the next observed issue.

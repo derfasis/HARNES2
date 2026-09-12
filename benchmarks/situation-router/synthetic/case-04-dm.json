@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "situation_id": "case-04",
+  "source": { "kind": "sanitized_fixture", "ref": "fixture://case-04", "captured_at": "2026-01-01T00:00:00Z" },
+  "message": { "id": "m-005", "channel": "dm", "direction": "in", "author_id": "user-04", "text": "Да, напиши мне лично, хочу понять, как это устроено.", "created_at": "2026-01-01T00:05:00Z", "reply_to_id": "m-004" },
+  "snapshot": { "messages": [
+    { "id": "m-004", "channel": "public", "direction": "in", "author_id": "user-04", "text": "В общей группе неудобно обсуждать детали.", "created_at": "2026-01-01T00:04:00Z", "reply_to_id": null },
+    { "id": "m-005", "channel": "dm", "direction": "in", "author_id": "user-04", "text": "Да, напиши мне лично, хочу понять, как это устроено.", "created_at": "2026-01-01T00:05:00Z", "reply_to_id": "m-004" }
+  ], "total_count": 2, "truncated": false },
+  "person": { "person_id": "user-04", "relationship": "existing_contact", "known_facts": [{ "text": "Человек сам попросил продолжить разговор лично.", "source_message_ids": ["m-005"] }] },
+  "public_profile": null,
+  "goal": { "text": "Понимать, когда есть естественный повод быть полезным в разговоре о wellness и партнёрстве.", "allowed_channels": ["public", "dm"] },
+  "constraints": { "review_required": true, "never_send": true, "no_cold_outreach": true, "call_time_unconfirmed": true }
+}

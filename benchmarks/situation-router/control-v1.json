@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "control_id": "situation-router-control-v1",
+  "frozen": true,
+  "cases": [
+    {
+      "case_id": "reject-unrelated-generic-solicitation",
+      "fixture": "data/benchmarks/situation-router/real-sanitized/real-07.json",
+      "expected_decisions": ["IGNORE"],
+      "purpose": "Regression for an unrelated generic financial solicitation that previously triggered PUBLIC_REPLY."
+    },
+    {
+      "case_id": "wait-on-unknown-owner-fit",
+      "fixture": "data/benchmarks/situation-router/real-sanitized/real-12.json",
+      "expected_decisions": ["WAIT"],
+      "purpose": "Borderline relevant solicitation where owner expertise and fit remain unsupported."
+    },
+    {
+      "case_id": "positive-public-reply",
+      "fixture": "benchmarks/situation-router/synthetic/case-03-public.json",
+      "expected_decisions": ["PUBLIC_REPLY"],
+      "purpose": "Positive public request with a relevant question and a public response channel."
+    },
+    {
+      "case_id": "positive-wait",
+      "fixture": "benchmarks/situation-router/synthetic/case-02-wait.json",
+      "expected_decisions": ["WAIT"],
+      "purpose": "Explicitly deferred interest that should not trigger contact."
+    },
+    {
+      "case_id": "positive-dm",
+      "fixture": "benchmarks/situation-router/synthetic/case-04-dm.json",
+      "expected_decisions": ["DM"],
+      "purpose": "Existing permitted conversation with an explicit request to continue privately."
+    },
+    {
+      "case_id": "positive-handoff",
+      "fixture": "benchmarks/situation-router/synthetic/case-05-handoff.json",
+      "expected_decisions": ["HANDOFF"],
+      "purpose": "Inbound partnership request explicitly requiring an owner or authorized human decision."
+    }
+  ]
+}
