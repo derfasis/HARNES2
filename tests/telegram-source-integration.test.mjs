@@ -15,7 +15,6 @@ import { ROOT, readJson } from '../business/config.mjs';
 import { Scheduler } from '../business/scheduler.mjs';
 import { contextFor } from '../business/context.mjs';
 import { callTool } from '../business/tools.mjs';
-import { consumeOpportunity } from '../business/opportunity-consumer.mjs';
 
 import {bootstrapTelegramSource,applyTelegramDifference,disconnectTelegramSource} from '../business/sources/telegram-readonly.mjs';
 let guards, originalKey;
@@ -108,4 +107,10 @@ test('Telegram review cannot be approved/retried or supplied to agent context',a
   const h=await telegramHarness(t);await applyTelegramDifference(h.service,sourceId,page());await h.tick();const task=h.cards()[0];
   await assert.rejects(h.command('task.approve',{task_id:task.id}));await assert.rejects(h.command('task.retry',{task_id:task.id}));
   assert.throws(()=>contextFor(h.service,null,task));assert.deepEqual(await callTool(h.service,{kind:'agent'},'partner_list_work',{},id()),[]);noEffects(h);
+});
+
+test('existing Scheduler tick reads injected source then creates operator review',async t=>{
+  const h=await telegramHarness(t);let reads=0;
+  h.scheduler.sourceReaders=[{sourceId,transport:{readDifference:async input=>{reads++;assert.equal(input.pts,10);return page();}}}];
+  await h.tick();assert.equal(reads,1);assert.equal(h.cards().length,1);assert.equal(h.detail().executable,false);noEffects(h);
 });
