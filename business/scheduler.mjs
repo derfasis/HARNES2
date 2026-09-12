@@ -20,7 +20,7 @@ export class Scheduler {
       }
       await this.ensurePlanningTask();
       const prepared = await this.service.exclusive(() => this.service.store.transaction(() => {
-        const task = this.service.store.get("SELECT * FROM tasks WHERE partner_id=? AND status='pending' AND due_at<=? ORDER BY due_at,created_at LIMIT 1", cfg.partnerId, now());
+        const task = this.service.store.get("SELECT * FROM tasks WHERE partner_id=? AND status='pending' AND kind<>'opportunity_review' AND due_at<=? ORDER BY due_at,created_at LIMIT 1", cfg.partnerId, now());
         if (!task) return null;
         if (task.conversation_id) {
           try { this.service.active(task.conversation_id); }
