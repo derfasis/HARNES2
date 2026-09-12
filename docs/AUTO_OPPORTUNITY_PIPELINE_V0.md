@@ -235,3 +235,147 @@ records до frozen projection. Переполнение явно отклоня
 Нужно получить zero failures/zero unexpected skips с настоящими зависимостями,
 проверить no-tool Hermes path с минимальным разрешённым model smoke, затем подключать
 конкретный read-only source. Sending не нужен и не допускается для этих проверок.
+
+## Independent integration audit: 2026-09-12
+
+This section supersedes the blocked verification and merge status above. Astra's
+original environment report is retained as history, not new regression evidence.
+The owner authorized exact bundle import, independent audit, offline tests and a
+minimal real no-tool smoke, followed by branch publication only after green.
+
+- Base/main: `9f1ff1d1e4006e493eeb26b7c1dba3c06187efac`.
+- Imported Astra: `4697623b948362d3375d586f400418d75ac50f3c`.
+- Branch: `astra/live-opportunity-pipeline-v0`; four original commits are intact:
+  `d88eb4c`, `ea9b65a`, `7e78f78`, `4697623`.
+- Additional regression commit: `1b75682`.
+- No rebase, squash, main modification, merge or production fix was needed.
+- Dependencies already provisioned: ajv 8.17.1, telegram 2.26.22, pinned Hermes
+  `4810074d73d9419dc82545202d595507a73f4f0e`; no install or lock change.
+
+### Independent findings
+
+No production defect requiring a fix was found. Production remains identical in
+Git to the imported Astra implementation. Three missing verification boundaries
+were covered by focused tests: concurrent delivery/ticks, terminal run-update
+rollback AFTER card/marker creation, and recovery of an in-flight inference claim.
+These are deterministic integration checks, not an OS-crash or multi-process
+load test. No behavior was changed merely to make a test pass.
+
+| Critical question | Finding |
+| --- | --- |
+| Public text becomes agent instruction? | Ingestion stores data, not business messages/tasks. No-tool context separates trusted instructions from source text; consumer instructions are fixed. Direct contextFor(review) rejects. |
+| Review enters agent work? | Global and conversation SQL filters exclude the kind; direct context guard is also tested. |
+| Scheduler executes review? | Automatic branch selects source events and returns before agent/autopilot code. Ordinary selector still excludes review even with corrupted pending status. |
+| JSON escalates authority? | Unchanged strict Projection/Router validation rejects permission, effects, approval/authorization, wrong recipient and DM. PUBLIC_REPLY remains a JSON proposal, not a drafts row. |
+| Display-name identity confusion? | IDs are scoped by source; names are display-only. Exact author/version/span validation and explicit operator-only CRM bindings are retained. |
+| Source-version race/collision? | Ingestion and receipt are in existing exclusive BEGIN IMMEDIATE. Historical same-version changes fail, unseen older updates do not replace current state, tombstones cannot resurrect. |
+| Duplicate-card race? | Durable running claim prevents a competing scheduler inference. Candidate uses existing reserved task dedupe. Concurrent delivery/ticks, duplicate result, cancellation and restart tests pass. |
+| Crash leaves half-written state? | Capture/run intent commit together. Result checkpoint commits separately; candidate/task/terminal/run completion commit together. Fault after marker/card creation rolls all final writes back. |
+| Retry infers unnecessarily? | Analyzed output is consumed without model readiness or another call. Failed/interrupted inference has bounded delay and at most three attempts; unknown budget cost pauses it. |
+| Late result creates stale card? | Rechecks anchor/context event IDs, allowlist, offer content, goal/channels, binding and CRM state before consumption. Source edits/deletes and ownership changes discard late results. |
+| analyzed -> consumer -> terminal rollback? | Failed task creation and failed terminal run update leave analyzed output, no card/marker, unchanged receipts. Restart completes the same stored result with one total stub inference. |
+| Parallel runtime/store/task path? | New runtime is a tag in existing runs, not an engine. Same scheduler, Store/events/tasks, usage limits, HermesAdapter, existing no-tool worker and credential pool. No new DB/schema/timer/CLI/reviewer/approval mechanism. |
+
+Frozen Router v1 and Projection modules/schemas, Store/migrations, Brain assets,
+Python workers/credential code, Telegram adapters and upstream/package locks have
+an empty Git diff against base. Runtime deliberately adds decide/no-tool dispatch;
+it does not advertise business tools, URL or run token in that envelope.
+
+### Actually executed regression
+
+All commands exited 0, with zero failures, cancellations and skips. Counts overlap.
+
+| Command/suite | Observed result |
+| --- | --- |
+| npm test | 139/139 |
+| node --test "tests/*opportunity*.test.mjs" | 84/84 |
+| HARNES2/Router regression | 27/27, including all tracked frozen Router fixtures and Brain context |
+| Projection | 17/17 |
+| Consumer | 34/34: 24 real integration + 10 UI/static/blob checks |
+| Auto Pipeline | 30/30: all 27 Astra cases + 3 independent recovery/race checks |
+| Source ingestion | 28/28 |
+| Runtime envelope | 3/3 |
+| npm run test:credentials | 5/5 against the real pinned Hermes credential module with synthetic clients |
+| npm run build | 44 JavaScript/JSON and 6 Python files syntax-compiled |
+| git diff BASE..HEAD --check | Clean |
+
+### Real model smoke, not a model-shaped stub
+
+One synthetic normalized event executed the genuine path: source.ingest -> stored
+source/snapshot -> HermesAdapter.decide -> installed situation_router_worker.py ->
+existing ephemeral credential pool -> model -> unchanged validators -> Consumer ->
+review card. The external audit harness observed the genuine child/envelope; it
+did not replace the worker, credential pool, model or validators.
+No scheduler timer or real source transport was started. Store was a temporary
+synthetic instance, not the active business database. Credentials came only from
+the existing model environment; ambient/Telegram credentials were stripped and
+the real child was checked for tools=[], maxIterations=1, no business_url/token.
+
+Sanitized observed result:
+
+```json
+{
+  "model": "free/gpt-5.6-luna",
+  "adapter_turns": 1,
+  "child_launches": 1,
+  "hermes_api_calls": 1,
+  "success": true,
+  "disposition": "review_created",
+  "decision": "PUBLIC_REPLY",
+  "hypothesis": "The author's explicit public question creates a supported opening for a cautious public reply that explains only the general format and limits of a wellness partnership, without income or health promises.",
+  "evidence": [{
+    "message_id": "smoke-question", "author_id": "invented-author-1", "version": 1,
+    "span": "I am considering a wellness partnership. What does the format involve, and what are its limits? I only need public information about the format, without income or health promises.",
+    "kind": "question", "attribution": "author_statement"
+  }],
+  "contradictions": [],
+  "unknowns": [
+    "Whether the operator has authorized public format content beyond the high-level description.",
+    "Whether the author seeks a general explanation or a specific partnership review.",
+    "Whether any eligibility, regulatory, or product constraints apply to the proposed public reply."
+  ],
+  "contact_permission": false, "allowed_effects": [], "executable": false, "fresh": true
+}
+```
+
+API-call count is Hermes's reported count, not independent wire-level SDK retry
+instrumentation. Only one adapter inference and one child launch were performed;
+no benchmark, failover probe or additional model smoke was run.
+Repeat delivery and another tick did not infer again. Approve/retry rejected;
+cancellation persisted without reactivation. Persons, conversations, messages,
+drafts, approvals, delivery_attempts, outcome_events and tool_calls stayed at zero.
+
+### Observed end-to-end scenarios
+
+The first row used the real model; other rows used hand-authored responses with
+real scheduler/Store/validators/Consumer. They do not measure semantic accuracy.
+
+| Scenario | Observed output |
+| --- | --- |
+| Explicit public question + fixture offer, real Luna | One fresh PUBLIC_REPLY review, exact author/version/span, false permission and empty effects. |
+| Irrelevant source | Valid IGNORE result, terminal marker, no card/draft. |
+| Refusal with fabricated positive claim | Actual validator rejects; no card. |
+| Same display name, different author IDs | Two distinct review subjects a1/a2, no guessed person. |
+| Edit/delete and late result | Old evidence becomes stale; deleted trigger does not infer; newer-version arrival prevents stale card. |
+| Consumer or terminal transaction fault | No half-written card/marker; analyzed retry succeeds without another inference. |
+| Concurrent delivery/ticks | One source event, one claimed inference, one review/terminal marker. |
+
+### Safety and conditions
+
+Actual local/default configuration retains automatic=false, runtime.enabled=false,
+telegram.enabled=false and telegram.liveSending=false. Only the disposable smoke
+configuration set automatic=true in memory. No live agent path, source adapter,
+Telegram/DM/email/browser posting/comments, approval, AUTOPILOT, permission or effect
+grant was activated. Model API access and Git publication are not business effects.
+
+READY WITH CONDITIONS for a disabled-by-default source-neutral offline prerequisite.
+Before real source data, require processing allowance and retention/erasure policy;
+tombstones invalidate but do not erase immutable history. Before live monitoring,
+review the actual public adapter, namespace/version/edit/delete guarantees, durable
+cursor and reconnect/backfill/gap behavior. Event scans/capacity are bounded-pilot
+tradeoffs, not proven scale. Terminal events do not automatically reevaluate after
+policy/offer/goal/parent changes. CRM links and semantic completeness require a
+human; one positive smoke proves plumbing, not product value or detection quality.
+Lost in-flight responses can require another paid call after recovery; exactly-once
+billing is not promised. UI/HTTP authorization remain source/markup checks, not a
+new browser/HTTP integration execution. No main merge was performed in this audit.

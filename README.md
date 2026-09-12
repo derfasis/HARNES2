@@ -48,8 +48,9 @@ npm start
 
 Новая ветка добавляет source-neutral prerequisite: `source.ingest` → durable events
 → существующий no-tool worker → Projection/Router validators → Consumer review.
-По умолчанию выключен, без Telegram и agent execution. **NOT READY для merge**
-до полного regression с настоящими зависимостями; это не проверенный live monitoring.
+По умолчанию выключен, без Telegram и agent execution. Независимая проверка:
+**READY WITH CONDITIONS** для source-neutral offline prerequisite, не live monitoring.
+Node 139/139, Python 5/5, build green; один настоящий no-tool Luna smoke прошёл.
 [Архитектура, подключение и ограничения](docs/AUTO_OPPORTUNITY_PIPELINE_V0.md).
 
 ## Telegram
