@@ -44,6 +44,14 @@ npm start
 для ограниченного operator-only offline pilot. Node: 78/78, Python: 5/5, build green;
 условия и границы проверки описаны в отчёте. Это не проверка качества модели или live execution.
 
+## Auto Opportunity Pipeline v0
+
+Новая ветка добавляет source-neutral prerequisite: `source.ingest` → durable events
+→ существующий no-tool worker → Projection/Router validators → Consumer review.
+По умолчанию выключен, без Telegram и agent execution. **NOT READY для merge**
+до полного regression с настоящими зависимостями; это не проверенный live monitoring.
+[Архитектура, подключение и ограничения](docs/AUTO_OPPORTUNITY_PIPELINE_V0.md).
+
 ## Telegram
 
 Поддерживаются два транспорта: `telegram.transport: "bot_api"` и `telegram.transport: "mtproto"`. Bot API использует `PARTNER_TELEGRAM_BOT_TOKEN`. MTProto использует GramJS (`telegram`/`TelegramClient`) и `PARTNER_TELEGRAM_API_ID`, `PARTNER_TELEGRAM_API_HASH` плюс `PARTNER_TELEGRAM_SESSION` или `PARTNER_TELEGRAM_SESSION_FILE`. В обоих режимах нужны числовые chat ID в `telegram.allowedChatIds` и `telegram.enabled: true`.
