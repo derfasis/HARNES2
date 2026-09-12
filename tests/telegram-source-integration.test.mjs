@@ -114,3 +114,29 @@ test('existing Scheduler tick reads injected source then creates operator review
   h.scheduler.sourceReaders=[{sourceId,transport:{readDifference:async input=>{reads++;assert.equal(input.pts,10);return page();}}}];
   await h.tick();assert.equal(reads,1);assert.equal(h.cards().length,1);assert.equal(h.detail().executable,false);noEffects(h);
 });
+
+test('generic source.ingest cannot bypass a Telegram reader checkpoint',async t=>{
+  const h=await telegramHarness(t);await applyTelegramDifference(h.service,sourceId,page());
+  const native=JSON.parse(h.store.get("SELECT payload_json FROM events WHERE kind='source.message'").payload_json);
+  const raw={...native,message_id:'message:2',version:999,text:'Unattested replacement'};
+  for(const actor of [{kind:'operator'},{kind:'channel',sourceId}])
+    await assert.rejects(h.command('source.ingest',raw,actor),{code:'SOURCE_TRANSPORT_INGEST_REQUIRED'});
+  h.config.opportunity.telegramSources=[];
+  await assert.rejects(h.command('source.ingest',raw),{code:'SOURCE_TRANSPORT_INGEST_REQUIRED'});
+  assert.equal(h.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='source.message'").n,1);
+  assert.equal(h.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='source.telegram.update'").n,1);
+  assert.equal(h.store.get("SELECT json_extract(cursor,'$.pts') AS pts FROM channel_offsets WHERE channel='telegram-source-v0'").pts,11);
+  assert.equal(h.calls,0);noEffects(h);
+});
+
+test('generic fixture source ingestion stays available outside Telegram transport scope',async t=>{
+  const h=harness(t);await h.ingest();await h.tick();
+  assert.equal(h.cards().length,1);assert.equal(h.detail().executable,false);noEffects(h);
+});
+
+test('configured Telegram source cannot be populated through generic ingest before bootstrap',async t=>{
+  const h=harness(t);h.config.opportunity.allowedSourceRefs=[sourceId];
+  h.config.opportunity.telegramSources=[{sourceId}];
+  await assert.rejects(h.command('source.ingest',source({source_id:sourceId})),{code:'SOURCE_TRANSPORT_INGEST_REQUIRED'});
+  assert.equal(h.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='source.message'").n,0);noEffects(h);
+});
