@@ -1,5 +1,118 @@
 # Audit report: HARNES2 read-only source intake v0
 
+## Independent acceptance in the restored HARNES2 environment
+
+**READY WITH CONDITIONS for the bounded offline intake prerequisite, NOT live
+Telegram monitoring or multi-process deployment.** The Astra environment report
+below is historical; its blocked suites were independently executed here, without
+substitute validators, live Telegram or model/API calls.
+
+### Provenance and environment
+
+- Exact base / unchanged main: `1809a2ca646a5b70969c37f37077fa38deb29d1b`.
+- Imported Astra HEAD: `ca0bd0ae025cbf5f5e81258feb642b662411b3c2`.
+- Imported tree: `5a1e7582a51b0e5e238235c4607fcac49f4789b9`.
+- Bundle verified and imported once; patch was NOT applied. All artifact sizes
+  and hashes in the manifest, and all seven SHA256SUMS entries, matched.
+- All six Astra commits preserved; no rebase, squash or merge into main.
+- Node 24.18.1, Ajv 8.17.1, telegram 2.26.22, project Python 3.11.15.
+- Hermes pinned checkout: `4810074d73d9419dc82545202d595507a73f4f0e`.
+  The project `.venv` loads the actual Hermes credential pool; `uv pip check`
+  confirms all 98 installed packages are compatible. Standard `uv sync --frozen
+  --offline --no-dev --extra mcp --extra messaging --python 3.11` removed four
+  non-lock S3 extras; no locked version upgrades or reinstalls. A second dry-run
+  reports "Would make no changes"; upstream lock and package lock unchanged.
+
+### Independently reproduced bug and fix
+
+**Generic `source.ingest` bypassed transactional Telegram intake.** An operator
+or source-scoped channel actor could write an arbitrary message/version under a
+configured Telegram source while its checkpoint was current. That write had no
+native update receipt and did not advance pts, yet `sourceContextState` would
+accept it using the existing transport-health gate.
+
+Fix commit: `b3ba4bc43b7e71190c0d2e66412fb8c1bf1f9eaa`.
+The command boundary now rejects generic ingestion when a reader binding OR a
+durable source checkpoint exists, including after binding revocation. The reader
+still calls `ingestSource` inside the same transaction as receipts and checkpoint.
+Unmanaged operator/fixture sources retain their previous behavior. This is a
+command-boundary guard, not a sandbox against arbitrary trusted in-process code.
+
+Three regression checks cover operator/channel attempts, revocation and unchanged
+pts/receipt counts; unchanged generic fixture flow; and attempts before bootstrap.
+The rejection regression first failed on Astra production code with "Missing
+expected rejection", then passed with the fix. No cosmetic refactor or new layer.
+
+### Verification results
+
+| Command / scope | Result |
+|---|---|
+| `npm test` on imported Astra HEAD, before fixes | 198/198 PASS |
+| `npm test` after fix | 201/201 PASS |
+| `node --test tests/telegram-source.test.mjs` | 51/51 PASS |
+| `node --test tests/telegram-source-integration.test.mjs` | 11/11 PASS: all 8 original real-stack scenarios + 3 regressions |
+| `node --test tests/harnes2-regression.test.mjs` | 27/27 PASS: Router fixtures, Conversation Brain, approvals, disabled Telegram/runtime |
+| `node --test tests/opportunity-projection.test.mjs` | 17/17 PASS |
+| Consumer + consumer UI test files | 34/34 PASS |
+| `node --test tests/opportunity-pipeline.test.mjs` | 30/30 PASS |
+| Source-ingestion + opportunity-runtime test files | 31/31 PASS |
+| `npm run test:credentials` | 5/5 PASS, actual Hermes pool and in-memory failover |
+| `npm run build` | PASS: 47 JavaScript/JSON + 6 Python files |
+
+All final suites: zero failures, cancelled tests, skips and todos. Focused counts
+are subsets of the full Node total, not additional independent product scenarios.
+The real-stack tests use production BusinessService/SQLite/Router validators/
+Projection/Consumer/Scheduler with deterministic model-shaped outputs and synthetic
+reader envelopes. They do NOT test semantic model accuracy or raw MTProto mapping.
+
+### Boundary audit
+
+The entire 14-file Astra diff was reviewed, plus the minimal command-boundary fix.
+Account/channel scope binds even empty responses; typed decimal author IDs prevent
+user/channel collisions; unknown/broadcast authors are not inferred humans.
+Reply/thread IDs are peer-scoped, missing/cross-peer ancestry stays unresolved.
+Native pts sequences, fingerprints, overlap/replay checks, edits, known/unknown
+deletes and tombstones are transactional with the cursor. Rollback fault tests
+cover invalid later updates, receipt insertion and checkpoint persistence.
+Integrity collisions/TooLong remain latched across poll/restart. Health gates block
+disconnected, partial, expired and revoked sources; edited/deleted evidence stales
+old captures/cards. This is trusted-reader consistency, NOT live Telegram proof.
+
+Prompt-injection text remains source data; existing exact-span/author/version and
+authority validators remain unchanged. Review tasks have constant non-executable
+instructions and cannot be approved/retried, listed as agent work, or used as agent
+context. `contact_permission=false`, `allowed_effects=[]`; no approvals or sends
+are created. New reader imports no Telegram client/session/network/send/model API;
+the server still injects no source readers. Both default and effective local config:
+`automatic=false`, `runtime.enabled=false`, `telegram.enabled=false`,
+`telegram.liveSending=false`, `telegramSources=[]`.
+
+Diff is zero for frozen Router module/schema/fixtures, Projection/schema, Consumer,
+Conversation Brain/context/assets, Hermes runtime/worker/credential adapter,
+legacy Telegram channels, contracts, dependencies and migrations. Only the existing
+Store recovery, scheduler/source gates and the scoped ingest guard are extended.
+
+### Conditions before actual live Telegram
+
+**Exactly one HARNES2 process per DB/session is required. NOT multi-process safe.**
+Independently verified using a temporary DB: while process A retained an open Store
+and a running inference claim, process B called existing `recover()` and changed
+A's claim to interrupted. This is a demonstrated production blocker, not an HA
+success test. No model or Telegram was involved; no lease/singleton layer added.
+
+Remaining live gates: a verified pinned raw MTProto mapper with complete ordered
+delta/unsupported-content handling; consistent bounded bootstrap watermark;
+TooLong/resnapshot reconciliation; peer permissions and processing authorization;
+session protection; singleton deployment; disconnect/FloodWait/backoff handling;
+retention/windowing/privacy erasure; authorized live failure tests. Existing
+1000-message/70000-byte limits and non-exactly-once billing remain. The shipped
+client research was not adopted as a dependency migration or legal clearance.
+
+Branch publication is allowed only after green final verification. Main remains
+unchanged; merging requires a separate owner command.
+
+## Astra Environment Report (Historical)
+
 Дата: 2026-09-12. Base SHA: `1809a2ca646a5b70969c37f37077fa38deb29d1b`.
 Final HEAD, полный список новых commits, SHA-256 файлов и verification logs выдаются
 в release manifest рядом с bundle/patch/source zip. Этот документ не содержит

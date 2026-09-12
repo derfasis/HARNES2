@@ -130,6 +130,9 @@ Added a bounded Telegram difference intake with transactional native receipts/ch
 identity/edit/delete normalization and transport freshness gating. This is NOT live Telegram
 monitoring: the raw MTProto client/mapper is not implemented or configured. Source readers
 are empty by default; old Telegram sending flags remain disabled.
+Independent acceptance: **READY WITH CONDITIONS** for offline intake only.
+Node 201/201, Python 5/5, build green; no live Telegram/model calls.
+See [independent audit and single-process requirement](docs/TELEGRAM_SOURCE_AUDIT_V0.md).
 See [runbook and honest verification limits](docs/TELEGRAM_SOURCE_RUNBOOK_V0.md),
 [pre-implementation decision](docs/TELEGRAM_SOURCE_SLICE_V0.md), and
 [ready-made client research](docs/TELEGRAM_CLIENT_RESEARCH_2026-09-12.md).

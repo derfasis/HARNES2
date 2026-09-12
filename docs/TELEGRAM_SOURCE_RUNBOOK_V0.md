@@ -1,5 +1,9 @@
 # Read-only Telegram source intake v0
 
+Independent local acceptance: **READY WITH CONDITIONS** for offline intake only.
+See [restored-environment audit and regression results](TELEGRAM_SOURCE_AUDIT_V0.md).
+The development-environment verification section below is the historical Astra run.
+
 ## Статус и граница результата
 
 Реализован и проверен на настоящем SQLite ограниченный слой приёма событий от
@@ -105,6 +109,10 @@ Channel identity нельзя связать с личной CRM conversation; �
 фиксируются в одной `BEGIN IMMEDIATE` транзакции. Возврат успеха является ACK. До него
 reader не должен продвигать свой durable cursor. SQLite failure откатывает весь batch.
 Отдельная failure-транзакция делает прежний checkpoint недостоверным.
+
+Generic `source.ingest` cannot populate a source owned by a Telegram reader binding
+or durable checkpoint, even after binding revocation. Use this transactional intake
+interface instead; generic operator/fixture sources outside that scope are unchanged.
 
 `version=pts`, не `edit_date` и не номер прибытия. Поэтому две правки за одну секунду
 не сливаются. В пределах страницы события сортируются по pts. Пропуск в pts_count,
