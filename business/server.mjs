@@ -66,7 +66,7 @@ export async function start() {
         runtime:runtimeReadiness(config), scheduler:scheduler.status(), telegram:telegram.readiness(),
         capabilities:readJson(path.join(ROOT,'partner/capabilities.json')),
         knowledge:fs.readdirSync(path.join(ROOT,'partner/knowledge')).filter(f=>f.endsWith('.json')).map(f=>readJson(path.join(ROOT,'partner/knowledge',f))),
-        configuration:{runtime_enabled:config.runtime.enabled,provider:config.runtime.provider,model:config.runtime.model,base_url:config.runtime.baseUrl, max_runs_per_day:config.runtime.maxRunsPerDay,daily_budget_usd:config.runtime.dailyBudgetUsd,timezone:config.scheduler.timezone},
+        configuration:{opportunity_automatic:config.opportunity.automatic===true,runtime_enabled:config.runtime.enabled,provider:config.runtime.provider,model:config.runtime.model,base_url:config.runtime.baseUrl, max_runs_per_day:config.runtime.maxRunsPerDay,daily_budget_usd:config.runtime.dailyBudgetUsd,timezone:config.scheduler.timezone},
         release:{version:'0.1.0',tests:'not_run_by_user_request',model_validation:'not_run'} });
       if (req.method === 'GET' && url.pathname.startsWith('/api/opportunity-captures/')) return send(200,service.opportunityCapture(decodeURIComponent(url.pathname.split('/').at(-1))));
       if (req.method === 'GET' && url.pathname.startsWith('/api/opportunities/')) return send(200,service.opportunityDetail(decodeURIComponent(url.pathname.split('/').at(-1))));

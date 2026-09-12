@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ROOT, readJson } from './config.mjs';
 import { hash } from './store.mjs';
-import { now } from './errors.mjs';
+import { now, ensure } from './errors.mjs';
 
 export function searchExperience(service, query = '', conversationId = null, limit = 5) {
   const terms = (query.match(/[\p{L}\p{N}]+/gu) ?? []).slice(0,12);
@@ -14,6 +14,7 @@ export function searchExperience(service, query = '', conversationId = null, lim
   return service.store.all(`SELECT ${projection} FROM lessons_fts JOIN lessons l ON l.rowid=lessons_fts.rowid WHERE l.partner_id=? AND l.status='active'${scope} AND lessons_fts MATCH ? ORDER BY rank LIMIT ?`, ...params, match, limit);
 }
 export function contextFor(service, conversationId = null, task = null) {
+  ensure(task?.kind !== 'opportunity_review', 'Opportunity review is not agent context', 409, 'candidate_not_executable');
   const profile = readJson(path.join(ROOT, 'partner/profile.json'));
   const identity = fs.readFileSync(path.join(ROOT, 'partner/identity.md'), 'utf8');
   const behavioralExamples = fs.readFileSync(path.join(ROOT, 'partner/behavioral_examples.md'), 'utf8');

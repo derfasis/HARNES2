@@ -3,6 +3,8 @@ import { AppError, ensure, requiredText, dateTime, now } from './errors.mjs';
 
 import { captureOpportunity, consumeOpportunity, opportunityDetail, opportunityCapture, OPPORTUNITY_TASK } from './opportunity-consumer.mjs';
 
+import { ingestSource } from './source-ingestion.mjs';
+
 const OUTCOMES = new Set(['qualified','call_proposed','call_accepted','call_booked','call_attended','no_show','joined','declined','business_value']);
 export class BusinessService {
   constructor(store, config) { this.store = store; this.config = config; this.tail = Promise.resolve(); this.telegramAccountId = null; }
@@ -43,15 +45,17 @@ export class BusinessService {
     requiredText(requestId, 'request_id', 150);
     ensure(p && typeof p === 'object' && !Array.isArray(p), 'payload должен быть объектом');
     const fingerprint = hash(JSON.stringify({ action, p, actor: actor.kind, run: actor.runId ?? null, scope: actor.conversationId ?? null }));
+    if (action === 'source.ingest') ensure(actor.kind === 'operator' || actor.kind === 'channel' && actor.sourceId === p.source_id, 'Источник вне области adapter', 403);
     const previous = this.store.get('SELECT * FROM command_receipts WHERE id=?', requestId);
     if (previous) { ensure(previous.fingerprint === fingerprint, 'request_id использован для другой операции', 409); return JSON.parse(previous.result_json); }
     const agentActions = new Set(['draft.create','fact.propose','lesson.propose','task.propose','capability.propose']);
-    ensure(actor.kind === 'operator' || (actor.kind === 'agent' && agentActions.has(action)) || (actor.kind === 'channel' && ['person.create','message.record'].includes(action)), 'Операция доступна только владельцу', 403);
+    ensure(actor.kind === 'operator' || (actor.kind === 'agent' && agentActions.has(action)) || (actor.kind === 'channel' && ['person.create','message.record','source.ingest'].includes(action)), 'Операция доступна только владельцу', 403);
     let conversationId = p.conversation_id ?? null;
     if (['person.permission','person.stop','person.resume','conversation.mode','conversation.takeover','conversation.release','message.record','draft.create','fact.propose','fact.create','outcome.record'].includes(action)) requiredText(conversationId, 'conversation_id', 100);
     if (conversationId) this.assertScope(actor, conversationId);
     let result;
     switch (action) {
+      case 'source.ingest': result = ingestSource(this, p); break;
       case 'opportunity.capture': result = captureOpportunity(this, p); break;
       case 'opportunity.consume': result = consumeOpportunity(this, p); break;
       case 'partner.update': {

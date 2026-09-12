@@ -57,6 +57,7 @@ function people(){
 function tasks(){return opportunityPanel()+panel('Очередь работы',`<div class="section-note">${esc(state.scheduler.reason??'Задачи выполняются по сроку, когда подключена модель. Предложения новых задач сначала рассматривает владелец.')}</div>${state.tasks.length?`<div class="table-wrap"><table class="data-table"><thead><tr><th>Задача</th><th>Срок</th><th>Состояние</th><th>Действия</th></tr></thead><tbody>${state.tasks.map(t=>`<tr><td>${esc(t.title)}<small>${esc(t.instructions)}</small></td><td>${date(t.due_at)}</td><td>${badge(t.status)}</td><td>${t.kind==='opportunity_review'?button('Разобрать','opportunity-detail',t.id):t.status==='proposed'?button('Принять','task-approve',t.id):''}${t.kind!=='opportunity_review'&&['failed','interrupted','blocked','cancelled'].includes(t.status)?button('Повторить','task-retry',t.id):''}${!['done','cancelled'].includes(t.status)?button('Отменить','task-cancel',t.id):''}</td></tr>`).join('')}</tbody></table></div>`:empty('Очередь свободна','Сформулируйте полезное действие для партнёра.')}`,`<div class="actions">${button('Обработать очередь','wake')}${button('+ Задача','task-new','','primary')}</div>`)}
 function opportunityPanel(){
   return panel('Opportunity: только разбор оператором',`<p>Snapshot, активный offer и один результат Router. Candidate не является одобрением или разрешением на контакт. Источники и offer задаются в config/local.json, раздел opportunity.</p>
+  <p>Автоматический source pipeline: ${state.configuration?.opportunity_automatic?'включён, только no-tool анализ':'выключен'}. Публичные source events обрабатываются отдельно от очереди agent tasks.</p>
   <div class="actions">${button('Импортировать snapshot','opportunity-capture')}${button('Сохранить результат Router','opportunity-consume')}</div>
   ${(state.opportunity_captures??[]).map(c=>`<div class="feature"><div>Snapshot ${esc(c.id)}<small>${esc(c.source)} · ${date(c.created_at)}</small></div>${button('Контекст Router','opportunity-context',String(c.id))}</div>`).join('')}`);
 }
@@ -72,6 +73,7 @@ function opportunityReviewMarkup(d){
   <h3>Неизвестно</h3><pre class="wrap">${esc([...o.opportunity.unknowns,...r.unknowns].join('\n')||'Не заявлено; это не доказательство полноты.')}</pre>
   <h3>Router: ${esc(r.decision)}</h3><p>${esc(r.strategy)}</p><p>${esc(r.reason)}</p>
   ${r.draft?`<h3>Только предложение текста</h3><pre class="wrap">${esc(r.draft.text)}</pre>`:''}
+  <p>Source identity: ${esc(d.source_identity?`${d.source_identity.source_id} / ${d.source_identity.message_id} / v${d.source_identity.version}`:'ручной snapshot')}<br>Display name (не identity): ${esc(d.source_identity?.display_name??'неизвестно')}<br>Duplicate state: ${esc(d.duplicate_state??'canonical_single_review')}</p>
   <p>Ключ дедупликации: ${esc(d.fingerprint)}<br>Задача: ${esc(d.task.id)} / ${esc(d.task.status)}</p>
   <details><summary>Полный проверяемый пакет: версии, критерии, ограничения, coverage</summary><pre class="code">${esc(JSON.stringify(d,null,2))}</pre></details>`;
 }
