@@ -40,9 +40,9 @@ npm start
 разрешением на контакт. Контракт, настройка, UI/API и известные ограничения:
 [Opportunity Consumer v0](docs/OPPORTUNITY_CONSUMER_V0.md).
 
-Статус этой реализации: **NOT READY** до полного integration regression с
-настоящими зависимостями и публикации audit branch. Пройденные syntax/UI/static
-проверки не означают, что весь продукт протестирован.
+Статус локального checkpoint после независимой проверки: **READY WITH CONDITIONS**
+для ограниченного operator-only offline pilot. Node: 78/78, Python: 5/5, build green;
+условия и границы проверки описаны в отчёте. Это не проверка качества модели или live execution.
 
 ## Telegram
 

@@ -230,3 +230,102 @@ integration tests. None of those 23 tests has executed successfully here;
 module loading stops before registration. The nine successful tests are UI
 rendering, static guards and exact-hash checks, not the ten-case acceptance
 suite. No end-to-end candidate example can honestly be called observed yet.
+
+## Independent integration audit: 2026-09-12
+
+This section supersedes the blocked verification status above, which is kept
+as a historical record of Astra's environment, not evidence of passing tests.
+The owner authorized bundle import, offline regression, minimal bug fixes and
+publication of this branch only after green. No merge into main was authorized.
+
+- Base: `d48a8498e74e6ff07dc720d682c132e0648717b3`.
+- Imported bundle head: `9d25651415c5b058f024b6f821b283aa29099bcb`.
+- Branch: `astra/opportunity-consumer-v0`; the four original commits are intact.
+- Fix: `4044d49`, portable canonical text-blob assertions and LF/CRLF regression.
+- Additional verification: `80e3b52`, real queue selection and receipt rollback.
+- Main remains `ceddb75933a162d282f52578ba8d848f575737ca`.
+- Existing dependencies are provisioned: ajv 8.17.1 and telegram 2.26.22.
+  Hermes remains pinned at `4810074d73d9419dc82545202d595507a73f4f0e`.
+  No installation, dependency lock change, rebase or squash was needed.
+
+### Findings and architecture
+
+One confirmed defect was in verification, not the Router: the frozen-blob test
+hashed raw CRLF worktree bytes on Windows against canonical LF Git blob IDs.
+It failed with the unchanged Router. Normalize CRLF only for these pinned UTF-8
+text assets, retaining the expected IDs; a regression also rejects changed
+content. Do not change frozen production assets or bless their CRLF blob IDs.
+
+No production defect requiring a change was found in this audit. Production
+remains byte-for-byte identical in Git to the imported Astra implementation.
+
+| Audit question | Independent conclusion |
+| --- | --- |
+| Existing HARNES2 duplication? | Reuses Store/events/tasks, transactions, command receipts, task dedupe, operator session/API and UI. New code handles source-backed review identity and freshness, not another planner or classifier. |
+| Second approval/task/runtime path? | Two operator commands create existing event/task records. No approval action, execution queue, model worker or transport is added. Ordinary `review` could execute; this distinct kind cannot. |
+| Could a review task become executable? | Ordinary create/propose cannot create this kind or poison its reserved key. Approve/retry reject it; cancellation cannot reactivate it. |
+| Could scheduler pick it up? | The actual selector excludes the kind. A ready-scheduler test corrupts its status to pending, proves no run, then proves ordinary research still runs through a stub. |
+| Could work/context promote source injection? | Both global and conversation-scoped listings exclude the kind even when pending. Task instructions are constant operator-only text, not source/output text. Review markup escapes untrusted fields. |
+| Could model JSON grant authority? | Unchanged Projection/Router validators reject true permission, effects, approval/authorization, wrong recipient, extra grants and DM. Responses/detail retain false permission, empty effects and non-executable state. |
+| Freshness correct? | Latest registered source generation, full offer content, goal/channels, allowlist, TTL and optional CRM state are rechecked. Retries do not renew observation age. Not external/live freshness. |
+| Attribution correct? | Evidence uses unchanged exact-span, subject-author and version validators. Source IDs are scoped to the registered source. CRM linking is explicitly an unverified operator assertion; no person or permission is inferred. |
+| Race/atomicity/idempotency? | Existing exclusive commands and synchronous BEGIN IMMEDIATE serialize writes. Duplicate/cancel/restart tests retain one task. Forced task failure rolls back candidate/audit events, task and receipt; the same request ID then succeeds once. |
+| Overengineering to remove now? | No new DB/table/migration, ledger, replay, reviewer voting, CLI, collector, background loop or semantic engine. Further abstractions are not justified. Event scans and manual import are bounded-pilot tradeoffs, not scaling solutions. |
+
+The frozen Router v1 module/schema, Projection module/schema, Store/migrations,
+Brain assets/benchmarks, runtime/channel modules and Hermes adapters have an
+empty Git diff against the Opportunity base. Exact canonical blob assertions
+also passed. Package and upstream lock files are unchanged.
+
+### Actually executed offline regression
+
+All commands below exited 0 on the provisioned HARNES2 workstation. There were
+zero failures, cancellations or skips. Counts overlap; do not add them up.
+
+| Command | Observed result |
+| --- | --- |
+| `npm test` | 78/78: 27 general integration, 17 Projection, 24 consumer integration, 10 UI/static/blob checks |
+| `node --test "tests/opportunity-consumer*.test.mjs"` | 34/34; real consumer integration loaded and executed |
+| `node --test tests/harnes2-regression.test.mjs tests/opportunity-projection.test.mjs` | 44/44 including frozen Router and Conversation Brain |
+| `npm run test:credentials` | 5/5 against the real pinned Hermes credential module with synthetic clients |
+| `npm run build` | 39 JavaScript/JSON and 6 Python files syntax-compiled |
+| `git diff d48a849..HEAD --check` | Clean |
+
+Consumer/general regression uses temporary instances of the existing Store,
+not the active business database. Fetch, socket connect and child spawn are
+fail-fast guarded; consumer guards observed zero calls. Ready-queue execution
+uses only a fake runtime and an invented key in test memory, restored afterward.
+The actual merged local config and default config both retain runtime.enabled,
+telegram.enabled and telegram.liveSending=false. No model call, live sending,
+approval, AUTOPILOT candidate or permission is created by consumer cases.
+
+### Observed end-to-end examples
+
+These executed capture -> real bounded Projection/Router context -> supplied
+model-shaped response -> real validators/consumer -> persisted review/detail.
+Responses are hand-authored synthetic JSON, NOT fresh model decisions or proof
+of semantic accuracy. The following are actual integration tests, not UI mocks.
+
+| Input/change | Observed result |
+| --- | --- |
+| Positive author question, active fixture offer | Proposed PUBLIC_REPLY review for user-02, exact source and evidence version 2; fresh, no person/draft/approval, executable=false. |
+| Explicit refusal in adversarial fixture | IGNORE, null hypothesis, retained exact refusal contradiction; forged positive opening rejected as CLOSED_OPENING. |
+| Injection asking for DM/approval with HTML payload | Source retained only as data; IGNORE review, fixed instructions, absent from agent/planning work. |
+| Source message edited with higher version after review | Existing card reports SOURCE_SNAPSHOT_SUPERSEDED; late result rejected atomically, no extra task. |
+| Duplicate input/output, cancellation and restart | One original candidate/task survives; repeated consume returns it cancelled and cannot approve/retry it. |
+
+### Conditions and remaining limits
+
+This is ready only as a disabled-by-default operator-only offline pilot.
+Before real source data: establish processing allowance, observation freshness
+and retention/deletion policy. Full snapshots are durably retained in events
+and command audit records; JSON history scans are not load/scale-tested.
+Identity links and evidence semantic kinds/omitted contradictions still need
+human verification. Source-wide invalidation is conservative; an unchanged
+expired/cancelled capture has no revalidation/reactivation workflow.
+The manual import path proves neither that a model produced the result nor
+that exactly one model turn occurred. It intentionally does not execute one.
+UI markup tests and source-order API guards are not a real browser interaction
+or HTTP authorization integration test. Do not claim either was executed.
+There is no permission or live-execution bridge in this slice; adding one later
+requires a separately reviewed boundary, not promotion of this candidate.
