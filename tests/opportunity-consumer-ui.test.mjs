@@ -97,7 +97,8 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     "business/opportunity-projection.mjs": "d45a580142a5ab7215fd0b1eaa351d3448c62416",
     "contracts/opportunity-projection.schema.json": "b53a1a7b05d89de66858f3e59bb14940918d1c96",
     "scripts/situation_router_worker.py": "4d85f3ee82d207181a3b64a03cde33654594d2cb",
-    "business/store.mjs": "b4044f433a81d5a8f5bed6cc09575abbacc6df72",
+    // Reviewed extension: invalidate read-only source checkpoints on process recovery.
+    "business/store.mjs": "c6f9014eedfbb0ad31c05a62a64c3342c7e0a215",
     "adapters/hermes/credentials.py": "2797bd89081eaf4a950178cec3d637015ee8f45f",
     "adapters/hermes/runner.py": "9a810243d5d58467bf2886ea76a4fc7c4f5f9911",
     // Deliberate v0 extension: existing worker, no-tool envelope tested in opportunity-runtime.test.mjs.

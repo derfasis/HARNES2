@@ -7,6 +7,40 @@ export const stable = value => JSON.stringify(value, (_, item) => item && typeof
   ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]])) : item);
 export const digest = value => hash(stable(value));
 const check = (condition, code) => ensure(condition, `Source pipeline: ${code}`, 409, code);
+// Dedicated read-only source cursors share the existing offset table, not private-chat offsets.
+export const SOURCE_CHECKPOINT_CHANNEL = 'telegram-source-v0';
+export function sourceCheckpoint(service, sourceId) {
+  const row = service.store.get('SELECT cursor FROM channel_offsets WHERE channel=? AND account_id=?',
+    SOURCE_CHECKPOINT_CHANNEL, digest([service.config.partnerId, sourceId]));
+  return row ? JSON.parse(row.cursor) : null;
+}
+export function validateSourceCheckpoint(state, p) {
+  const keys=['source_id','account_id','channel_id','policy_hash','baseline_hash','pts','phase','confirmed_at','reason'];
+  check(state && typeof state==='object' && !Array.isArray(state)
+    && Object.keys(state).length===keys.length && Object.keys(state).every(k=>keys.includes(k))
+    && state.source_id===p.sourceId && state.account_id===p.accountId && state.channel_id===p.channelId
+    && state.policy_hash===digest(p) && typeof state.baseline_hash==='string' && /^[a-f0-9]{64}$/.test(state.baseline_hash)
+    && Number.isInteger(state.pts) && state.pts>0 && state.pts<=2147483647
+    && ['current','catching_up','blocked'].includes(state.phase)
+    && (state.reason===null || typeof state.reason==='string' && state.reason.length<=100)
+    && (state.phase==='current' ? typeof state.confirmed_at==='string' && Number.isFinite(Date.parse(state.confirmed_at))
+      : state.confirmed_at===null), 'SOURCE_TRANSPORT_CORRUPT_CHECKPOINT');
+}
+function sourceTransportBoundary(service, sourceId) {
+  const bindings = service.config.opportunity.telegramSources ?? [];
+  const configured = Array.isArray(bindings) ? bindings.filter(p => p.sourceId === sourceId) : [];
+  const state = sourceCheckpoint(service, sourceId);
+  if (!configured.length && !state) return; // Existing operator/fixture sources remain unchanged.
+  check(configured.length === 1, 'SOURCE_TRANSPORT_POLICY_UNAVAILABLE');
+  const p = configured[0];
+  check(state && state.policy_hash === digest(p), 'SOURCE_TRANSPORT_NOT_READY');
+  validateSourceCheckpoint(state,p);
+  check(state.phase === 'current', 'SOURCE_TRANSPORT_NOT_CURRENT');
+  const age = Date.now() - Date.parse(state.confirmed_at);
+  check(Number.isInteger(p.maxLagSeconds) && p.maxLagSeconds > 0 && p.maxLagSeconds <= 3600
+    && Number.isFinite(age) && age >= 0 && age <= p.maxLagSeconds * 1000, 'SOURCE_TRANSPORT_STALE');
+}
+
 const validId = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,149}$/.test(value);
 const nullableId = value => value === null || validId(value);
 export function automaticBoundary(service) {
@@ -88,6 +122,7 @@ function authorBinding(service, message) {
 export function sourceContextState(service, eventId) {
   const event = sourceEvent(service, eventId), anchor = event.message;
   allowed(service, anchor.source_id);
+  sourceTransportBoundary(service, anchor.source_id);
   const rows = sourceRows(service, anchor.source_id);
   check(rows.length <= 1000, 'SOURCE_CAPACITY_EXCEEDED');
   check(rows.find(r => r.message.message_id === anchor.message_id)?.event_id === eventId, 'SOURCE_MESSAGE_SUPERSEDED');
