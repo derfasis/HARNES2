@@ -6,6 +6,10 @@ import { automaticBoundary, digest, ingestSource, finishSource, sourceRows, sour
 const UPDATE = 'source.telegram.update';
 const TOMBSTONE = 'source.telegram.tombstone';
 const MAX_PTS = 2147483647;
+const INTEGRITY = 'INTEGRITY_RECONCILIATION_REQUIRED';
+const integrityErrors = new Set(['TELEGRAM_PTS_COLLISION','SOURCE_VERSION_COLLISION','TELEGRAM_AUTHOR_IDENTITY_CHANGED',
+  'SOURCE_CREATION_TIME_CHANGED','SOURCE_UPDATE_TIME_ROLLBACK','TELEGRAM_MESSAGE_DELETED','TELEGRAM_DIFFERENCE_TOO_LONG',
+  'SOURCE_TRANSPORT_CORRUPT_CHECKPOINT',INTEGRITY]);
 const check = (ok, code) => ensure(ok, `Telegram source: ${code}`, 409, code);
 const integer = (n, min = 1) => Number.isInteger(n) && n >= min && n <= MAX_PTS;
 const numericId = x => typeof x === 'string' && /^[1-9][0-9]{0,18}$/.test(x);
@@ -39,6 +43,7 @@ function stateFor(service, p) {
   check(state, 'TELEGRAM_BOOTSTRAP_REQUIRED');
   check(state.policy_hash === digest(p), 'TELEGRAM_SOURCE_POLICY_CHANGED');
   validateSourceCheckpoint(state,p);
+  check(state.reason!==INTEGRITY,INTEGRITY);
   return state;
 }
 function receipt(service, p, pts) {
@@ -188,7 +193,8 @@ export function applyTelegramDifference(service,sourceId,page) {
       // If DB is unavailable even here, rethrow: never report success or advance transport.
       service.store.transaction(()=>{
         const s=sourceCheckpoint(service,sourceId);
-        if(s) writeState(service,p,{...s,phase:'blocked',confirmed_at:null,reason:'INTAKE_FAILED'});
+        if(s) writeState(service,p,{...s,phase:'blocked',confirmed_at:null,
+          reason:s.reason===INTEGRITY || integrityErrors.has(error.code)?INTEGRITY:'INTAKE_FAILED'});
       });
       throw error;
     }

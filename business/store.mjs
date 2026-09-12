@@ -37,7 +37,7 @@ export class Store {
   recover() {
     this.transaction(() => {
       // A persisted last-seen timestamp is not proof of connection after a restart.
-      this.run("UPDATE channel_offsets SET cursor=json_set(cursor,'$.phase','catching_up','$.confirmed_at',NULL,'$.reason','PROCESS_RESTART') WHERE channel='telegram-source-v0'");
+      this.run("UPDATE channel_offsets SET cursor=json_set(cursor,'$.phase','catching_up','$.confirmed_at',NULL,'$.reason','PROCESS_RESTART') WHERE channel='telegram-source-v0' AND json_extract(cursor,'$.reason') IS NOT 'INTEGRITY_RECONCILIATION_REQUIRED'");
       this.run("UPDATE delivery_attempts SET status='delivery_unknown',error='Service restarted during delivery',finished_at=? WHERE status='sending'", now());
       this.run("UPDATE drafts SET status='delivery_unknown' WHERE status='sending'");
       this.run("UPDATE tasks SET status='interrupted' WHERE status='running'");

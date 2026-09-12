@@ -29,7 +29,19 @@ async function harness(t,history=[]) {
   await bootstrapTelegramSource(service,sourceId,{pts:10,history});
   return {service,config,get store(){return store;},state:()=>sourceCheckpoint(service,sourceId),rows:()=>sourceRows(service,sourceId),
     apply:p=>applyTelegramDifference(service,sourceId,p),poll:transport=>pollTelegramSource(service,sourceId,transport),
-    restart:()=>{store.close();store=new Store(directory);store.recover();}};
+    restart:()=>{store.close();store=new Store(directory);store.recover();},
+    processRestart:()=>{
+      store.close();
+      try {
+        const script=`import {Store} from ${JSON.stringify(new URL('../business/store.mjs',import.meta.url).href)};
+          import {sourceContextState,sourceRows} from ${JSON.stringify(new URL('../business/source-ingestion.mjs',import.meta.url).href)};
+          const store=new Store(${JSON.stringify(directory)});store.recover();const service={store,config:${JSON.stringify(config)}};
+          try {sourceContextState(service,sourceRows(service,${JSON.stringify(sourceId)})[0].event_id);process.exitCode=2;}
+          catch(e){if(e.code!=='SOURCE_TRANSPORT_NOT_CURRENT')throw e;console.log('new process: source blocked until recovery');}
+          finally{store.close();}`;
+        return childProcess.execFileSync(process.execPath,['--input-type=module','-e',script],{encoding:'utf8'});
+      } finally {store=new Store(directory);}
+    }};
 }
 function noEffects(h){for(const table of ['persons','channel_identities','conversations','messages','tasks','runs','drafts','approvals','delivery_attempts','tool_calls'])assert.equal(h.store.get(`SELECT COUNT(*) AS n FROM ${table}`).n,0,table);}
 const current=h=>sourceContextState(h.service,h.rows().find(r=>r.message.operation==='upsert').event_id);
@@ -216,4 +228,20 @@ test('corrupt checkpoint identity cannot confirm health or select a read cursor'
   const h=await harness(t);await h.apply(page());h.store.run("UPDATE channel_offsets SET cursor=json_set(cursor,'$.account_id','888') WHERE channel=?",SOURCE_CHECKPOINT_CHANNEL);
   assert.throws(()=>current(h),/SOURCE_TRANSPORT_CORRUPT_CHECKPOINT/);
   let calls=0;await assert.rejects(h.poll({readDifference:async()=>{calls++;return empty(11);}}),/SOURCE_TRANSPORT_CORRUPT_CHECKPOINT/);assert.equal(calls,0);
+});
+test('integrity collision stays latched across empty page, poll and restart',async t=>{
+  const h=await harness(t);await h.apply(page());await assert.rejects(h.apply(page([update(11,{message:msg({text:'conflict'})})])),/TELEGRAM_PTS_COLLISION/);
+  assert.equal(h.state().reason,'INTEGRITY_RECONCILIATION_REQUIRED');h.restart();
+  await assert.rejects(h.apply(empty(11)),/INTEGRITY_RECONCILIATION_REQUIRED/);
+  let calls=0;await assert.rejects(h.poll({readDifference:async()=>{calls++;return empty(11);}}),/INTEGRITY_RECONCILIATION_REQUIRED/);
+  assert.equal(calls,0);assert.equal(h.state().phase,'blocked');
+});
+test('differenceTooLong cannot be cleared by fabricated empty confirmation',async t=>{
+  const h=await harness(t);await assert.rejects(h.apply({kind:'too_long'}),/TELEGRAM_DIFFERENCE_TOO_LONG/);
+  await assert.rejects(h.apply(empty()),/INTEGRITY_RECONCILIATION_REQUIRED/);
+});
+test('a real sequential second Node process recovers the on-disk checkpoint safely',async t=>{
+  const h=await harness(t);await h.apply(page());assert.match(h.processRestart(),/new process: source blocked/);
+  assert.equal(h.state().pts,11);assert.throws(()=>current(h),/SOURCE_TRANSPORT_NOT_CURRENT/);
+  await h.apply(empty(11));assert.equal(current(h).snapshot.messages.length,1);
 });
