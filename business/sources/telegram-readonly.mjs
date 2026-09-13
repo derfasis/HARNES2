@@ -407,6 +407,9 @@ export function applyTelegramDifference(service,sourceId,page,expectedPts=null,c
       check(reconciled || frozen.kind!=='empty' || frozen.updates.length===0 && frozen.from_pts===frozen.to_pts,'INVALID_TELEGRAM_EMPTY');
       check(!authorizationId || reconciled && frozen.from_pts===s.pts,'TELEGRAM_RECOVERY_TYPED_RESPONSE_REQUIRED');
       if(reconciled) {
+        // An Empty page carries no material state: after an integrity failure it
+        // cannot witness that a rolled-back edit/delete actually was applied.
+        check(!authorizationId || frozen.kind!=='empty','TELEGRAM_RECOVERY_EMPTY_UNPROVEN');
         if(!reconcile(service,p,s,frozen))return {disposition:'duplicate',pts:s.pts};
         const final=frozen.final && confirmCurrent()===true;
         writeState(service,p,{...s,pts:frozen.to_pts,phase:final?'current':'catching_up',

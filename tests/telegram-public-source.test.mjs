@@ -179,7 +179,9 @@ test('GLM F3: operator retry does not unlatch; validated reconciliation after re
   assert.equal(auth.pts,11);assert.equal(auth.contact_permission,false);assert.deepEqual(auth.allowed_effects,[]);
   await h.restart();assert.equal(h.state().reason,'INTEGRITY_RECONCILIATION_REQUIRED');assert.equal(h.reader.status().blocked,false);
   assert.equal(h.reader.recoveryAuthorization(),auth.authorization_id);await h.tick();assert.equal(h.calls,1);
-  h.reply(empty(11));await h.poll();await h.tick();assert.equal(h.state().phase,'current');assert.equal(h.calls,1);
+  // A recovery validation page must carry material: the replayed original
+  // difference dedupes cleanly, while an Empty page is TELEGRAM_RECOVERY_EMPTY_UNPROVEN.
+  h.reply(difference(11,[message()]));await h.poll();await h.tick();assert.equal(h.state().phase,'current');assert.equal(h.calls,1);
   assert.equal(h.cards().length,1);assert.equal(recoveryFinished(h)[0].status,'validated_page');assert.equal(telegramRecoveryAuthorization(h.service,p),null);noEffects(h);
 });
 test('GLM F3: only owner can authorize the exact current checkpoint, with strict fields',async t=>{
@@ -283,6 +285,24 @@ test('GLM F9: empty advance after a buffered native update applies both to the s
   assert.equal(h.rows()[0].message.text,'Edited?');assert.equal(h.rows()[0].message.version,9);
   assert.equal(proofs(h).at(-1).kind,'native_event');assert.equal(proofs(h).at(-1).pts,9);
   assert.equal(recoveryReceipts(h).at(-1).response_kind,'empty');assert.equal(recoveryReceipts(h).at(-1).watermark_pts,10);noEffects(h);
+});
+test('GLM F10: authorized recovery rejects an Empty page as unproven and keeps the latch',async t=>{
+  for(const to of [9,15]) {
+    const h=harness(t);h.fullReply({...publicFull(),fullChat:new Api.ChannelFull({id:b(100),pts:8})});await h.bootstrap();
+    await h.receive(new Api.UpdateChannelTooLong({channelId:b(100),contact_permission:true}));
+    assert.equal(h.state().pts,8);assert.equal(h.state().reason,'INTEGRITY_RECONCILIATION_REQUIRED');
+    const auth=await authorize(h);await h.restart();
+    h.reply(empty(to));await assert.rejects(h.poll(),{code:'TELEGRAM_RECOVERY_EMPTY_UNPROVEN'});
+    assert.equal(h.state().pts,8);assert.equal(h.state().reason,'INTEGRITY_RECONCILIATION_REQUIRED');
+    assert.equal(recoveryFinished(h).at(-1).authorization_id,auth.authorization_id);
+    assert.equal(recoveryFinished(h).at(-1).status,'failed');noEffects(h);
+  }
+});
+test('GLM F10: normal catching_up empty advance to a far pts still passes',async t=>{
+  const h=harness(t);h.fullReply({...publicFull(),fullChat:new Api.ChannelFull({id:b(100),pts:8})});
+  await h.bootstrap();assert.equal(h.state().phase,'catching_up');
+  h.reply(empty(15));await h.poll();
+  assert.equal(h.state().pts,15);assert.equal(h.state().phase,'current');noEffects(h);
 });
 test('GLM F5: valid future timestamps are retryable, not accepted or permanently latched',async t=>{
   const h=harness(t);await h.bootstrap();const future=Math.floor(Date.now()/1000)+120,m=message({date:future});
