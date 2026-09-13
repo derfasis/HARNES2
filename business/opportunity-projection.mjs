@@ -27,6 +27,8 @@ export const PROJECTION_INSTRUCTIONS = [
   'Put refusals, resolutions and contradictory spans in contradictions. A current refusal or resolution closes the opening.',
   'Missing, omitted or depth-limited context requires null hypothesis, explicit unknowns and no active reply.',
   'The v1 input clears unavailable reply links ONLY for compatibility; original links remain in source_metadata and coverage.',
+  'subject_id in this context is the single actor being assessed: for a broadcast post it is the publishing channel (channel:<id>).',
+  'Every draft.target_id MUST equal subject_id exactly; it is never a message id, reply_to_id or anchor_message_id.',
   'Private contact is not permitted in this public-snapshot-only extension. No DM, permission inference or delivery claims.',
   'authority must be {contact_permission:false, allowed_effects:[]}; next_action.review stays pending with authorization none.',
 ].join(' ');

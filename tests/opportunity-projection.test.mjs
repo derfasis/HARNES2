@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import Ajv from 'ajv';
-import { buildOpportunityContext, parseOpportunityOutput, validateOpportunityOutput } from '../business/opportunity-projection.mjs';
+import { buildOpportunityContext, parseOpportunityOutput, validateOpportunityOutput, PROJECTION_INSTRUCTIONS } from '../business/opportunity-projection.mjs';
 import { buildRouterContext, parseSituationOutput } from '../business/situation-router.mjs';
 
 const fixture = number => JSON.parse(fs.readFileSync(new URL(`../benchmarks/opportunity-projection-v0/case-0${number}.json`, import.meta.url), 'utf8'));
@@ -53,6 +53,15 @@ test('author-aware context retains ancestry and excludes unrelated thread', () =
 test('source allowance is required outside model output', () => {
   assert.throws(() => buildOpportunityContext(fixture(1)), /SOURCE_NOT_ALLOWED/);
   assert.throws(() => buildOpportunityContext(fixture(1), { allowedSourceRefs: ['another-source'] }), /SOURCE_NOT_ALLOWED/);
+});
+
+test('GLM F12: subject_id is exposed and the instructions pin the draft target rule', () => {
+  const context = prepare(1);
+  assert.equal(context.subject_id, context.input.message.author_id);
+  assert.match(PROJECTION_INSTRUCTIONS, /subject_id in this context is the single actor being assessed/);
+  assert.match(PROJECTION_INSTRUCTIONS, /broadcast post it is the publishing channel \(channel:<id>\)/);
+  assert.match(PROJECTION_INSTRUCTIONS, /Every draft\.target_id MUST equal subject_id exactly/);
+  assert.match(PROJECTION_INSTRUCTIONS, /never a message id, reply_to_id or anchor_message_id/);
 });
 
 test('source versions are unique latest snapshots, not a new event store', () => {

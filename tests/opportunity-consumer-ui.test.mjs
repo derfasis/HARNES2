@@ -94,7 +94,9 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
   const pinned = {
     "business/situation-router.mjs": "ef2a2b53f0cec4560920453c4ff5c1e3fd88df61",
     "contracts/situation-router.schema.json": "ee18ffd684545585c8868ebe424578774bd771a0",
-    "business/opportunity-projection.mjs": "d45a580142a5ab7215fd0b1eaa351d3448c62416",
+    // Draft-target guidance extension: the projection instructions now pin
+    // draft.target_id to subject_id for every draft (live 11c mismatch fix).
+    "business/opportunity-projection.mjs": "a5e9ac19202e6c7831f9b0bc4e8f76e7579742fb",
     "contracts/opportunity-projection.schema.json": "b53a1a7b05d89de66858f3e59bb14940918d1c96",
     "scripts/situation_router_worker.py": "4d85f3ee82d207181a3b64a03cde33654594d2cb",
     // Reviewed extension: invalidate read-only source checkpoints on process recovery.
