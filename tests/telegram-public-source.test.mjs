@@ -336,6 +336,138 @@ test('later native edit supersedes reconciled snapshot and stales exact old evid
   assert.equal(proofs(h).at(-1).kind,'native_event');assert.equal(proofs(h).at(-1).pts,12);assert.equal(proofs(h).at(-1).pts_count,1);
   assert.equal(h.service.opportunityDetail(old.id).freshness.fresh,false);assert.equal(h.cards().length,2);noEffects(h);
 });
+
+const zeroEdit=(pts=12,extra={})=>update(pts,'edit',{ptsCount:0,
+  message:message({message:'Edited question?',editDate:1767225600}),...extra});
+test('live regression: UpdateEditChannelMessage pts=8 pts_count=0 reconciles cursor 7 and message 5',async t=>{
+  const h=harness(t),post=message({id:5,post:true,fromId:null});
+  h.fullReply({...publicFull(),fullChat:new Api.ChannelFull({id:b(100),pts:5})});await h.bootstrap();
+  h.reply(difference(7,[post]));await h.poll();await h.tick();const old=h.cards()[0];
+  const edit=zeroEdit(8,{message:message({id:5,post:true,fromId:null,message:'Edited question?',editDate:1767225600})});
+  const mapped=mapTelegramUpdate(p,edit);assert.equal(mapped.pts,8);assert.equal(mapped.pts_count,0);
+  await h.receive(edit);assert.equal(h.state().pts,7);assert.equal(h.state().phase,'catching_up');assert.equal(h.reader.status().blocked,false);
+  h.reply(difference(8,[],[edit]));await h.poll();await h.tick();
+  const proof=proofs(h).at(-1);assert.equal(proof.contract_version,'telegram-reconciliation-v2');assert.equal(proof.kind,'reconciled_event');
+  assert.equal(proof.pts,8);assert.equal(proof.pts_count,0);assert.equal(proof.from_pts,7);assert.equal(proof.watermark_pts,8);
+  assert.equal(proof.batch_id,recoveryReceipts(h).at(-1).batch_id);assert.equal(h.rows()[0].message.message_id,'message:5');
+  assert.equal(h.rows()[0].message.author_id,'channel:100');assert.equal(h.rows()[0].message.text,'Edited question?');
+  assert.equal(h.state().pts,8);assert.equal(h.state().phase,'current');assert.equal(h.reader.status().buffered,0);
+  assert.equal(h.service.opportunityDetail(old.id).freshness.fresh,false);assert.equal(h.calls,2);assert.equal(h.cards().length,2);noEffects(h);
+});
+test('zero-count redelivery and restart preserve one source revision, inference and card',async t=>{
+  const h=harness(t);await recovered(h);const edit=zeroEdit(),page=mapChannelDifference(p,11,difference(12,[],[edit]));
+  h.reply(difference(12,[],[edit]));await h.poll();await h.tick();const row=h.rows()[0],proofCount=proofs(h).length;
+  await h.receive(edit);await h.poll();await h.tick();assert.equal(h.reader.status().buffered,0);
+  assert.equal((await applyTelegramDifference(h.service,sourceId,page)).disposition,'duplicate');
+  await h.restart();assert.equal(h.state().phase,'catching_up');await h.poll();await h.tick();
+  assert.equal(h.rows()[0].event_id,row.event_id);assert.equal(h.rows()[0].observed_at,row.observed_at);
+  assert.equal(proofs(h).length,proofCount);assert.equal(h.calls,2);assert.equal(h.cards().length,2);noEffects(h);
+});
+test('zero-count edits of different messages may share a difference watermark',async t=>{
+  const h=harness(t);await h.bootstrap();h.reply(difference(11,[message(),message({id:2,fromId:new Api.PeerUser({userId:b(20)})})]));
+  await h.poll();await h.tick();await h.tick();
+  const edits=[zeroEdit(),zeroEdit(12,{message:message({id:2,fromId:new Api.PeerUser({userId:b(20)}),message:'Second edit?',editDate:1767225600})})];
+  for(const e of edits)await h.receive(e);assert.equal(h.reader.status().buffered,2);
+  h.reply(difference(12,[],edits));await h.poll();await h.tick();await h.tick();
+  assert.equal(h.rows().length,2);assert.equal(h.state().pts,12);assert.equal(h.reader.status().buffered,0);
+  assert.equal(proofs(h).filter(v=>v.kind==='reconciled_event').length,2);
+  assert.equal(new Set(proofs(h).filter(v=>v.kind==='reconciled_event').map(v=>v.batch_id)).size,1);
+  h.reply(difference(12,[],[...edits].reverse()));await h.poll();await h.tick();
+  assert.equal(h.calls,4);assert.equal(h.cards().length,4);noEffects(h);
+});
+test('zero count at the current cursor is applied once without advancing the cursor',async t=>{
+  const h=harness(t);await recovered(h);const edit=zeroEdit(11);await h.receive(edit);
+  h.reply(difference(11,[],[edit]));await h.poll();await h.tick();assert.equal(h.state().pts,11);
+  assert.equal(h.rows()[0].message.text,'Edited question?');assert.equal(h.state().phase,'current');
+  await h.poll();await h.tick();assert.equal(h.calls,2);assert.equal(h.cards().length,2);noEffects(h);
+});
+test('zero-count delete preserves a tombstone, stale evidence and no deletion inference',async t=>{
+  const h=harness(t);await recovered(h);const old=h.cards()[0],del=update(12,'delete',{ptsCount:0});
+  await h.receive(del);h.reply(difference(12,[],[del]));await h.poll();await h.tick();
+  assert.equal(h.rows()[0].message.operation,'delete');assert.equal(proofs(h).at(-1).pts_count,0);
+  assert.equal(h.service.opportunityDetail(old.id).freshness.fresh,false);assert.equal(h.calls,1);assert.equal(h.cards().length,1);
+  await h.restart();await h.poll();await h.tick();assert.equal(h.calls,1);assert.equal(h.rows()[0].message.operation,'delete');noEffects(h);
+});
+test('zero-count recovery rolls back source/proof/receipt/cursor before ACK and retries after restart',async t=>{
+  const h=harness(t);await recovered(h);const old=h.rows()[0],edit=zeroEdit();h.reply(difference(12,[],[edit]));
+  const run=h.store.run.bind(h.store);let fail=true,acks=0;
+  h.store.run=(sql,...args)=>{if(fail && sql.startsWith('INSERT INTO channel_offsets') && JSON.parse(args[2]).pts===12){fail=false;throw Error('zero commit fault');}return run(sql,...args);};
+  const ack=h.reader.acknowledge.bind(h.reader);h.reader.acknowledge=pts=>{acks++;return ack(pts);};
+  await assert.rejects(h.poll(),/zero commit fault/);assert.equal(acks,0);assert.equal(h.state().pts,11);assert.equal(h.rows()[0].event_id,old.event_id);
+  assert.equal(proofs(h).length,1);assert.equal(h.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='source.telegram.update'").n,0);
+  await h.restart();await h.poll();await h.tick();assert.equal(h.state().pts,12);assert.equal(h.calls,2);assert.equal(h.cards().length,2);noEffects(h);
+});
+test('crash after zero-count durable commit before ACK cannot duplicate inference on restart',async t=>{
+  const h=harness(t);await recovered(h);h.reply(difference(12,[],[zeroEdit()]));
+  h.reader.acknowledge=()=>{throw Error('zero post-commit crash');};await assert.rejects(h.poll(),/zero post-commit crash/);
+  const row=h.rows()[0];assert.equal(h.state().pts,12);await h.restart();await h.poll();await h.tick();await h.tick();
+  assert.equal(h.rows()[0].event_id,row.event_id);assert.equal(h.calls,2);assert.equal(h.cards().length,2);noEffects(h);
+});
+test('operator recovery of the live zero-count blocker retries the same cursor without reset',async t=>{
+  const h=harness(t);await recovered(h);await h.receive(new Api.UpdateChannelTooLong({channelId:b(100),contact_permission:true}));
+  assert.equal(h.state().reason,'INTEGRITY_RECONCILIATION_REQUIRED');const auth=await authorize(h);await h.restart();
+  h.reply(difference(12,[],[zeroEdit()]));await h.poll();await h.tick();assert.equal(h.state().phase,'current');assert.equal(h.state().pts,12);
+  assert.equal(recoveryFinished(h).at(-1).authorization_id,auth.authorization_id);assert.equal(recoveryFinished(h).at(-1).status,'validated_page');
+  assert.equal(h.calls,2);noEffects(h);
+});
+test('conflicting zero-count receipt and same-target same-watermark updates remain latched',async t=>{
+  for(const first of [true,false]) {
+    const h=harness(t);await recovered(h);const a=zeroEdit(),different=zeroEdit(12,{message:message({message:'Conflict?',editDate:1767225600})});
+    if(first){h.reply(difference(12,[],[a]));await h.poll();}
+    const row=h.rows()[0];h.reply(difference(12,[],first?[different]:[a,different]));
+    await assert.rejects(h.poll(),{code:first?'TELEGRAM_PTS_COLLISION':'TELEGRAM_MAPPING_INTEGRITY'});
+    assert.equal(h.state().reason,'INTEGRITY_RECONCILIATION_REQUIRED');assert.equal(h.rows()[0].event_id,row.event_id);noEffects(h);
+  }
+});
+test('zero-count ingress cannot fabricate coverage when the server difference omits its edit',async t=>{
+  const h=harness(t);await recovered(h);const old=h.rows()[0];await h.receive(zeroEdit());h.reply(empty(12));
+  await assert.rejects(h.poll(),mappingFailure);assert.equal(h.rows()[0].event_id,old.event_id);assert.equal(h.state().pts,11);
+  assert.equal(h.state().reason,'INTEGRITY_RECONCILIATION_REQUIRED');noEffects(h);
+});
+test('zero-count malformed edit/delete, unknown updates and v1 envelopes remain fail closed',async t=>{
+  for(const e of [zeroEdit(12,{ptsCount:-1}),zeroEdit(12,{ptsCount:0.5}),zeroEdit(12,{pts:undefined}),
+    zeroEdit(12,{message:message()}),zeroEdit(12,{contact_permission:true}),update(12,'delete',{ptsCount:0,messages:[]})])
+    assert.throws(()=>mapTelegramUpdate(p,e),mappingFailure);
+  assert.throws(()=>mapChannelDifference(p,11,difference(12,[],[zeroEdit(13)])),mappingFailure);
+  assert.throws(()=>mapChannelDifference(p,11,difference(12,[],[new Api.UpdateReadChannelInbox({channelId:b(100),pts:12,maxId:1,stillUnreadCount:0})])),mappingFailure);
+  const h=harness(t);await recovered(h);const page=mapChannelDifference(p,11,difference(12,[],[zeroEdit()]));
+  await assert.rejects(applyTelegramDifference(h.service,sourceId,{...page,contract_version:'telegram-reconciliation-v1'}));
+  assert.equal(h.rows()[0].message.version,1);assert.equal(h.state().pts,11);assert.notEqual(h.state().phase,'current');noEffects(h);
+});
+test('old zero-count replay cannot justify an unrelated watermark or positive PTS gap',()=>{
+  assert.throws(()=>mapChannelDifference(p,12,difference(20,[],[zeroEdit(12)])),{code:'TELEGRAM_UNSUPPORTED_WATERMARK_ADVANCE'});
+  assert.throws(()=>mapChannelDifference(p,12,difference(20,[],[zeroEdit(11),update(20)])),mappingFailure);
+  assert.throws(()=>mapChannelDifference(p,11,difference(20,[],[zeroEdit(12)])),{code:'TELEGRAM_UNSUPPORTED_WATERMARK_ADVANCE'});
+});
+test('zero-count no-op does not renew evidence or reclassify native origin',async t=>{
+  const h=harness(t),m=message({editDate:1767225600});await h.bootstrap();h.reply(difference(11,[],[update(11,'new',{message:m})]));
+  await h.poll();await h.tick();const row=h.rows()[0],proofCount=proofs(h).length;
+  h.reply(difference(12,[],[zeroEdit(12,{message:m})]));await h.poll();await h.tick();
+  assert.equal(h.rows()[0].event_id,row.event_id);assert.equal(h.rows()[0].observed_at,row.observed_at);
+  assert.equal(proofs(h).length,proofCount);assert.equal(proofs(h).at(-1).kind,'native_event');assert.equal(h.calls,1);noEffects(h);
+});
+test('later positive-count native edit/delete supersedes zero-count recovery normally',async t=>{
+  const h=harness(t);await recovered(h);h.reply(difference(12,[],[zeroEdit()]));await h.poll();await h.tick();
+  const old=h.cards().at(-1),edit=update(13,'edit',{message:message({message:'Later native edit?',editDate:1767225600})});
+  await h.receive(edit);h.reply(difference(13,[],[edit]));await h.poll();await h.tick();assert.equal(proofs(h).at(-1).kind,'native_event');
+  assert.equal(proofs(h).at(-1).pts_count,1);assert.equal(h.service.opportunityDetail(old.id).freshness.fresh,false);
+  const del=update(14,'delete');await h.receive(del);h.reply(difference(14,[],[del]));await h.poll();await h.tick();
+  assert.equal(h.rows()[0].message.operation,'delete');assert.equal(h.calls,3);assert.equal(h.cards().length,3);noEffects(h);
+});
+test('zero-count recovery partial page commits progress but cannot infer before final reconciliation',async t=>{
+  const h=harness(t);await recovered(h);h.reply(new Api.updates.ChannelDifference({pts:12,final:false,newMessages:[],otherUpdates:[zeroEdit()],chats:[],users:[]}));
+  await h.poll();await h.tick();assert.equal(h.state().pts,12);assert.equal(h.state().phase,'catching_up');assert.equal(h.calls,1);
+  h.reply(empty(12));await h.poll();await h.tick();assert.equal(h.calls,2);assert.equal(h.cards().length,2);noEffects(h);
+});
+test('positive and zero-count updates sharing PTS keep separate receipts and conflicting targets fail closed',async t=>{
+  const h=harness(t);await recovered(h);const native=update(12,'new',{message:message({id:2,fromId:new Api.PeerUser({userId:b(20)})})});
+  await h.receive(native);await h.receive(zeroEdit());h.reply(difference(12,[],[native,zeroEdit()]));await h.poll();
+  assert.equal(h.reader.status().buffered,0);assert.equal(h.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='source.telegram.update'").n,2);
+  await h.receive(native);await h.receive(zeroEdit());assert.equal(h.reader.status().buffered,0);noEffects(h);
+  const other=harness(t);await recovered(other);const old=other.rows()[0];other.reply(difference(12,[],[update(12,'delete'),zeroEdit()]));
+  await assert.rejects(other.poll(),{code:'TELEGRAM_SNAPSHOT_CONFLICT'});assert.equal(other.rows()[0].event_id,old.event_id);
+  assert.equal(other.state().reason,'INTEGRITY_RECONCILIATION_REQUIRED');noEffects(other);
+});
 test('native delete supersedes snapshot with tombstone and never runs inference for deletion',async t=>{
   const h=harness(t);await recovered(h);const old=h.cards()[0],del=update(12,'delete');await h.receive(del);
   h.reply(difference(12,[],[del]));await h.poll();await h.tick();assert.equal(h.rows()[0].message.operation,'delete');

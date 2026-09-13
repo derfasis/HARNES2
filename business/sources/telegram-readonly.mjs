@@ -10,6 +10,7 @@ const RECOVERY = 'source.telegram.reconciliation';
 const RECOVERY_REQUEST = 'source.telegram.recovery.requested';
 const RECOVERY_FINISHED = 'source.telegram.recovery.finished';
 export const TELEGRAM_RECONCILIATION = 'telegram-reconciliation-v1';
+export const TELEGRAM_COUNTERLESS = 'telegram-reconciliation-v2';
 const MAX_PTS = 2147483647;
 const INTEGRITY = 'INTEGRITY_RECONCILIATION_REQUIRED';
 const integrityErrors = new Set(['TELEGRAM_PTS_COLLISION','SOURCE_VERSION_COLLISION','TELEGRAM_AUTHOR_IDENTITY_CHANGED',
@@ -52,10 +53,12 @@ function stateFor(service, p, authorizationId=null) {
   check(state.reason!==INTEGRITY || authorizationId && telegramRecoveryAuthorization(service,p)===authorizationId,INTEGRITY);
   return state;
 }
-function receipt(service, p, pts) {
+export const telegramUpdateKey = u => u.pts_count===0 ? digest([u.pts,u.kind,u.message?.id??[...u.message_ids].sort((a,b)=>a-b)]) : u.pts;
+function receipt(service, p, pts, updateKey=null) {
   return service.store.get(`SELECT payload_json FROM events WHERE partner_id=? AND kind=? AND actor='system'
-    AND json_extract(payload_json,'$.source_id')=? AND json_extract(payload_json,'$.pts')=? LIMIT 1`,
-  service.config.partnerId, UPDATE, p.sourceId, pts);
+    AND json_extract(payload_json,'$.source_id')=? AND json_extract(payload_json,'$.pts')=?
+    AND (json_extract(payload_json,'$.update_key')=? OR ? IS NULL AND json_extract(payload_json,'$.pts_count')>0) LIMIT 1`,
+  service.config.partnerId, UPDATE, p.sourceId, pts,updateKey,updateKey);
 }
 export { policy as telegramSourcePolicy, receipt as telegramUpdateReceipt };
 export function telegramRecoveryAuthorization(service,p) {
@@ -137,26 +140,29 @@ function latestProof(service,p,eventId) {
   service.config.partnerId,PROOF,p.sourceId,eventId);
   return row ? JSON.parse(row.payload_json) : null;
 }
-function saveMessage(service,p,m,pts,ptsCount) {
-  const old=sourceRows(service,p.sourceId).find(r=>r.message.message_id===`message:${m.id}`)?.message;
+function saveMessage(service,p,m,pts,ptsCount,recovery=null) {
+  const row=sourceRows(service,p.sourceId).find(r=>r.message.message_id===`message:${m.id}`),old=row?.message;
   // Evidence revisions are application-local, not Telegram per-message PTS.
   const version=Math.max(pts,(old?.version??0)+1);
   const normalized = normalizeTelegramMessage(p,m,version);
   check(!deleted(service,p,normalized.message_id), 'TELEGRAM_MESSAGE_DELETED');
   check(!old || old.author_id===normalized.author_id, 'TELEGRAM_AUTHOR_IDENTITY_CHANGED');
+  if(recovery && old && digest(old)===digest({...normalized,version:old.version}))return;
   const saved=ingestSource(service,normalized);
-  proof(service,p,saved.source_event_id,{kind:'native_event',pts,pts_count:ptsCount,content_fingerprint:digest(m)});
+  proof(service,p,saved.source_event_id,{kind:'native_event',...recovery,pts,pts_count:ptsCount,content_fingerprint:digest(m)});
   return saved;
 }
-function saveUpdate(service,p,u) {
+function saveUpdate(service,p,u,recovery=null) {
   fields(u,['kind','pts','pts_count','message','message_ids','channel_id','metadata_type','metadata_fingerprint']);
-  check(integer(u.pts) && integer(u.pts_count) && u.channel_id === p.channelId, 'INVALID_TELEGRAM_UPDATE');
+  check(integer(u.pts) && (integer(u.pts_count) || recovery && u.pts_count===0 && ['edit','delete'].includes(u.kind))
+    && u.channel_id === p.channelId, 'INVALID_TELEGRAM_UPDATE');
   check(['new','edit','delete','metadata'].includes(u.kind), 'UNSUPPORTED_TELEGRAM_UPDATE');
   if(u.kind==='metadata')validateMetadata(u);
   else if (u.kind !== 'delete') {
     check(u.metadata_type===undefined && u.metadata_fingerprint===undefined,'UNSUPPORTED_TELEGRAM_FIELDS');
     check(u.message_ids === undefined, 'UNSUPPORTED_TELEGRAM_FIELDS');
-    saveMessage(service,p,u.message,u.pts,u.pts_count);
+    check(!recovery || u.message?.edit_date!=null,'INVALID_TELEGRAM_UPDATE');
+    saveMessage(service,p,u.message,u.pts,u.pts_count,recovery);
   } else {
     check(u.metadata_type===undefined && u.metadata_fingerprint===undefined,'UNSUPPORTED_TELEGRAM_FIELDS');
     check(u.message === undefined && Array.isArray(u.message_ids) && u.message_ids.length > 0
@@ -171,12 +177,13 @@ function saveUpdate(service,p,u) {
       // Unknown deletes stay native tombstones, never fabricate source identity or time.
       if (previous && previous.operation !== 'delete') {
         const saved=ingestSource(service,{...previous,version:Math.max(u.pts,previous.version+1),operation:'delete',text:null});
-        proof(service,p,saved.source_event_id,{kind:'native_event',pts:u.pts,pts_count:u.pts_count,operation:'delete'});
+        proof(service,p,saved.source_event_id,{kind:'native_event',...recovery,pts:u.pts,pts_count:u.pts_count,operation:'delete'});
       }
     }
   }
   service.store.event(service.config.partnerId,null,UPDATE,'system',
     {source_id:p.sourceId,pts:u.pts,pts_count:u.pts_count,kind:u.kind,fingerprint:digest(u),
+      ...(recovery?{update_key:telegramUpdateKey(u),proof_kind:'reconciled_event',batch_id:recovery.batch_id}:{}),
       ...(u.kind==='metadata'?{proof_kind:'native_event',metadata_type:u.metadata_type,content_basis:'plain_text_only'}:{})});
 }
 function validateMetadata(u) {
@@ -192,20 +199,24 @@ export function telegramRecoveryCoverage(service,p,pts,ptsCount=1) {
   service.config.partnerId,RECOVERY,p.sourceId,pts-ptsCount,pts);
   if(!row)return false;
   const r=JSON.parse(row.payload_json),{batch_id,...body}=r;
-  check(r.contract_version===TELEGRAM_RECONCILIATION && r.account_id===p.accountId && r.channel_id===p.channelId
+  check([TELEGRAM_RECONCILIATION,TELEGRAM_COUNTERLESS].includes(r.contract_version) && r.account_id===p.accountId && r.channel_id===p.channelId
     && integer(r.from_pts) && integer(r.watermark_pts) && batch_id===digest(body)
     && r.watermark_pts<=sourceCheckpoint(service,p.sourceId)?.pts,'TELEGRAM_SNAPSHOT_CONFLICT');
   return true;
 }
 function recoveryBody(p,page) {
-  return {contract_version:TELEGRAM_RECONCILIATION,source_id:p.sourceId,account_id:p.accountId,channel_id:p.channelId,
+  return {contract_version:page.contract_version,source_id:p.sourceId,account_id:p.accountId,channel_id:p.channelId,
     from_pts:page.from_pts,watermark_pts:page.to_pts,response_kind:page.kind,final:page.final,
     request:{method:'updates.getChannelDifference',filter:'channelMessagesFilterEmpty',force:false,limit:100},
-    response_fingerprint:page.response_fingerprint,snapshot_fingerprint:digest([...page.snapshots].sort((a,b)=>a.id-b.id))};
+    response_fingerprint:page.response_fingerprint,snapshot_fingerprint:digest([...page.snapshots].sort((a,b)=>a.id-b.id)),
+    ...(page.contract_version===TELEGRAM_COUNTERLESS?{recovered_fingerprint:digest([...page.recovered_updates].sort((a,b)=>telegramUpdateKey(a).localeCompare(telegramUpdateKey(b))))}:{})};
 }
 function reconcile(service,p,s,page) {
   check(Array.isArray(page.snapshots) && page.snapshots.length<=100,'INVALID_TELEGRAM_DIFFERENCE');
   check(typeof page.response_fingerprint==='string' && /^[a-f0-9]{64}$/.test(page.response_fingerprint),'INVALID_TELEGRAM_DIFFERENCE');
+  const recovered=page.recovered_updates??[];
+  check(Array.isArray(recovered) && recovered.length<=100 && page.updates.length+recovered.length<=100
+    && (page.contract_version===TELEGRAM_COUNTERLESS ? page.kind==='difference' && recovered.length>0 : page.recovered_updates===undefined),'INVALID_TELEGRAM_DIFFERENCE');
   const body=recoveryBody(p,page),batchId=digest(body);
   const previous=service.store.get(`SELECT id FROM events WHERE partner_id=? AND kind=? AND actor='system'
     AND json_extract(payload_json,'$.batch_id')=?`,service.config.partnerId,RECOVERY,batchId);
@@ -218,6 +229,7 @@ function reconcile(service,p,s,page) {
     check(!snapshots.has(m.id),'TELEGRAM_SNAPSHOT_CONFLICT');snapshots.set(m.id,m);
   }
   check(page.kind!=='empty' || snapshots.size===0,'INVALID_TELEGRAM_EMPTY');
+  const recoveredCoverage=recovered.some(u=>u.pts>page.from_pts && u.pts<=page.to_pts);
   const updates=[...page.updates].sort((a,b)=>a.pts-b.pts),seen=new Map();let cursor=page.from_pts;
   for(const u of updates) {
     check(integer(u.pts) && integer(u.pts_count) && u.pts<=page.to_pts && u.pts-u.pts_count>=0,'INVALID_TELEGRAM_PTS');
@@ -237,15 +249,44 @@ function reconcile(service,p,s,page) {
       continue;
     }
     check(u.pts-u.pts_count>=cursor,'TELEGRAM_PTS_GAP');
-    if(!snapshots.size)check(u.pts-u.pts_count===cursor,'TELEGRAM_PTS_GAP');cursor=u.pts;
+    if(!snapshots.size && !recoveredCoverage)check(u.pts-u.pts_count===cursor,'TELEGRAM_PTS_GAP');cursor=u.pts;
     saveUpdate(service,p,u);
   }
+  // Zero-count difference updates carry material state, not a native event interval.
+  // Dedup them by scoped target as multiple updates may share one watermark.
+  const recoveredSeen=new Map(),targets=new Set();
+  for(const u of [...recovered].sort((a,b)=>a.pts-b.pts)) {
+    fields(u,['kind','pts','pts_count','message','message_ids','channel_id']);
+    check(integer(u.pts) && u.pts_count===0 && ['edit','delete'].includes(u.kind) && u.pts<=page.to_pts,'INVALID_TELEGRAM_PTS');
+    check(u.channel_id===p.channelId,'INVALID_TELEGRAM_UPDATE');
+    if(u.kind==='edit'){check(u.message_ids===undefined && u.message?.edit_date!=null,'INVALID_TELEGRAM_UPDATE');normalizeTelegramMessage(p,u.message,1);}
+    else check(u.message===undefined && Array.isArray(u.message_ids) && u.message_ids.length>0 && u.message_ids.length<=100
+      && u.message_ids.every(id=>integer(id)) && new Set(u.message_ids).size===u.message_ids.length,'INVALID_TELEGRAM_DELETE');
+    const key=telegramUpdateKey(u),fingerprint=digest(u);
+    if(recoveredSeen.has(key)){check(recoveredSeen.get(key)===fingerprint,'TELEGRAM_PTS_COLLISION');continue;}
+    recoveredSeen.set(key,fingerprint);
+    for(const id of u.message ? [u.message.id] : u.message_ids) {
+      check(!targets.has(`${u.pts}:${id}`),'TELEGRAM_PTS_COLLISION');targets.add(`${u.pts}:${id}`);
+      const last=updates.filter(v=>v.message?.id===id || v.message_ids?.includes(id)).at(-1);
+      check(!last || last.pts<u.pts || last.pts===u.pts && last.message && u.message
+        && digest(last.message)===digest(u.message),'TELEGRAM_SNAPSHOT_CONFLICT');
+    }
+    const old=receipt(service,p,u.pts,key);
+    if(old){check(JSON.parse(old.payload_json).fingerprint===fingerprint,'TELEGRAM_PTS_COLLISION');continue;}
+    if(historical || u.pts<page.from_pts) {
+      check(telegramRecoveryCoverage(service,p,u.pts,0),'TELEGRAM_UNVERIFIED_REPLAY');validateHistoricalUpdate(service,p,u);
+      service.store.event(service.config.partnerId,null,UPDATE,'system',{source_id:p.sourceId,pts:u.pts,pts_count:0,kind:u.kind,
+        fingerprint,update_key:key,proof_kind:'reconciled_event',batch_id:batchId,disposition:'covered_historical_event'});
+    } else saveUpdate(service,p,u,{contract_version:TELEGRAM_COUNTERLESS,kind:'reconciled_event',
+      from_pts:page.from_pts,watermark_pts:page.to_pts,batch_id:batchId});
+  }
   if(historical)return false;
-  if(!snapshots.size)check(cursor===page.to_pts,'TELEGRAM_UNACCOUNTED_PTS');
+  if(!snapshots.size)check(cursor===page.to_pts || recovered.some(u=>u.pts===page.to_pts && u.pts>page.from_pts),'TELEGRAM_UNACCOUNTED_PTS');
   // A returned snapshot is final material state at the response watermark, not
   // another event placed arbitrarily among native edit/delete updates.
   for(const [id,m] of snapshots) {
-    const last=updates.filter(u=>u.pts>page.from_pts && (u.message?.id===id || u.message_ids?.includes(id))).at(-1);
+    const last=[...updates.filter(u=>u.pts>page.from_pts),...recovered].sort((a,b)=>a.pts-b.pts)
+      .filter(u=>u.message?.id===id || u.message_ids?.includes(id)).at(-1);
     check(!last || last.message && digest(last.message)===digest(m),'TELEGRAM_SNAPSHOT_CONFLICT');
     const old=sourceRows(service,p.sourceId).find(r=>r.message.message_id===`message:${id}`);
     const normalized=normalizeTelegramMessage(p,m,(old?.message.version??0)+1);
@@ -339,10 +380,10 @@ export function applyTelegramDifference(service,sourceId,page,expectedPts=null,c
     const p=policy(service,sourceId);
     try { return service.store.transaction(()=>{
       check(stillOwned()===true,'TELEGRAM_READER_RETIRED');
-      const s=stateFor(service,p,authorizationId); fields(frozen,['kind','account_id','channel_id','from_pts','to_pts','final','updates','contract_version','snapshots','response_fingerprint']);bounded(frozen);
+      const s=stateFor(service,p,authorizationId); fields(frozen,['kind','account_id','channel_id','from_pts','to_pts','final','updates','contract_version','snapshots','response_fingerprint','recovered_updates']);bounded(frozen);
       const reconciled=frozen.contract_version!==undefined;
-      check(reconciled ? frozen.contract_version===TELEGRAM_RECONCILIATION
-        : frozen.snapshots===undefined && frozen.response_fingerprint===undefined,'INVALID_TELEGRAM_DIFFERENCE');
+      check(reconciled ? [TELEGRAM_RECONCILIATION,TELEGRAM_COUNTERLESS].includes(frozen.contract_version)
+        : frozen.snapshots===undefined && frozen.response_fingerprint===undefined && frozen.recovered_updates===undefined,'INVALID_TELEGRAM_DIFFERENCE');
       check(frozen.kind!=='too_long','TELEGRAM_DIFFERENCE_TOO_LONG');
       check(frozen.account_id===p.accountId && frozen.channel_id===p.channelId,'TELEGRAM_RESPONSE_SCOPE_MISMATCH');
       check(expectedPts===null || frozen.from_pts===expectedPts,'TELEGRAM_RESPONSE_CURSOR_MISMATCH');

@@ -50,6 +50,51 @@ events. Without snapshots this slice still requires contiguous native proof;
 an unexplained watermark jump is rejected, including an opaque empty advance.
 This is a deliberate conservative supported-subset restriction.
 
+### Zero-count difference edit/delete extension
+
+The controlled live smoke exposed `UpdateEditChannelMessage(pts=8, pts_count=0)`
+in `other_updates`, returned for durable cursor 7. Zero is preserved; it is not
+replaced by one or treated as a contiguous event interval. Official Telegram
+updates semantics permits zero counts; TDLib processes channel difference
+material updates before setting the response's continuation PTS.
+
+`telegram-reconciliation-v2` explicitly adds `recovered_updates` for supported
+zero-count edits/deletes from the actual scoped normal difference. Ordinary
+positive-count pages keep v1 unchanged. The native-only v0 envelope remains
+strict and cannot use zero to skip a native gap. Zero-count new-message/WebPage
+variants remain unsupported in this narrow slice.
+
+Live zero-count ingress is bounded and invalidates health for reconciliation,
+not a permanent malformed-data latch. It cannot advance a cursor or mutate a
+source on its own. The server delta must contain the exact compatible update
+(or a previously verified receipt); omitted/conflicting proof still latches.
+
+A v2 mutation has `kind: reconciled_event`, its genuine `pts` and `pts_count: 0`,
+plus `from_pts`, `watermark_pts` and `batch_id`. These PTS fields are real TL
+fields, NOT claimed event-interval coverage. The existing recovery batch proves
+the applied server delta; source versions, receipts, batch and cursor remain one
+atomic commit. With no snapshots, an advancing terminal watermark must match
+the last positive-count event or a fresh returned zero-count update. Historical
+zero-count updates alone cannot justify a new gap/advance.
+
+Zero-count receipts use `(source, pts, kind, scoped target)` plus an exact
+content fingerprint, since distinct messages may share one PTS. Positive-count
+receipts keep their existing per-PTS collision checks. Conflicting same-target
+updates at one watermark fail closed. Redelivery, batch retry and restart do
+not allocate another source revision/inference/card. An identical-material
+zero-count update only receives a receipt; it does not renew evidence age or
+reclassify native-origin evidence. Explicit supported edits/deletes supersede
+prior snapshot/native material state, and ordinary later native mutations work
+without Consumer/Router changes.
+
+All public identity/content/ancestry/time validation, unknown-update rejection,
+DifferenceTooLong handling and operator-only fingerprinted INTEGRITY recovery
+remain intact. No DB migration, queue, sender capability or Router schema change.
+
+References: [Telegram update counters](https://core.telegram.org/api/updates),
+[channel difference continuation PTS](https://core.telegram.org/constructor/updates.channelDifference),
+[TDLib channel difference application](https://github.com/tdlib/td/blob/master/td/telegram/MessagesManager.cpp).
+
 All returned supported messages, proofs, native receipts, recovery receipt and
 cursor are committed in ONE existing synchronous transaction. ACK follows the
 durable commit. Failure before commit rolls them all back. Retry/restart uses

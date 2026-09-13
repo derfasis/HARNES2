@@ -1,6 +1,6 @@
 import { AppError } from '../errors.mjs';
 import { digest, sourceCheckpoint } from '../source-ingestion.mjs';
-import { bootstrapTelegramSource, disconnectTelegramSource, telegramSourcePolicy, telegramUpdateReceipt, telegramRecoveryCoverage, telegramRecoveryAuthorization } from './telegram-readonly.mjs';
+import { bootstrapTelegramSource, disconnectTelegramSource, telegramSourcePolicy, telegramUpdateReceipt, telegramUpdateKey, telegramRecoveryCoverage, telegramRecoveryAuthorization } from './telegram-readonly.mjs';
 import { Api, decimal, nativeCheck, nativeInt, mapTelegramUpdate, mapChannelDifference, mapTelegramControl } from './telegram-public-mapper.mjs';
 import { createRequire } from 'node:module';
 const { UpdateConnectionState }=createRequire(import.meta.url)('telegram/network');
@@ -33,7 +33,7 @@ export class TelegramPublicSourceReader {
   }
   #old(u) {
     if(this.#baseline!==null && u.pts<=this.#baseline) return true; // Explicit empty-history cutover.
-    const row=telegramUpdateReceipt(this.#service,this.#p,u.pts);
+    const row=telegramUpdateReceipt(this.#service,this.#p,u.pts,u.pts_count===0?telegramUpdateKey(u):null);
     return !!row && JSON.parse(row.payload_json).fingerprint===digest(u);
   }
   async #invalidate(integrity=false) {
@@ -58,9 +58,9 @@ export class TelegramPublicSourceReader {
       if(control){if(this.#control(control))await this.#invalidate();return;}
       const u=mapTelegramUpdate(this.#p,update),state=sourceCheckpoint(this.#service,this.#p.sourceId);
       if(state && u.pts<=state.pts && this.#old(u))return;
-      const old=this.#pending.get(u.pts);nativeCheck(!old || digest(old)===digest(u));
+      const key=telegramUpdateKey(u),old=this.#pending.get(key);nativeCheck(!old || digest(old)===digest(u));
       if(old)return;
-      nativeCheck(this.#pending.size<100);this.#pending.set(u.pts,u);
+      nativeCheck(this.#pending.size<100);this.#pending.set(key,u);
       this.#epoch++;await this.#invalidate();
     } catch(error){this.#epoch++;await this.#invalidate(error.code!=='TELEGRAM_CLOCK_SKEW');
       if(error.code==='TELEGRAM_CLOCK_SKEW' && sourceCheckpoint(this.#service,this.#p.sourceId))
@@ -84,7 +84,7 @@ export class TelegramPublicSourceReader {
       ()=>!this.#blocked,()=>this.ownsSource());
     nativeCheck(!this.#closed && !this.#blocked && this.#owns());
     this.#baseline=response.fullChat.pts;
-    for(const [pts] of this.#pending)if(pts<=this.#baseline)this.#pending.delete(pts);
+    for(const [key,u] of this.#pending)if(u.pts<=this.#baseline)this.#pending.delete(key);
     return result;
   }
   async #read(request) {
@@ -128,10 +128,10 @@ export class TelegramPublicSourceReader {
     }
   }
   confirmCurrent(pts=sourceCheckpoint(this.#service,this.#p.sourceId)?.pts) {return this.#final && this.#owns() && !this.#peerDirty && this.#watermark>=this.#ptsHint && pts===this.#watermark && !this.#closed && !this.#blocked && this.#confirmed!==null && this.#confirmed===this.#epoch
-    && ![...this.#pending.keys()].some(pts=>pts>this.#watermark) && this.#rpc.connected();}
+    && ![...this.#pending.values()].some(u=>u.pts>this.#watermark) && this.#rpc.connected();}
   acknowledge(pts) {
     nativeCheck(sourceCheckpoint(this.#service,this.#p.sourceId)?.pts===pts);
-    for(const [version,u] of this.#pending)if(version<=pts){nativeCheck(this.#old(u));this.#pending.delete(version);}
+    for(const [key,u] of this.#pending)if(u.pts<=pts){nativeCheck(this.#old(u));this.#pending.delete(key);}
   }
   status() {return {buffered:this.#pending.size,blocked:this.#blocked,closed:this.#closed,retry_at:this.#retryAt};}
   fault() {if(this.#closed || !this.#owns())return Promise.resolve();this.#epoch++;this.#confirmed=null;return this.#invalidate(true);}

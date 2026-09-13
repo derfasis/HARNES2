@@ -2,7 +2,7 @@ import { createRequire } from 'node:module';
 import { AppError } from '../errors.mjs';
 import { digest } from '../source-ingestion.mjs';
 import { hash } from '../store.mjs';
-import { normalizeTelegramMessage, TELEGRAM_RECONCILIATION } from './telegram-readonly.mjs';
+import { normalizeTelegramMessage, TELEGRAM_RECONCILIATION, TELEGRAM_COUNTERLESS, telegramUpdateKey } from './telegram-readonly.mjs';
 
 export const { Api } = createRequire(import.meta.url)('telegram');
 export const mappingError = () => new AppError('Raw Telegram delta lacks supported native evidence',409,'TELEGRAM_MAPPING_INTEGRITY');
@@ -81,7 +81,7 @@ export function mapTelegramUpdate(p,u) {
   }
   const kind=u instanceof Api.UpdateNewChannelMessage?'new':u instanceof Api.UpdateEditChannelMessage?'edit'
     :u instanceof Api.UpdateDeleteChannelMessages?'delete':null;
-  nativeCheck(kind && nativeInt(u.pts) && nativeInt(u.ptsCount) && u.ptsCount<=u.pts);
+  nativeCheck(kind && nativeInt(u.pts) && (nativeInt(u.ptsCount) || kind!=='new' && u.ptsCount===0) && u.ptsCount<=u.pts);
   noExtra(u,kind==='delete'?['channelId','pts','ptsCount','messages']:['message','pts','ptsCount']);
   if(kind==='delete') {
     nativeCheck(decimal(u.channelId)===p.channelId && Array.isArray(u.messages) && u.messages.length>0
@@ -89,6 +89,7 @@ export function mapTelegramUpdate(p,u) {
     return {kind,channel_id:p.channelId,pts:u.pts,pts_count:u.ptsCount,message_ids:[...u.messages]};
   }
   const message=mapTelegramMessage(p,u.message);
+  nativeCheck(u.ptsCount!==0 || message.edit_date!=null);
   try { normalizeTelegramMessage(p,message,u.pts); } catch(error) {throw normalizationError(error);}
   return {kind,channel_id:p.channelId,pts:u.pts,pts_count:u.ptsCount,message};
 }
@@ -101,36 +102,50 @@ export function mapChannelDifference(p,fromPts,response,native=[],verifiedOld=()
   const others=response instanceof Api.updates.ChannelDifference ? response.otherUpdates : [];
   nativeCheck(Array.isArray(messages) && messages.length<=100 && Array.isArray(others) && others.length<=100);
   const byPts=new Map();
-  const serverUpdates=[],controls=[];
+  const serverUpdates=[],recovered=[],controls=[];
   for(const u of others) {
     const control=mapTelegramControl(p,u);
-    if(control){controls.push(control);onControl(control);}else serverUpdates.push(mapTelegramUpdate(p,u));
+    if(control){controls.push(control);onControl(control);}else {
+      const mapped=mapTelegramUpdate(p,u);(mapped.pts_count===0?recovered:serverUpdates).push(mapped);
+    }
   }
-  nativeCheck(serverUpdates.every(u=>u.pts<=response.pts));
-  for(const u of [...native.filter(u=>u.pts<=response.pts),...serverUpdates]) {
+  nativeCheck([...serverUpdates,...recovered].every(u=>u.pts<=response.pts));
+  const counterless=new Map();
+  for(const u of recovered) {
+    const key=telegramUpdateKey(u),old=counterless.get(key);nativeCheck(!old || digest(old)===digest(u));counterless.set(key,u);
+  }
+  for(const u of native.filter(u=>u.pts_count===0 && u.pts<=response.pts)) {
+    const server=counterless.get(telegramUpdateKey(u));nativeCheck(verifiedOld(u) || server && digest(server)===digest(u));
+  }
+  for(const u of [...native.filter(u=>u.pts_count!==0 && u.pts<=response.pts),...serverUpdates]) {
     if(u.pts<=fromPts) {if(verifiedOld(u))continue;nativeCheck(coveredOld(u));}
     const old=byPts.get(u.pts); nativeCheck(!old || digest(old)===digest(u)); byPts.set(u.pts,u);
   }
   const updates=[...byPts.values()].sort((a,b)=>a.pts-b.pts);
-  nativeCheck(updates.length<=100);
+  nativeCheck(updates.length+counterless.size<=100);
+  const recoveredCoverage=[...counterless.values()].some(u=>u.pts>fromPts);
   let cursor=fromPts;
   for(const u of updates.filter(u=>u.pts>fromPts)) {
     nativeCheck(u.pts-u.pts_count>=cursor);
-    if(!messages.length)nativeCheck(u.pts-u.pts_count===cursor);cursor=u.pts;
+    if(!messages.length && !recoveredCoverage)nativeCheck(u.pts-u.pts_count===cursor);cursor=u.pts;
   }
-  if(!messages.length && cursor!==response.pts)throw new AppError('Unaccounted channel watermark advance',409,'TELEGRAM_UNSUPPORTED_WATERMARK_ADVANCE');
+  if(!messages.length && cursor!==response.pts && ![...counterless.values()].some(u=>u.pts===response.pts && u.pts>fromPts))
+    throw new AppError('Unaccounted channel watermark advance',409,'TELEGRAM_UNSUPPORTED_WATERMARK_ADVANCE');
   const snapshots=[],ids=new Set();
   // Telegram supplies one channel watermark for Message snapshots. Never assign
   // that watermark (or guessed increments) as an individual event's PTS.
   for(const m of messages) {
-    const wire=mapTelegramMessage(p,m),latest=updates.filter(u=>u.message?.id===wire.id || u.message_ids?.includes(wire.id)).at(-1);
+    const wire=mapTelegramMessage(p,m),latest=[...updates,...counterless.values()].sort((a,b)=>a.pts-b.pts)
+      .filter(u=>u.message?.id===wire.id || u.message_ids?.includes(wire.id)).at(-1);
     try{normalizeTelegramMessage(p,wire,1);}catch(error){throw normalizationError(error);}
     nativeCheck(!ids.has(wire.id));ids.add(wire.id);
     nativeCheck(!latest || latest.pts<=fromPts || latest.message && digest(latest.message)===digest(wire));
     snapshots.push(wire);
   }
-  return {contract_version:TELEGRAM_RECONCILIATION,kind:response instanceof Api.updates.ChannelDifference?'difference':'empty',
+  return {contract_version:counterless.size?TELEGRAM_COUNTERLESS:TELEGRAM_RECONCILIATION,kind:response instanceof Api.updates.ChannelDifference?'difference':'empty',
     account_id:p.accountId,channel_id:p.channelId,from_pts:fromPts,to_pts:response.pts,updates,snapshots,
+    ...(counterless.size?{recovered_updates:[...counterless.values()].sort((a,b)=>telegramUpdateKey(a).localeCompare(telegramUpdateKey(b)))}:{}),
     response_fingerprint:digest({constructor:response.className,pts:response.pts,final:response.final===true,
+      ...(counterless.size?{recovered_updates:[...counterless.values()].sort((a,b)=>telegramUpdateKey(a).localeCompare(telegramUpdateKey(b)))}:{}),
       snapshots:[...snapshots].sort((a,b)=>a.id-b.id),updates:[...new Map(serverUpdates.map(u=>[u.pts,u])).values()].sort((a,b)=>a.pts-b.pts),controls}),final:response.final===true};
 }
