@@ -36,6 +36,8 @@ function sourceTransportBoundary(service, sourceId) {
   check(state && state.policy_hash === digest(p), 'SOURCE_TRANSPORT_NOT_READY');
   validateSourceCheckpoint(state,p);
   check(state.phase === 'current', 'SOURCE_TRANSPORT_NOT_CURRENT');
+  const liveHealth = service.sourceTransportHealth?.get(sourceId);
+  check(!liveHealth || liveHealth() === true, 'SOURCE_TRANSPORT_DIRTY');
   const age = Date.now() - Date.parse(state.confirmed_at);
   check(Number.isInteger(p.maxLagSeconds) && p.maxLagSeconds > 0 && p.maxLagSeconds <= 3600
     && Number.isFinite(age) && age >= 0 && age <= p.maxLagSeconds * 1000, 'SOURCE_TRANSPORT_STALE');

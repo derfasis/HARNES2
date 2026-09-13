@@ -51,6 +51,7 @@ function receipt(service, p, pts) {
     AND json_extract(payload_json,'$.source_id')=? AND json_extract(payload_json,'$.pts')=? LIMIT 1`,
   service.config.partnerId, UPDATE, p.sourceId, pts);
 }
+export { policy as telegramSourcePolicy, receipt as telegramUpdateReceipt };
 function deleted(service,p,messageId) {
   return service.store.get(`SELECT id FROM events WHERE partner_id=? AND kind=? AND actor='system'
     AND json_extract(payload_json,'$.source_id')=? AND json_extract(payload_json,'$.message_id')=? LIMIT 1`,
@@ -122,9 +123,10 @@ function bounded(value) { check(Buffer.byteLength(JSON.stringify(value)) <= 1000
 
 // Explicit operator-approved starting point. Not a claim of complete Telegram history.
 // Call with bounded history read consistently at pts by the future transport.
-export function bootstrapTelegramSource(service, sourceId, baseline) {
+export function bootstrapTelegramSource(service, sourceId, baseline,confirmBaseline=()=>true,stillOwned=()=>true) {
   const frozen=structuredClone(baseline);
   return service.exclusive(()=>service.store.transaction(()=>{
+    check(stillOwned()===true,'TELEGRAM_READER_RETIRED');
     const p=policy(service,sourceId); fields(frozen,['pts','history']); bounded(frozen);
     check(integer(frozen.pts) && Array.isArray(frozen.history) && frozen.history.length<=100, 'INVALID_TELEGRAM_BASELINE');
     check(new Set(frozen.history.map(m=>m.id)).size===frozen.history.length,'DUPLICATE_BASELINE_MESSAGE');
@@ -135,8 +137,10 @@ export function bootstrapTelegramSource(service, sourceId, baseline) {
       const saved=saveMessage(service,p,message,frozen.pts);
       finishSource(service,saved.source_event_id,'bootstrap_context_only');
     }
+    const accepted=confirmBaseline()===true;
     const state={source_id:sourceId,account_id:p.accountId,channel_id:p.channelId,policy_hash:digest(p),
-      baseline_hash:fingerprint,pts:frozen.pts,phase:'catching_up',confirmed_at:null,reason:'BOOTSTRAP_REQUIRES_DIFFERENCE'};
+      baseline_hash:fingerprint,pts:frozen.pts,phase:accepted?'catching_up':'blocked',confirmed_at:null,
+      reason:accepted?'BOOTSTRAP_REQUIRES_DIFFERENCE':INTEGRITY};
     writeState(service,p,state);
     service.store.event(service.config.partnerId,null,'source.telegram.baseline','system',
       {source_id:sourceId,pts:frozen.pts,fingerprint,history_count:frozen.history.length,history_complete:false});
@@ -144,21 +148,26 @@ export function bootstrapTelegramSource(service, sourceId, baseline) {
   }));
 }
 
-export function disconnectTelegramSource(service,sourceId,reason='DISCONNECTED') {
+export function disconnectTelegramSource(service,sourceId,reason='DISCONNECTED',stillOwned=()=>true) {
   // Never persist raw provider errors, sessions or credentials.
   return service.exclusive(()=>service.store.transaction(()=>{
-    const p=policy(service,sourceId),s=stateFor(service,p);
-    writeState(service,p,{...s,phase:'catching_up',confirmed_at:null,reason:reason==='READ_FAILED'?'READ_FAILED':'DISCONNECTED'});
+    if(stillOwned()!==true)return;
+    const p=policy(service,sourceId),latched=sourceCheckpoint(service,sourceId);
+    if(latched?.reason===INTEGRITY){validateSourceCheckpoint(latched,p);return;}
+    const s=stateFor(service,p);
+    writeState(service,p,{...s,phase:reason===INTEGRITY?'blocked':'catching_up',confirmed_at:null,
+      reason:reason===INTEGRITY?INTEGRITY:reason==='READ_FAILED'?'READ_FAILED':'DISCONNECTED'});
   }));
 }
 
 // Durable ordered handoff. A page must account for ALL pts advances; opaque/unmapped
 // other_updates and DifferenceTooLong are deliberately rejected, never skipped.
-export function applyTelegramDifference(service,sourceId,page,expectedPts=null) {
+export function applyTelegramDifference(service,sourceId,page,expectedPts=null,confirmCurrent=()=>true,stillOwned=()=>true) {
   const frozen=structuredClone(page);
   return service.exclusive(()=>{
     const p=policy(service,sourceId);
     try { return service.store.transaction(()=>{
+      check(stillOwned()===true,'TELEGRAM_READER_RETIRED');
       const s=stateFor(service,p); fields(frozen,['kind','account_id','channel_id','from_pts','to_pts','final','updates']);bounded(frozen);
       check(frozen.kind!=='too_long','TELEGRAM_DIFFERENCE_TOO_LONG');
       check(frozen.account_id===p.accountId && frozen.channel_id===p.channelId,'TELEGRAM_RESPONSE_SCOPE_MISMATCH');
@@ -186,10 +195,13 @@ export function applyTelegramDifference(service,sourceId,page,expectedPts=null) 
       check(cursor===frozen.to_pts,'TELEGRAM_UNACCOUNTED_PTS');
       check(frozen.from_pts===s.pts || frozen.to_pts<=s.pts,'TELEGRAM_OVERLAPPING_PAGE');
       if(frozen.from_pts<s.pts) return {disposition:'duplicate',pts:s.pts};
-      writeState(service,p,{...s,pts:cursor,phase:frozen.final?'current':'catching_up',
-        confirmed_at:frozen.final?now():null,reason:frozen.final?null:'DIFFERENCE_NOT_FINAL'});
-      return {disposition:'applied',pts:cursor,phase:frozen.final?'current':'catching_up'};
+      // Optional native-reader attestation is synchronous, checked inside the commit.
+      const final=frozen.final && confirmCurrent()===true;
+      writeState(service,p,{...s,pts:cursor,phase:final?'current':'catching_up',
+        confirmed_at:final?now():null,reason:final?null:'DIFFERENCE_NOT_FINAL'});
+      return {disposition:'applied',pts:cursor,phase:final?'current':'catching_up'};
     }); } catch(error) {
+      if(stillOwned()!==true)throw error;
       // Separate failure transaction keeps the previous cursor but invalidates evidence.
       // If DB is unavailable even here, rethrow: never report success or advance transport.
       service.store.transaction(()=>{
@@ -206,14 +218,21 @@ export function applyTelegramDifference(service,sourceId,page,expectedPts=null) 
 // transport must supply a narrowed readDifference capability, not a full client.
 export async function pollTelegramSource(service,sourceId,transport) {
   check(transport && typeof transport.readDifference==='function','READ_DIFFERENCE_REQUIRED');
-  await disconnectTelegramSource(service,sourceId);
+  const stillOwned=()=>transport.ownsSource ? transport.ownsSource()===true : true;
+  check(stillOwned(),'TELEGRAM_READER_RETIRED');
+  await disconnectTelegramSource(service,sourceId,'DISCONNECTED',stillOwned);
   const p=policy(service,sourceId),s=stateFor(service,p);
   let page;
   try {
     page=await transport.readDifference(Object.freeze({accountId:p.accountId,channelId:p.channelId,pts:s.pts,limit:100}));
   } catch(error) {
-    await disconnectTelegramSource(service,sourceId,'READ_FAILED'); throw error;
+    await disconnectTelegramSource(service,sourceId,error.code==='TELEGRAM_MAPPING_INTEGRITY'
+      ?INTEGRITY:'READ_FAILED',stillOwned); throw error;
   }
   // An intake failure is not a transient read failure. Preserve its blocked state.
-  return applyTelegramDifference(service,sourceId,page,s.pts);
+  const result=await applyTelegramDifference(service,sourceId,page,s.pts,
+    ()=>transport.confirmCurrent ? transport.confirmCurrent(page.to_pts) : true,stillOwned);
+  // Native buffers may be released only AFTER the durable source/receipt/cursor commit.
+  if(transport.acknowledge) await transport.acknowledge(result.pts);
+  return result;
 }
