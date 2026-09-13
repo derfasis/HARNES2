@@ -102,7 +102,9 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     "adapters/hermes/credentials.py": "2797bd89081eaf4a950178cec3d637015ee8f45f",
     "adapters/hermes/runner.py": "9a810243d5d58467bf2886ea76a4fc7c4f5f9911",
     // Deliberate v0 extension: existing worker, no-tool envelope tested in opportunity-runtime.test.mjs.
-    "business/runtime.mjs": "f0b06df7ac4e5273bd91d1b1a8fdff3a93b9879b",
+    // Retry-budget extension: decision envelope raises maxIterations 1->2 so the pinned
+    // Hermes empty-response ladder can actually re-enter the loop after an empty response.
+    "business/runtime.mjs": "517e9284d5b5430957052202428f7fee9273b604",
     "business/channels/telegram.mjs": "1b4de6dc8c8465bed237375bd6295ab4dbfa2eda",
     "business/channels/telegram-mtproto.mjs": "e30171ab2a8bf83ba5cbc63de22c025288f99e01",
     "benchmarks/situation-router/README.md": "0da57bf3fcb53bbec5713f6a44c48654b16270b8",

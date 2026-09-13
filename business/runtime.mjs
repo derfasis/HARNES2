@@ -48,9 +48,13 @@ export class HermesAdapter {
         if (code !== 0 && !result.error) result.error = 'Hermes process exited unsuccessfully';
         finish(null, result);
       });
+      // Hermes' empty-response retry ladder re-enters the loop only while
+      // api_call_count < max_iterations, so a single-iteration decision run
+      // can never execute its builtin retry. The second iteration is exactly
+      // that one retry after an empty first response; attempts stay bounded.
       const envelope = decision
         ? { run_id: run.id, situation_id: context.input.situation_id, context, system_prompt: context.router_instructions,
-          model: { ...config.runtime, maxIterations: 1 }, tools: [] }
+          model: { ...config.runtime, maxIterations: 2 }, tools: [] }
         : { run_id: run.id, context, model: config.runtime, tools, business_url: `http://127.0.0.1:${config.server.port}` };
       child.stdin.end(JSON.stringify(envelope));
     });
