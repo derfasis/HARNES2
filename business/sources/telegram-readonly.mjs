@@ -291,7 +291,11 @@ function reconcile(service,p,s,page) {
       from_pts:page.from_pts,watermark_pts:page.to_pts,batch_id:batchId});
   }
   if(historical)return false;
-  if(!snapshots.size)check(cursor===page.to_pts || recovered.some(u=>u.pts===page.to_pts && u.pts>page.from_pts),'TELEGRAM_UNACCOUNTED_PTS');
+  // An Empty response whose pts exceeds the cursor is the server's attestation
+  // that the interval carries no supported content; no fake update/source is
+  // created, and the recovery receipt below is the durable proof of the advance.
+  if(!snapshots.size)check(cursor===page.to_pts || recovered.some(u=>u.pts===page.to_pts && u.pts>page.from_pts)
+    || page.kind==='empty' && page.to_pts>page.from_pts,'TELEGRAM_UNACCOUNTED_PTS');
   // A returned snapshot is final material state at the response watermark, not
   // another event placed arbitrarily among native edit/delete updates.
   for(const [id,m] of snapshots) {

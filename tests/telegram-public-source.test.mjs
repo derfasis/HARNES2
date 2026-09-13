@@ -249,9 +249,40 @@ test('GLM F1/F3: restart and operator recovery cannot forget unsafe full-peer me
     if(retry)assert.equal(recoveryFinished(h)[0].status,'failed');noEffects(h);
   }
 });
-test('GLM F4: opaque empty watermark advance is explicitly unsupported, never silently accepted',async t=>{
-  const h=harness(t);await h.bootstrap();h.reply(empty(20));await assert.rejects(h.poll(),{code:'TELEGRAM_UNSUPPORTED_WATERMARK_ADVANCE'});
-  assert.equal(h.state().pts,10);assert.equal(h.state().reason,'INTEGRITY_RECONCILIATION_REQUIRED');assert.equal(h.calls,0);noEffects(h);
+test('GLM F9: empty watermark advance is a server-attested cursor move with a durable receipt',async t=>{
+  const h=harness(t);await h.bootstrap();h.reply(empty(20));await h.poll();
+  assert.equal(h.state().pts,20);assert.equal(h.state().phase,'current');
+  const receipt=recoveryReceipts(h).at(-1);
+  assert.equal(receipt.response_kind,'empty');assert.equal(receipt.from_pts,10);assert.equal(receipt.watermark_pts,20);
+  assert.match(receipt.response_fingerprint,/^[a-f0-9]{64}$/);assert.equal(h.rows().length,0);
+  await h.poll();await h.tick();assert.equal(h.calls,0);noEffects(h);
+});
+test('GLM F9: unexplained advance of a non-empty difference still fails closed',async t=>{
+  const h=harness(t);await h.bootstrap();h.reply(difference(20,[],[]));
+  await assert.rejects(h.poll(),{code:'TELEGRAM_UNSUPPORTED_WATERMARK_ADVANCE'});
+  assert.equal(h.state().pts,10);assert.equal(h.state().reason,'INTEGRITY_RECONCILIATION_REQUIRED');noEffects(h);
+});
+test('GLM F9: exact 8→9 advance, multi-step jump, replay and restart stay idempotent',async t=>{
+  const h=harness(t);h.fullReply({...publicFull(),fullChat:new Api.ChannelFull({id:b(100),pts:8})});
+  await h.bootstrap();assert.equal(h.state().pts,8);
+  h.reply(empty(9));await h.poll();assert.equal(h.state().pts,9);assert.equal(h.state().phase,'current');
+  assert.equal(h.rows().length,0);
+  const page=mapChannelDifference(p,8,empty(9));
+  assert.equal((await applyTelegramDifference(h.service,sourceId,page)).disposition,'duplicate');
+  h.reply(empty(12));await h.poll();assert.equal(h.state().pts,12);assert.equal(h.state().phase,'current');
+  await h.restart();assert.equal(h.state().phase,'catching_up');
+  h.reply(empty(12));await h.poll();await h.tick();assert.equal(h.state().pts,12);assert.equal(h.state().phase,'current');
+  assert.equal(h.rows().length,0);noEffects(h);
+});
+test('GLM F9: empty advance after a buffered native update applies both to the server pts',async t=>{
+  const h=harness(t);h.fullReply({...publicFull(),fullChat:new Api.ChannelFull({id:b(100),pts:8})});
+  await h.bootstrap();const edit=update(9,'edit',{message:message({message:'Edited?',editDate:1767225600})});
+  await h.receive(edit);assert.equal(h.reader.status().buffered,1);
+  h.reply(empty(10));await h.poll();await h.tick();
+  assert.equal(h.state().pts,10);assert.equal(h.state().phase,'current');assert.equal(h.reader.status().buffered,0);
+  assert.equal(h.rows()[0].message.text,'Edited?');assert.equal(h.rows()[0].message.version,9);
+  assert.equal(proofs(h).at(-1).kind,'native_event');assert.equal(proofs(h).at(-1).pts,9);
+  assert.equal(recoveryReceipts(h).at(-1).response_kind,'empty');assert.equal(recoveryReceipts(h).at(-1).watermark_pts,10);noEffects(h);
 });
 test('GLM F5: valid future timestamps are retryable, not accepted or permanently latched',async t=>{
   const h=harness(t);await h.bootstrap();const future=Math.floor(Date.now()/1000)+120,m=message({date:future});

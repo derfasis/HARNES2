@@ -129,7 +129,11 @@ export function mapChannelDifference(p,fromPts,response,native=[],verifiedOld=()
     nativeCheck(u.pts-u.pts_count>=cursor);
     if(!messages.length && !recoveredCoverage)nativeCheck(u.pts-u.pts_count===cursor);cursor=u.pts;
   }
-  if(!messages.length && cursor!==response.pts && ![...counterless.values()].some(u=>u.pts===response.pts && u.pts>fromPts))
+  // An Empty response whose pts exceeds the cursor is the server's attestation
+  // that the interval carries no supported content; its pts becomes the cursor.
+  const emptyAdvance=response instanceof Api.updates.ChannelDifferenceEmpty && response.pts>fromPts;
+  if(!messages.length && cursor!==response.pts && !emptyAdvance
+    && ![...counterless.values()].some(u=>u.pts===response.pts && u.pts>fromPts))
     throw new AppError('Unaccounted channel watermark advance',409,'TELEGRAM_UNSUPPORTED_WATERMARK_ADVANCE');
   const snapshots=[],ids=new Set();
   // Telegram supplies one channel watermark for Message snapshots. Never assign
