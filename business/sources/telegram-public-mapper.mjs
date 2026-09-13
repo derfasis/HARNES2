@@ -1,7 +1,8 @@
 import { createRequire } from 'node:module';
 import { AppError } from '../errors.mjs';
 import { digest } from '../source-ingestion.mjs';
-import { normalizeTelegramMessage } from './telegram-readonly.mjs';
+import { hash } from '../store.mjs';
+import { normalizeTelegramMessage, TELEGRAM_RECONCILIATION } from './telegram-readonly.mjs';
 
 export const { Api } = createRequire(import.meta.url)('telegram');
 export const mappingError = () => new AppError('Raw Telegram delta lacks supported native evidence',409,'TELEGRAM_MAPPING_INTEGRITY');
@@ -20,6 +21,33 @@ function noExtra(value, allowed) {
     nativeCheck(allowed.includes(key) || content==null || content===false);
   }
 }
+export function mapTelegramControl(p,u) {
+  const refresh=u instanceof Api.UpdateChannel || u instanceof Api.UpdateChannelParticipant;
+  const hint=u instanceof Api.UpdateChannelTooLong;
+  const views=u instanceof Api.UpdateChannelMessageViews,forwards=u instanceof Api.UpdateChannelMessageForwards;
+  const typing=u instanceof Api.UpdateChannelUserTyping,read=u instanceof Api.UpdateChannelReadMessagesContents;
+  if(!refresh && !hint && !views && !forwards && !typing && !read)return null;
+  nativeCheck(decimal(u.channelId)===p.channelId);
+  noExtra(u,hint?['channelId','pts']:u instanceof Api.UpdateChannel?['channelId']
+    :refresh?['channelId','date','actorId','userId','prevParticipant','newParticipant','invite','qts','viaChatlist']
+    :views?['channelId','id','views']:forwards?['channelId','id','forwards']
+    :typing?['channelId','topMsgId','fromId','action']:['channelId','topMsgId','messages']);
+  if(hint)nativeCheck(u.pts==null || nativeInt(u.pts));
+  if(views || forwards)nativeCheck(nativeInt(u.id) && Number.isInteger(u.views??u.forwards)
+    && (u.views??u.forwards)>=0 && (u.views??u.forwards)<=2147483647);
+  if(typing || read)nativeCheck(u.topMsgId==null || nativeInt(u.topMsgId));
+  if(typing) {
+    nativeCheck(u.fromId instanceof Api.PeerUser || u.fromId instanceof Api.PeerChannel);
+    decimal(u.fromId.userId??u.fromId.channelId);
+    const Type=Api[u.action?.className];
+    nativeCheck(typeof Type==='function' && u.action instanceof Type && /^(SendMessage|SpeakingInGroupCall)/.test(u.action.className));
+  }
+  if(read)nativeCheck(Array.isArray(u.messages) && u.messages.length<=100 && u.messages.every(nativeInt));
+  if(u instanceof Api.UpdateChannelParticipant){decimal(u.actorId);decimal(u.userId);nativeCheck(nativeInt(u.date)
+    && Number.isInteger(u.qts) && u.qts>=0 && u.qts<=2147483647);}
+  return {kind:hint?'catch_up':refresh?'refresh_peer':'ignore',pts_hint:hint?u.pts??null:null};
+}
+function normalizationError(error) {return error.code==='TELEGRAM_CLOCK_SKEW' ? error : mappingError();}
 export function mapTelegramMessage(p,m) {
   nativeCheck(m instanceof Api.Message && m.peerId instanceof Api.PeerChannel && decimal(m.peerId.channelId)===p.channelId);
   noExtra(m,['id','peerId','fromId','post','message','date','editDate','replyTo','out',
@@ -42,9 +70,18 @@ export function mapTelegramMessage(p,m) {
     reply_to_top_id:r?.replyToTopId??null,reply_to_channel_id:r?.replyToPeerId ? decimal(r.replyToPeerId.channelId) : null};
 }
 export function mapTelegramUpdate(p,u) {
+  if(u instanceof Api.UpdateChannelWebPage) {
+    noExtra(u,['channelId','webpage','pts','ptsCount']);
+    nativeCheck(decimal(u.channelId)===p.channelId && nativeInt(u.pts) && nativeInt(u.ptsCount) && u.ptsCount<=u.pts);
+    nativeCheck([Api.WebPageEmpty,Api.WebPagePending,Api.WebPage,Api.WebPageNotModified].some(Type=>u.webpage instanceof Type));
+    let bytes;try{bytes=u.webpage.getBytes();}catch{throw mappingError();}
+    nativeCheck(bytes.length<=1000000);
+    return {kind:'metadata',channel_id:p.channelId,pts:u.pts,pts_count:u.ptsCount,
+      metadata_type:'webpage',metadata_fingerprint:hash(bytes)};
+  }
   const kind=u instanceof Api.UpdateNewChannelMessage?'new':u instanceof Api.UpdateEditChannelMessage?'edit'
     :u instanceof Api.UpdateDeleteChannelMessages?'delete':null;
-  nativeCheck(kind && nativeInt(u.pts) && nativeInt(u.ptsCount));
+  nativeCheck(kind && nativeInt(u.pts) && nativeInt(u.ptsCount) && u.ptsCount<=u.pts);
   noExtra(u,kind==='delete'?['channelId','pts','ptsCount','messages']:['message','pts','ptsCount']);
   if(kind==='delete') {
     nativeCheck(decimal(u.channelId)===p.channelId && Array.isArray(u.messages) && u.messages.length>0
@@ -52,32 +89,48 @@ export function mapTelegramUpdate(p,u) {
     return {kind,channel_id:p.channelId,pts:u.pts,pts_count:u.ptsCount,message_ids:[...u.messages]};
   }
   const message=mapTelegramMessage(p,u.message);
-  try { normalizeTelegramMessage(p,message,u.pts); } catch {throw mappingError();}
+  try { normalizeTelegramMessage(p,message,u.pts); } catch(error) {throw normalizationError(error);}
   return {kind,channel_id:p.channelId,pts:u.pts,pts_count:u.ptsCount,message};
 }
-export function mapChannelDifference(p,fromPts,response,native=[],verifiedOld=()=>false) {
+export function mapChannelDifference(p,fromPts,response,native=[],verifiedOld=()=>false,coveredOld=()=>false,onControl=()=>{}) {
   if(response instanceof Api.updates.ChannelDifferenceTooLong) return {kind:'too_long'};
   nativeCheck(response instanceof Api.updates.ChannelDifference || response instanceof Api.updates.ChannelDifferenceEmpty);
+  noExtra(response,['pts','final','timeout','newMessages','otherUpdates','chats','users']);
   nativeCheck(nativeInt(fromPts) && nativeInt(response.pts) && response.pts>=fromPts && native.length<=100);
   const messages=response instanceof Api.updates.ChannelDifference ? response.newMessages : [];
   const others=response instanceof Api.updates.ChannelDifference ? response.otherUpdates : [];
   nativeCheck(Array.isArray(messages) && messages.length<=100 && Array.isArray(others) && others.length<=100);
   const byPts=new Map();
-  for(const u of [...native.filter(u=>u.pts<=response.pts),...others.map(u=>mapTelegramUpdate(p,u))]) {
-    if(u.pts<=fromPts) {nativeCheck(verifiedOld(u));continue;}
+  const serverUpdates=[],controls=[];
+  for(const u of others) {
+    const control=mapTelegramControl(p,u);
+    if(control){controls.push(control);onControl(control);}else serverUpdates.push(mapTelegramUpdate(p,u));
+  }
+  nativeCheck(serverUpdates.every(u=>u.pts<=response.pts));
+  for(const u of [...native.filter(u=>u.pts<=response.pts),...serverUpdates]) {
+    if(u.pts<=fromPts) {if(verifiedOld(u))continue;nativeCheck(coveredOld(u));}
     const old=byPts.get(u.pts); nativeCheck(!old || digest(old)===digest(u)); byPts.set(u.pts,u);
   }
   const updates=[...byPts.values()].sort((a,b)=>a.pts-b.pts);
   nativeCheck(updates.length<=100);
   let cursor=fromPts;
-  for(const u of updates) {nativeCheck(u.pts-u.pts_count===cursor);cursor=u.pts;}
-  nativeCheck(cursor===response.pts);
-  // newMessages are snapshots with NO per-message pts. Accept only exact current
-  // snapshots backed by actual native upserts in this fully accounted pts interval.
+  for(const u of updates.filter(u=>u.pts>fromPts)) {
+    nativeCheck(u.pts-u.pts_count>=cursor);
+    if(!messages.length)nativeCheck(u.pts-u.pts_count===cursor);cursor=u.pts;
+  }
+  if(!messages.length && cursor!==response.pts)throw new AppError('Unaccounted channel watermark advance',409,'TELEGRAM_UNSUPPORTED_WATERMARK_ADVANCE');
+  const snapshots=[],ids=new Set();
+  // Telegram supplies one channel watermark for Message snapshots. Never assign
+  // that watermark (or guessed increments) as an individual event's PTS.
   for(const m of messages) {
     const wire=mapTelegramMessage(p,m),latest=updates.filter(u=>u.message?.id===wire.id || u.message_ids?.includes(wire.id)).at(-1);
-    nativeCheck(latest?.message && digest(latest.message)===digest(wire));
+    try{normalizeTelegramMessage(p,wire,1);}catch(error){throw normalizationError(error);}
+    nativeCheck(!ids.has(wire.id));ids.add(wire.id);
+    nativeCheck(!latest || latest.pts<=fromPts || latest.message && digest(latest.message)===digest(wire));
+    snapshots.push(wire);
   }
-  return {kind:updates.length?'difference':'empty',account_id:p.accountId,channel_id:p.channelId,
-    from_pts:fromPts,to_pts:cursor,updates,final:response.final===true && !native.some(u=>u.pts>cursor)};
+  return {contract_version:TELEGRAM_RECONCILIATION,kind:response instanceof Api.updates.ChannelDifference?'difference':'empty',
+    account_id:p.accountId,channel_id:p.channelId,from_pts:fromPts,to_pts:response.pts,updates,snapshots,
+    response_fingerprint:digest({constructor:response.className,pts:response.pts,final:response.final===true,
+      snapshots:[...snapshots].sort((a,b)=>a.id-b.id),updates:[...new Map(serverUpdates.map(u=>[u.pts,u])).values()].sort((a,b)=>a.pts-b.pts),controls}),final:response.final===true};
 }

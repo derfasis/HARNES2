@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module';
 import { AppError, ensure } from '../errors.mjs';
 import { sourceCheckpoint, digest } from '../source-ingestion.mjs';
-import { telegramSourcePolicy, disconnectTelegramSource } from '../sources/telegram-readonly.mjs';
+import { telegramSourcePolicy, disconnectTelegramSource, telegramRecoveryAuthorization } from '../sources/telegram-readonly.mjs';
 import { Api, decimal, nativeCheck } from '../sources/telegram-public-mapper.mjs';
 import { TelegramPublicSourceReader,telegramReadDeadline } from '../sources/telegram-public-reader.mjs';
 import { MtprotoTelegramChannel } from './telegram-mtproto.mjs';
@@ -19,7 +19,7 @@ export function fencePublicTelegramClient(client,{channelId,username,ingress=()=
     if(r instanceof Api.contacts.ResolveUsername)return r.username===username;
     if(r instanceof Api.channels.GetFullChannel || r instanceof Api.updates.GetChannelDifference) {
       return r.channel instanceof Api.InputChannel && decimal(r.channel.channelId)===channelId
-        && (!(r instanceof Api.updates.GetChannelDifference) || r.filter instanceof Api.ChannelMessagesFilterEmpty && r.limit===100 && r.force===true);
+        && (!(r instanceof Api.updates.GetChannelDifference) || r.filter instanceof Api.ChannelMessagesFilterEmpty && r.limit===100 && r.force===false);
     }
     return false;
   }
@@ -67,7 +67,8 @@ export async function openTelegramPublicReader(service,owner,{sourceId,username}
     'An exclusive existing MTProto connection owner is required',409,'PUBLIC_TELEGRAM_OWNER_BUSY');
   ensure(typeof username==='string' && /^[A-Za-z][A-Za-z0-9_]{4,31}$/.test(username),
     'Explicit approved public username required',409,'PUBLIC_TELEGRAM_PEER_REQUIRED');
-  ensure(sourceCheckpoint(service,sourceId)?.reason!=='INTEGRITY_RECONCILIATION_REQUIRED','Source requires reconciliation',409,'PUBLIC_TELEGRAM_RECONCILIATION_REQUIRED');
+  ensure(sourceCheckpoint(service,sourceId)?.reason!=='INTEGRITY_RECONCILIATION_REQUIRED' || telegramRecoveryAuthorization(service,p),
+    'Source requires operator-authorized reconciliation',409,'PUBLIC_TELEGRAM_RECONCILIATION_REQUIRED');
   const c=owner.credentials();
   ensure(Number.isInteger(c.apiId)&&c.apiId>0&&c.apiHash&&c.session,'Existing MTProto credentials required',409,'PUBLIC_TELEGRAM_CREDENTIALS_REQUIRED');
   let client,listener,failure,connecting,closePromise;let connectionSettled=false;
@@ -118,7 +119,7 @@ export async function openTelegramPublicReader(service,owner,{sourceId,username}
     nativeCheck(!cancelled && !owner.stopped && digest(telegramSourcePolicy(service,sourceId))===digest(p));
     const rpc=Object.freeze({invokeRead:request=>{nativeCheck(!cancelled && !owner.stopped);return client.invoke(request);},subscribe:(callback,onFault)=>{listener=callback;failure=onFault;},
       connected:()=>!cancelled&&!owner.stopped&&!!client.connected&&!client._sender?.isReconnecting&&settled(),close});
-    const reader=new TelegramPublicSourceReader(service,sourceId,rpc,peer);
+    const reader=new TelegramPublicSourceReader(service,sourceId,rpc,peer,username);
     await reader.bootstrap();nativeCheck(!cancelled && !owner.stopped);return reader;
   } catch {
     close().catch(()=>{});

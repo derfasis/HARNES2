@@ -1,5 +1,11 @@
 # Public Telegram native-proof bridge v0
 
+Recovery follow-up: [Reconciliation v1](TELEGRAM_RECONCILIATION_V1.md) separates
+recovered Message snapshots from native event PTS. The v0 verification below is
+a historical checkpoint, not the final recovery contract.
+The subsequent [GLM gate review](TELEGRAM_PUBLIC_SOURCE_GLM_GATE.md) covers routine
+updates, operator-authorized recovery and the final pre-smoke regression.
+
 Base: `42efe153d6a9dd171adce12d5fabaa89f9f94131`.
 Branch: `codex/telegram-public-source-v0`.
 Implementation checkpoint: `430af97745ab6c93db45250ae6ed9fb0350d5f75`.

@@ -4,6 +4,7 @@ import { AppError, ensure, requiredText, dateTime, now } from './errors.mjs';
 import { captureOpportunity, consumeOpportunity, opportunityDetail, opportunityCapture, OPPORTUNITY_TASK } from './opportunity-consumer.mjs';
 
 import { ingestSource, sourceCheckpoint } from './source-ingestion.mjs';
+import { requestTelegramRecovery } from './sources/telegram-readonly.mjs';
 
 const OUTCOMES = new Set(['qualified','call_proposed','call_accepted','call_booked','call_attended','no_show','joined','declined','business_value']);
 export class BusinessService {
@@ -61,6 +62,7 @@ export class BusinessService {
     if (conversationId) this.assertScope(actor, conversationId);
     let result;
     switch (action) {
+      case 'source.reconcile': result = requestTelegramRecovery(this,p,actor); break;
       case 'source.ingest': result = ingestSource(this, p); break;
       case 'opportunity.capture': result = captureOpportunity(this, p); break;
       case 'opportunity.consume': result = consumeOpportunity(this, p); break;

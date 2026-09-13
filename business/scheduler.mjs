@@ -17,9 +17,13 @@ export class Scheduler {
       if (cfg.opportunity?.automatic) {
         // Empty by default. Only a trusted bootstrap can supply narrowed read-only
         // transport capabilities. Reuse this tick, never the private-chat adapter.
-        for (const { sourceId, transport } of this.sourceReaders) await pollTelegramSource(this.service, sourceId, transport);
+        let sourceReadFailed=false;
+        for (const { sourceId, transport } of this.sourceReaders) {
+          try { await pollTelegramSource(this.service, sourceId, transport); }
+          catch { sourceReadFailed=true; }
+        }
         const result = await processSourceOpportunity(this.service, this.runtime);
-        this.lastReason = result.disposition; return;
+        this.lastReason = sourceReadFailed?'source_read_failed':result.disposition; return;
       }
       if (!runtimeReadiness(cfg).ready) { this.lastReason = 'Задачи сохранены. Ожидается подключение модели.'; return; }
       const day = now().slice(0,10), count = this.service.store.get('SELECT COUNT(*) AS n,COALESCE(SUM(estimated_cost_usd),0) AS cost,SUM(CASE WHEN cost_status=\'unknown\' THEN 1 ELSE 0 END) AS unknown FROM runs WHERE created_at>=?', day);

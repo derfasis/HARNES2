@@ -122,8 +122,10 @@ test('duplicate update within page is idempotent; conflicting copy rolls back',a
 test('pts gap fails closed, does not acknowledge or infer missing messages',async t=>{
   const h=await harness(t);await assert.rejects(h.apply(page([update(12)],{to_pts:12})),/TELEGRAM_PTS_GAP/);assert.equal(h.state().pts,10);assert.equal(h.rows().length,0);
 });
-test('unmapped pts advances and differenceTooLong require explicit recovery',async t=>{
-  const h=await harness(t);await assert.rejects(h.apply(page([])),/TELEGRAM_UNACCOUNTED_PTS/);await assert.rejects(h.apply({kind:'too_long'}),/TELEGRAM_DIFFERENCE_TOO_LONG/);assert.equal(h.state().pts,10);
+test('unmapped pts advances and differenceTooLong independently latch explicit recovery',async t=>{
+  const h=await harness(t);await assert.rejects(h.apply(page([])),/TELEGRAM_UNACCOUNTED_PTS/);
+  assert.equal(h.state().reason,'INTEGRITY_RECONCILIATION_REQUIRED');
+  const other=await harness(t);await assert.rejects(other.apply({kind:'too_long'}),/TELEGRAM_DIFFERENCE_TOO_LONG/);assert.equal(other.state().pts,10);
 });
 test('older unknown update is not silently accepted',async t=>{
   const h=await harness(t);await assert.rejects(h.apply(page([update(10)],{from_pts:9,to_pts:10})),/TELEGRAM_UNVERIFIED_REPLAY/);
@@ -222,7 +224,7 @@ test('Telegram unknown author cannot become identified through an edit',async t=
 });
 test('poll preserves integrity error phase instead of disguising it as read failure',async t=>{
   const h=await harness(t);await assert.rejects(h.poll({readDifference:async()=>page([update(12)],{to_pts:12})}),/TELEGRAM_PTS_GAP/);
-  assert.equal(h.state().phase,'blocked');assert.equal(h.state().reason,'INTAKE_FAILED');
+  assert.equal(h.state().phase,'blocked');assert.equal(h.state().reason,'INTEGRITY_RECONCILIATION_REQUIRED');
 });
 test('corrupt checkpoint identity cannot confirm health or select a read cursor',async t=>{
   const h=await harness(t);await h.apply(page());h.store.run("UPDATE channel_offsets SET cursor=json_set(cursor,'$.account_id','888') WHERE channel=?",SOURCE_CHECKPOINT_CHANNEL);
