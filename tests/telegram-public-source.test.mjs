@@ -468,6 +468,89 @@ test('positive and zero-count updates sharing PTS keep separate receipts and con
   await assert.rejects(other.poll(),{code:'TELEGRAM_SNAPSHOT_CONFLICT'});assert.equal(other.rows()[0].event_id,old.event_id);
   assert.equal(other.state().reason,'INTEGRITY_RECONCILIATION_REQUIRED');noEffects(other);
 });
+const zeroDelete=(pts,extra={})=>update(pts,'delete',{ptsCount:0,messages:[1],...extra});
+const deleteGate=async(h,id=7)=>{const post=message({id,post:true,fromId:null});
+  h.fullReply({...publicFull(),fullChat:new Api.ChannelFull({id:b(100),pts:9})});await h.bootstrap();
+  h.reply(difference(10,[post]));await h.poll();await h.tick();};
+const tombstones=(h,id=7)=>h.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='source.telegram.tombstone'"
+  +(id?` AND json_extract(payload_json,'$.message_id')='message:${id}'`:'')).n;
+const deleteVersions=h=>h.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='source.message' AND json_extract(payload_json,'$.operation')='delete'").n;
+test('GLM F6: same-pts native and counterless deletes are one event with corroborating receipt',async t=>{
+  const h=harness(t);await deleteGate(h);assert.equal(h.cards().length,1);
+  const native=update(11,'delete',{ptsCount:1,messages:[7]}),counterless=zeroDelete(11,{messages:[7]});
+  await h.receive(native);assert.equal(h.reader.status().buffered,1);
+  h.reply(difference(11,[],[counterless]));await h.poll();await h.tick();
+  assert.equal(h.state().pts,11);assert.equal(h.state().phase,'current');assert.equal(h.reader.status().buffered,0);
+  assert.equal(tombstones(h),1);assert.equal(deleteVersions(h),1);assert.equal(h.rows()[0].message.operation,'delete');
+  const receipts=h.store.all("SELECT payload_json FROM events WHERE kind='source.telegram.update' AND json_extract(payload_json,'$.pts')=11").map(r=>JSON.parse(r.payload_json));
+  assert.equal(receipts.length,2);assert.equal(receipts.filter(r=>r.pts_count===1&&r.proof_kind===undefined).length,1);
+  assert.equal(receipts.filter(r=>r.pts_count===0&&r.proof_kind==='reconciled_event'&&r.update_key).length,1);
+  assert.equal(h.calls,1);assert.equal(h.cards().length,1);noEffects(h);
+});
+test('GLM F6: same-pts delete equivalence is order-insensitive across the id set',async t=>{
+  const h=harness(t);await deleteGate(h);
+  h.reply(difference(11,[message({id:8,post:true,fromId:null,message:'Second post'})]));await h.poll();await h.tick();
+  await h.receive(update(13,'delete',{ptsCount:2,messages:[7,8]}));
+  h.reply(difference(13,[],[zeroDelete(13,{messages:[8,7]})]));await h.poll();await h.tick();
+  assert.equal(h.state().pts,13);assert.equal(h.state().phase,'current');
+  assert.equal(tombstones(h,''),2);assert.equal(deleteVersions(h),2);noEffects(h);
+});
+test('GLM F6: same-pts delete with different message ids stays a conflict',async t=>{
+  const h=harness(t);await deleteGate(h);
+  h.reply(difference(11,[message({id:8,post:true,fromId:null,message:'Other'})]));await h.poll();await h.tick();
+  await h.receive(update(12,'delete',{ptsCount:1,messages:[7]}));
+  h.reply(difference(12,[],[zeroDelete(12,{messages:[8]})]));
+  await assert.rejects(h.poll(),{code:'TELEGRAM_SNAPSHOT_CONFLICT'});
+  assert.equal(h.state().pts,11);assert.equal(h.state().reason,'INTEGRITY_RECONCILIATION_REQUIRED');
+  assert.equal(h.rows().find(r=>r.message.message_id==='message:7').message.operation,'upsert');noEffects(h);
+});
+test('GLM F6: partial same-pts delete id set remains a conflict',async t=>{
+  const h=harness(t);await deleteGate(h);
+  h.reply(difference(11,[message({id:8,post:true,fromId:null,message:'Other'})]));await h.poll();await h.tick();
+  await h.receive(update(12,'delete',{ptsCount:1,messages:[7,8]}));
+  h.reply(difference(12,[],[zeroDelete(12,{messages:[7]})]));
+  await assert.rejects(h.poll(),{code:'TELEGRAM_SNAPSHOT_CONFLICT'});
+  assert.equal(h.state().pts,11);assert.equal(h.state().reason,'INTEGRITY_RECONCILIATION_REQUIRED');noEffects(h);
+});
+test('GLM F6: same-pts edit equivalence is unchanged',async t=>{
+  const h=harness(t);await recovered(h);
+  const native=update(12,'edit',{message:message({message:'Edited question?',editDate:1767225600})});
+  await h.receive(native);h.reply(difference(12,[],[zeroEdit(12)]));await h.poll();await h.tick();
+  assert.equal(h.state().pts,12);assert.equal(h.state().phase,'current');assert.equal(h.rows()[0].message.text,'Edited question?');noEffects(h);
+});
+test('GLM F6: positive-count native delete without a counterless twin still applies once',async t=>{
+  const h=harness(t);await deleteGate(h);
+  const native=update(11,'delete',{ptsCount:1,messages:[7]});
+  await h.receive(native);h.reply(difference(11,[],[native]));await h.poll();await h.tick();
+  assert.equal(h.state().pts,11);assert.equal(h.rows()[0].message.operation,'delete');
+  assert.equal(tombstones(h),1);assert.equal(h.calls,1);noEffects(h);
+});
+test('GLM F6: counterless delete without a native twin keeps the v2 recovery path',async t=>{
+  const h=harness(t);await recovered(h);const old=h.cards()[0],counterless=zeroDelete(11,{messages:[1]});
+  await h.receive(counterless);h.reply(difference(11,[],[counterless]));await h.poll();await h.tick();
+  assert.equal(h.rows()[0].message.operation,'delete');assert.equal(proofs(h).at(-1).pts_count,0);
+  assert.equal(h.service.opportunityDetail(old.id).freshness.fresh,false);assert.equal(h.calls,1);noEffects(h);
+});
+test('GLM F6: replaying the same-pts delete page is idempotent without new tombstones or versions',async t=>{
+  const h=harness(t);await deleteGate(h);
+  const native=update(11,'delete',{ptsCount:1,messages:[7]}),counterless=zeroDelete(11,{messages:[7]});
+  await h.receive(native);h.reply(difference(11,[],[counterless]));await h.poll();await h.tick();
+  const page=mapChannelDifference(p,10,difference(11,[],[counterless]),[mapTelegramUpdate(p,native)]);
+  assert.equal((await applyTelegramDifference(h.service,sourceId,page)).disposition,'duplicate');
+  await h.receive(native);await h.receive(counterless);assert.equal(h.reader.status().buffered,0);
+  await h.poll();await h.tick();
+  assert.equal(tombstones(h),1);assert.equal(deleteVersions(h),1);assert.equal(h.calls,1);noEffects(h);
+});
+test('GLM F6: restart after the corroborated delete commit preserves one deleted revision',async t=>{
+  const h=harness(t);await deleteGate(h);
+  const native=update(11,'delete',{ptsCount:1,messages:[7]}),counterless=zeroDelete(11,{messages:[7]});
+  await h.receive(native);h.reply(difference(11,[],[counterless]));await h.poll();await h.tick();
+  await h.restart();assert.equal(h.state().phase,'catching_up');
+  h.reply(empty(11));await h.poll();await h.tick();
+  assert.equal(h.state().pts,11);assert.equal(h.state().phase,'current');
+  assert.equal(h.rows()[0].message.operation,'delete');assert.equal(tombstones(h),1);assert.equal(deleteVersions(h),1);
+  assert.equal(h.calls,1);noEffects(h);
+});
 test('native delete supersedes snapshot with tombstone and never runs inference for deletion',async t=>{
   const h=harness(t);await recovered(h);const old=h.cards()[0],del=update(12,'delete');await h.receive(del);
   h.reply(difference(12,[],[del]));await h.poll();await h.tick();assert.equal(h.rows()[0].message.operation,'delete');
