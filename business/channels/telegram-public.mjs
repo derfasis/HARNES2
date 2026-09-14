@@ -9,8 +9,17 @@ const require=createRequire(import.meta.url),{TelegramClient}=require('telegram'
 const {Logger}=require('telegram/extensions/Logger');
 const bigInt=require('big-integer');
 
-export function fencePublicTelegramClient(client,{channelId,username,joinedPeer=false,ingress=()=>{},fault=()=>{}}) {
+function requireJoinedAccessHash(value) {
+  ensure(typeof value==='string' && /^-?[1-9][0-9]{0,18}$/.test(value)
+    && BigInt(value)>=-(1n<<63n) && BigInt(value)<(1n<<63n),
+    'Explicit local joined-peer access hash required',409,'JOINED_TELEGRAM_ACCESS_HASH_REQUIRED');
+  return value;
+}
+export function fencePublicTelegramClient(client,{channelId,username,joinedPeer=false,accessHash=null,ingress=()=>{},fault=()=>{}}) {
+  if(joinedPeer)requireJoinedAccessHash(accessHash);
   const denied=()=>{throw new AppError('Public Telegram write or out-of-scope RPC forbidden',403,'PUBLIC_TELEGRAM_RPC_FORBIDDEN');};
+  const target=peer=>peer instanceof Api.InputChannel && decimal(peer.channelId)===channelId
+    && (!joinedPeer || bigInt.isInstance(peer.accessHash) && peer.accessHash.toString()===accessHash);
   function allowed(r,depth=0) {
     if(depth>2)return false;
     if(r instanceof Api.InvokeWithLayer || r instanceof Api.InitConnection)return allowed(r.query,depth+1);
@@ -18,10 +27,9 @@ export function fencePublicTelegramClient(client,{channelId,username,joinedPeer=
       || r instanceof Api.help.GetConfig || r instanceof Api.updates.GetState)return true;
     if(r instanceof Api.users.GetUsers)return r.id.length===1 && r.id[0] instanceof Api.InputUserSelf;
     if(r instanceof Api.contacts.ResolveUsername)return !joinedPeer && r.username===username;
-    if(r instanceof Api.channels.GetChannels)return joinedPeer===true && r.id.length===1
-      && r.id[0] instanceof Api.InputChannel && decimal(r.id[0].channelId)===channelId;
+    if(r instanceof Api.channels.GetChannels)return joinedPeer===true && r.id.length===1 && target(r.id[0]);
     if(r instanceof Api.channels.GetFullChannel || r instanceof Api.updates.GetChannelDifference) {
-      return r.channel instanceof Api.InputChannel && decimal(r.channel.channelId)===channelId
+      return target(r.channel)
         && (!(r instanceof Api.updates.GetChannelDifference) || r.filter instanceof Api.ChannelMessagesFilterEmpty && r.limit===100 && r.force===false);
     }
     return false;
@@ -67,13 +75,14 @@ export function fencePublicTelegramClient(client,{channelId,username,joinedPeer=
 export function openTelegramPublicReader(service,owner,{sourceId,username}) {
   return openTelegramReader(service,owner,{sourceId,username,joinedPeer:false});
 }
-export function openTelegramJoinedReader(service,owner,{sourceId}) {
-  return openTelegramReader(service,owner,{sourceId,username:null,joinedPeer:true});
+export function openTelegramJoinedReader(service,owner,{sourceId,accessHash}) {
+  return openTelegramReader(service,owner,{sourceId,username:null,joinedPeer:true,accessHash});
 }
-async function openTelegramReader(service,owner,{sourceId,username,joinedPeer}) {
+async function openTelegramReader(service,owner,{sourceId,username,joinedPeer,accessHash}) {
   const p=structuredClone(telegramSourcePolicy(service,sourceId));
   ensure(owner instanceof MtprotoTelegramChannel && owner.service===service && !owner.client && !owner.connected && !owner.stopped,
     'An exclusive existing MTProto connection owner is required',409,'PUBLIC_TELEGRAM_OWNER_BUSY');
+  if(joinedPeer)requireJoinedAccessHash(accessHash);
   ensure(joinedPeer || typeof username==='string' && /^[A-Za-z][A-Za-z0-9_]{4,31}$/.test(username),
     'Explicit approved public username required',409,'PUBLIC_TELEGRAM_PEER_REQUIRED');
   ensure(sourceCheckpoint(service,sourceId)?.reason!=='INTEGRITY_RECONCILIATION_REQUIRED' || telegramRecoveryAuthorization(service,p),
@@ -115,18 +124,17 @@ async function openTelegramReader(service,owner,{sourceId,username,joinedPeer}) 
     nativeCheck(!cancelled && !owner.stopped && client.session.getAuthKey()?.getKey()?.length===256);
     owner.client=client;
     client.onError=async()=>fail();
-    const settled=fencePublicTelegramClient(client,{channelId:p.channelId,username,joinedPeer,
+    const settled=fencePublicTelegramClient(client,{channelId:p.channelId,username,joinedPeer,accessHash,
       ingress:update=>{listener?.(update).catch(fail);},fault:fail});
     await bounded(()=>{connecting=client.connect();connecting.then(()=>{connectionSettled=true;},()=>{connectionSettled=true;});return connecting;});
     const me=await bounded(()=>client.getMe());nativeCheck(decimal(me.id)===p.accountId);
-    // The joined-peer lookup returns the real access hash; zero is used only
-    // for this scoped metadata query, never as provenance or a difference proof.
     const resolved=await bounded(()=>client.invoke(joinedPeer
-      ? new Api.channels.GetChannels({id:[new Api.InputChannel({channelId:bigInt(p.channelId),accessHash:bigInt.zero})]})
+      ? new Api.channels.GetChannels({id:[new Api.InputChannel({channelId:bigInt(p.channelId),accessHash:bigInt(accessHash)})]})
       : new Api.contacts.ResolveUsername({username})));
     const entity=resolved.chats.find(c=>c instanceof Api.Channel && decimal(c.id)===p.channelId);
     nativeCheck(entity && !entity.min && !entity.restricted && (entity.broadcast || entity.megagroup) && entity.accessHash!=null
-      && (joinedPeer ? !entity.left : resolved.peer instanceof Api.PeerChannel && decimal(resolved.peer.channelId)===p.channelId
+      && (joinedPeer ? !entity.left && bigInt.isInstance(entity.accessHash) && entity.accessHash.toString()===accessHash
+        : resolved.peer instanceof Api.PeerChannel && decimal(resolved.peer.channelId)===p.channelId
         && (entity.username?.toLowerCase()===username.toLowerCase() || entity.usernames?.some(u=>u.active&&u.username.toLowerCase()===username.toLowerCase()))));
     const peer=new Api.InputChannel({channelId:entity.id,accessHash:entity.accessHash});
     nativeCheck(!cancelled && !owner.stopped && digest(telegramSourcePolicy(service,sourceId))===digest(p));

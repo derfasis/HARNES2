@@ -28,7 +28,8 @@ export class TelegramPublicSourceReader {
   #owns() {return this.#service.sourceTransportHealth.get(this.#p.sourceId)===this.#health;}
   #allowedChannel(channel) {
     return channel && !channel.min && !channel.restricted && (channel.broadcast || channel.megagroup)
-      && (this.#joinedPeer ? !channel.left : (channel.username || channel.usernames?.some(u=>u.active))
+      && (this.#joinedPeer ? !channel.left && channel.accessHash?.toString()===this.#peer.accessHash?.toString()
+        : (channel.username || channel.usernames?.some(u=>u.active))
         && (!this.#username || channel.username?.toLowerCase()===this.#username.toLowerCase()
           || channel.usernames?.some(u=>u.active && u.username.toLowerCase()===this.#username.toLowerCase())));
   }
