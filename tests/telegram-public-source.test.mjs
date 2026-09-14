@@ -16,7 +16,7 @@ import {sourceCheckpoint,sourceRows,sourceContextState,sourceFreshnessReasons,di
 import {pollTelegramSource,applyTelegramDifference,telegramRecoveryAuthorization,bootstrapTelegramSource} from '../business/sources/telegram-readonly.mjs';
 import {Api,mapTelegramMessage,mapTelegramUpdate,mapChannelDifference,mapTelegramControl} from '../business/sources/telegram-public-mapper.mjs';
 import {TelegramPublicSourceReader} from '../business/sources/telegram-public-reader.mjs';
-import {fencePublicTelegramClient,openTelegramPublicReader} from '../business/channels/telegram-public.mjs';
+import {fencePublicTelegramClient,openTelegramPublicReader,openTelegramJoinedReader} from '../business/channels/telegram-public.mjs';
 import {MtprotoTelegramChannel} from '../business/channels/telegram-mtproto.mjs';
 const require=createRequire(import.meta.url),b=require('big-integer'),{TelegramClient}=require('telegram');
 const {RequestState}=require('telegram/network/RequestState'),{UpdateConnectionState}=require('telegram/network');
@@ -47,7 +47,7 @@ function output(c) {
 function harness(t,options={}) {
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'harnes2-public-reader-'));
   assert.equal(path.dirname(path.resolve(dir)),path.resolve(os.tmpdir()));
-  let store=new Store(dir),service,reader,calls=0,reads=0,reply=empty(),fullReply=publicFull();
+  let store=new Store(dir),service,reader,calls=0,reads=0,reply=empty(),fullReply=publicFull(options.joinedPeer?{username:null,left:false}:{});
   const config=readJson(path.join(ROOT,'config/default.json'));
   Object.assign(config.opportunity,{automatic:true,telegramSources:[structuredClone(p)],allowedSourceRefs:[sourceId],
     activeOffer:readJson(path.join(ROOT,'benchmarks/opportunity-projection-v0/case-01.json')).active_offer});
@@ -59,7 +59,8 @@ function harness(t,options={}) {
     service=new BusinessService(store,config);
     const rpc={invokeRead:async r=>{reads++;return r instanceof Api.channels.GetFullChannel?typeof fullReply==='function'?fullReply(r):fullReply:typeof reply==='function'?reply(r):reply;},
       subscribe:()=>{},connected:()=>true,close:async()=>options.close?.()};
-    reader=new TelegramPublicSourceReader(service,sourceId,rpc,inputChannel(),'fixture_peer');
+    reader=new TelegramPublicSourceReader(service,sourceId,rpc,inputChannel(),options.joinedPeer?null:'fixture_peer',
+      {joinedPeer:options.joinedPeer??false});
   }
   make();
   t.after(async()=>{await reader.close().catch(()=>{});await service.tail;store.close();fs.rmSync(dir,{recursive:true,force:true});});
@@ -1010,17 +1011,103 @@ async function sdkFixture(t,h,options={}) {
   const owner=new MtprotoTelegramChannel(h.service),{StringSession}=require('telegram/sessions'),{AuthKey}=require('telegram/crypto/AuthKey');
   const session=new StringSession('');session.setDC(2,'149.154.167.51',443);const key=new AuthKey();await key.setKey(Buffer.alloc(256,1));session.setAuthKey(key);
   owner.credentials=()=>({apiId:12345,apiHash:'invented-offline-api-hash',session:session.save()});
-  const originalConnect=owner.connect;let clientRef,closed=0,reply=empty();
+  const originalConnect=owner.connect;let clientRef,closed=0,reply=empty();const requests=[];
   const patches=[mock.method(TelegramClient.prototype,'connect',async function(){clientRef=this;this._sender=fakeClient().sender;await options.connect?.();return true;}),
     mock.method(TelegramClient.prototype,'destroy',async function(){closed++;this._destroyed=true;
       if(options.failDestroy)throw Error('invented teardown failure');await options.destroy?.();if(this._sender)this._sender.isConnected=()=>false;}),
     mock.method(TelegramClient.prototype,'invoke',async r=>{
+      requests.push(r);
       if(r instanceof Api.users.GetUsers)return [new Api.User({id:b(options.meId??999),accessHash:b(99),self:true})];
       if(r instanceof Api.contacts.ResolveUsername)return {peer:new Api.PeerChannel({channelId:b(100)}),chats:[new Api.Channel({id:b(100),accessHash:b(200),username:'fixture_peer',megagroup:true})]};
-      if(r instanceof Api.channels.GetFullChannel)return options.full?options.full():publicFull();if(r instanceof Api.updates.GetChannelDifference)return reply;throw Error('Unexpected synthetic RPC');})];
+      if(r instanceof Api.channels.GetChannels)return {chats:[new Api.Channel({id:b(100),accessHash:b(200),megagroup:true,left:false,...options.entity})]};
+      if(r instanceof Api.channels.GetFullChannel)return options.full?options.full():publicFull(options.joinedPeer?{username:null,left:false}:{});
+      if(r instanceof Api.updates.GetChannelDifference)return reply;throw Error('Unexpected synthetic RPC');})];
   t.after(()=>patches.forEach(m=>m.mock.restore()));
-  return {owner,originalConnect,get client(){return clientRef;},get closed(){return closed;},get connectCalls(){return patches[0].mock.callCount();},reply:r=>{reply=r;}};
+  return {owner,originalConnect,requests,get client(){return clientRef;},get closed(){return closed;},get connectCalls(){return patches[0].mock.callCount();},reply:r=>{reply=r;}};
 }
+
+test('joined reader: public mode still rejects private peer lookup and ignores a joined override',async t=>{
+  const {client,accepted}=fakeClient();fencePublicTelegramClient(client,{channelId:'100',username:'fixture_peer'});
+  assert.throws(()=>client.invoke(new Api.channels.GetChannels({id:[inputChannel()]})),{code:'PUBLIC_TELEGRAM_RPC_FORBIDDEN'});
+  assert.equal(accepted.length,0);const h=harness(t),f=await sdkFixture(t,h);
+  await assert.rejects(openTelegramPublicReader(h.service,f.owner,{sourceId,joinedPeer:true}),{code:'PUBLIC_TELEGRAM_PEER_REQUIRED'});
+  assert.equal(f.connectCalls,0);assert.equal(h.state(),null);noEffects(h);
+});
+
+test('joined reader: scoped metadata allowed, foreign peers/history/writes denied through sender and replay',async()=>{
+  const {client,sender,accepted}=fakeClient();fencePublicTelegramClient(client,{channelId:'100',username:null,joinedPeer:true});
+  await client.invoke(new Api.channels.GetChannels({id:[inputChannel()]}));assert.equal(accepted.length,1);
+  const denied=[new Api.channels.GetChannels({id:[inputChannel(200)]}),new Api.channels.GetChannels({id:[inputChannel(),inputChannel(200)]}),
+    new Api.contacts.ResolveUsername({username:'fixture_peer'}),new Api.channels.JoinChannel({channel:inputChannel()}),
+    new Api.channels.LeaveChannel({channel:inputChannel()}),new Api.channels.ReadHistory({channel:inputChannel(),maxId:1}),
+    new Api.messages.SendMessage({peer:new Api.InputPeerSelf(),message:'NOT SENT',randomId:b(1)}),
+    new Api.messages.SendReaction({peer:new Api.InputPeerSelf(),msgId:1,reaction:[]}),
+    new Api.messages.EditMessage({peer:new Api.InputPeerSelf(),id:1,message:'NOT EDITED'}),
+    new Api.channels.DeleteMessages({channel:inputChannel(),id:[1]}),
+    new Api.messages.GetHistory({peer:new Api.InputPeerSelf(),offsetId:0,offsetDate:0,addOffset:0,limit:1,maxId:0,minId:0,hash:b(0)})];
+  for(const r of denied){assert.throws(()=>client.invoke(r),{code:'PUBLIC_TELEGRAM_RPC_FORBIDDEN'});
+    assert.throws(()=>sender.send(r));assert.throws(()=>sender.addStateToQueue(new RequestState(r)));
+    assert.throws(()=>sender._sendQueue.append(new RequestState(r)));assert.throws(()=>sender._sendQueue.prepend([new RequestState(r)]));}
+  assert.throws(()=>client.invoke(new Api.InvokeWithLayer({layer:198,query:denied[3]})));
+  assert.equal(accepted.length,1);
+});
+
+test('joined reader: verified membership empty-history cutover, one review, duplicate and same-session restart',async t=>{
+  let reader;t.after(()=>reader?.close());
+  const h=harness(t,{joinedPeer:true}),f=await sdkFixture(t,h,{joinedPeer:true});
+  reader=await openTelegramJoinedReader(h.service,f.owner,{sourceId});
+  assert.equal(h.state().pts,10);assert.equal(h.state().phase,'catching_up');assert.equal(h.rows().length,0);assert.equal(h.calls,0);
+  assert.ok(f.requests.some(r=>r instanceof Api.channels.GetChannels));assert.ok(!f.requests.some(r=>r instanceof Api.contacts.ResolveUsername));
+  assert.throws(()=>f.owner.connect(),{code:'PUBLIC_TELEGRAM_OWNER_BUSY'});
+  await assert.rejects(openTelegramJoinedReader(h.service,f.owner,{sourceId}),{code:'PUBLIC_TELEGRAM_OWNER_BUSY'});
+  f.reply(difference());await h.tickWith(reader);assert.equal(h.state().phase,'current');assert.equal(h.calls,1);assert.equal(h.cards().length,1);
+  const detail=h.service.opportunityDetail(h.cards()[0].id);assert.equal(detail.executable,false);
+  assert.equal(detail.contact_permission,false);assert.deepEqual(detail.allowed_effects,[]);
+  assert.equal(proofs(h)[0].kind,'reconciled_snapshot');assert.equal(proofs(h)[0].pts,undefined);
+  f.reply(empty(11));await h.tickWith(reader);assert.equal(h.calls,1);assert.equal(h.cards().length,1);
+  await reader.close();assert.equal(f.owner.client,null);reader=await openTelegramJoinedReader(h.service,f.owner,{sourceId});
+  assert.equal(h.state().phase,'catching_up');await h.tickWith(reader);assert.equal(h.state().phase,'current');
+  assert.equal(h.calls,1);assert.equal(h.cards().length,1);noEffects(h);
+});
+
+test('joined reader: zero-count edit keeps actor identity, stales evidence, delete keeps tombstone across restart',async t=>{
+  const h=harness(t,{joinedPeer:true});await recovered(h);const old=h.cards()[0],edit=zeroEdit(11);
+  await h.receive(edit);h.reply(difference(11,[],[edit]));await h.poll();await h.tick();
+  assert.equal(h.state().pts,11);assert.equal(h.rows()[0].message.author_id,'user:10');assert.equal(h.rows()[0].message.message_id,'message:1');
+  assert.equal(h.rows()[0].message.text,'Edited question?');assert.equal(h.service.opportunityDetail(old.id).freshness.fresh,false);
+  assert.equal(h.calls,2);assert.equal(h.cards().length,2);await h.receive(edit);await h.poll();await h.tick();assert.equal(h.calls,2);
+  const del=update(12,'delete');await h.receive(del);h.reply(difference(12,[],[del]));await h.poll();await h.tick();
+  assert.equal(h.rows()[0].message.operation,'delete');assert.equal(tombstones(h,1),1);
+  for(const card of h.cards())assert.equal(h.service.opportunityDetail(card.id).freshness.fresh,false);
+  h.reply(empty(12));await h.restart();assert.equal(h.state().phase,'catching_up');await h.poll();await h.tick();
+  assert.equal(h.state().phase,'current');assert.equal(h.calls,2);assert.equal(h.cards().length,2);assert.equal(tombstones(h,1),1);noEffects(h);
+});
+
+test('joined reader: membership loss, restricted/min/wrong peer metadata and TTL remain fail closed',async t=>{
+  for(const reply of [publicFull({username:null,left:true}),publicFull({username:null,restricted:true}),publicFull({username:null,min:true}),
+    {...publicFull({username:null}),chats:[new Api.Channel({id:b(200),accessHash:b(200),megagroup:true})]},
+    {...publicFull({username:null}),fullChat:new Api.ChannelFull({id:b(100),pts:11,ttlPeriod:60})}]) {
+    const h=harness(t,{joinedPeer:true});await recovered(h);await h.receive(new Api.UpdateChannel({channelId:b(100)}));
+    const reads=h.reads;h.fullReply(reply);h.reply(empty(11));await assert.rejects(h.poll(),mappingFailure);
+    assert.equal(h.reads,reads+1);assert.equal(h.state().pts,11);assert.equal(h.state().reason,'INTEGRITY_RECONCILIATION_REQUIRED');
+    assert.equal(h.service.opportunityDetail(h.cards()[0].id).freshness.fresh,false);assert.equal(h.calls,1);noEffects(h);
+  }
+});
+
+test('joined reader: bootstrap membership is checked again before durable baseline',async t=>{
+  const h=harness(t,{joinedPeer:true}),f=await sdkFixture(t,h,{joinedPeer:true,full:()=>publicFull({username:null,left:true})});
+  await assert.rejects(openTelegramJoinedReader(h.service,f.owner,{sourceId}),{code:'JOINED_TELEGRAM_BOOTSTRAP_FAILED'});
+  await flush();assert.equal(h.state(),null);assert.equal(h.rows().length,0);assert.equal(h.calls,0);assert.equal(f.owner.client,null);noEffects(h);
+});
+
+test('joined reader: joined lookup cannot bootstrap a left or foreign channel',async t=>{
+  const h=harness(t,{joinedPeer:true}),entity={left:true},f=await sdkFixture(t,h,{joinedPeer:true,entity});
+  for(const change of [{left:true},{left:false,id:b(200)}]) {
+    Object.assign(entity,change);
+    await assert.rejects(openTelegramJoinedReader(h.service,f.owner,{sourceId}),{code:'JOINED_TELEGRAM_BOOTSTRAP_FAILED'});
+    await flush();assert.equal(h.state(),null);assert.equal(f.owner.client,null);noEffects(h);
+  }
+});
 test('real factory and Scheduler connect pinned raw ingress to review without credentials, sends, or competing connect',async t=>{
   const h=harness(t),f=await sdkFixture(t,h),{owner}=f;
   const reader=await openTelegramPublicReader(h.service,owner,{sourceId,username:'fixture_peer'});

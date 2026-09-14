@@ -7,8 +7,9 @@ import { TelegramPublicSourceReader,telegramReadDeadline } from '../sources/tele
 import { MtprotoTelegramChannel } from './telegram-mtproto.mjs';
 const require=createRequire(import.meta.url),{TelegramClient}=require('telegram'),{StringSession}=require('telegram/sessions');
 const {Logger}=require('telegram/extensions/Logger');
+const bigInt=require('big-integer');
 
-export function fencePublicTelegramClient(client,{channelId,username,ingress=()=>{},fault=()=>{}}) {
+export function fencePublicTelegramClient(client,{channelId,username,joinedPeer=false,ingress=()=>{},fault=()=>{}}) {
   const denied=()=>{throw new AppError('Public Telegram write or out-of-scope RPC forbidden',403,'PUBLIC_TELEGRAM_RPC_FORBIDDEN');};
   function allowed(r,depth=0) {
     if(depth>2)return false;
@@ -16,7 +17,9 @@ export function fencePublicTelegramClient(client,{channelId,username,ingress=()=
     if(r instanceof Api.Ping || r instanceof Api.PingDelayDisconnect || r instanceof Api.MsgsAck || r instanceof Api.MsgsStateInfo
       || r instanceof Api.help.GetConfig || r instanceof Api.updates.GetState)return true;
     if(r instanceof Api.users.GetUsers)return r.id.length===1 && r.id[0] instanceof Api.InputUserSelf;
-    if(r instanceof Api.contacts.ResolveUsername)return r.username===username;
+    if(r instanceof Api.contacts.ResolveUsername)return !joinedPeer && r.username===username;
+    if(r instanceof Api.channels.GetChannels)return joinedPeer===true && r.id.length===1
+      && r.id[0] instanceof Api.InputChannel && decimal(r.id[0].channelId)===channelId;
     if(r instanceof Api.channels.GetFullChannel || r instanceof Api.updates.GetChannelDifference) {
       return r.channel instanceof Api.InputChannel && decimal(r.channel.channelId)===channelId
         && (!(r instanceof Api.updates.GetChannelDifference) || r.filter instanceof Api.ChannelMessagesFilterEmpty && r.limit===100 && r.force===false);
@@ -61,11 +64,17 @@ export function fencePublicTelegramClient(client,{channelId,username,ingress=()=
 
 // Trusted bootstrap only: use the existing private adapter's credential loader
 // and exclusive client slot, never its CRM listener/connect/send methods.
-export async function openTelegramPublicReader(service,owner,{sourceId,username}) {
+export function openTelegramPublicReader(service,owner,{sourceId,username}) {
+  return openTelegramReader(service,owner,{sourceId,username,joinedPeer:false});
+}
+export function openTelegramJoinedReader(service,owner,{sourceId}) {
+  return openTelegramReader(service,owner,{sourceId,username:null,joinedPeer:true});
+}
+async function openTelegramReader(service,owner,{sourceId,username,joinedPeer}) {
   const p=structuredClone(telegramSourcePolicy(service,sourceId));
   ensure(owner instanceof MtprotoTelegramChannel && owner.service===service && !owner.client && !owner.connected && !owner.stopped,
     'An exclusive existing MTProto connection owner is required',409,'PUBLIC_TELEGRAM_OWNER_BUSY');
-  ensure(typeof username==='string' && /^[A-Za-z][A-Za-z0-9_]{4,31}$/.test(username),
+  ensure(joinedPeer || typeof username==='string' && /^[A-Za-z][A-Za-z0-9_]{4,31}$/.test(username),
     'Explicit approved public username required',409,'PUBLIC_TELEGRAM_PEER_REQUIRED');
   ensure(sourceCheckpoint(service,sourceId)?.reason!=='INTEGRITY_RECONCILIATION_REQUIRED' || telegramRecoveryAuthorization(service,p),
     'Source requires operator-authorized reconciliation',409,'PUBLIC_TELEGRAM_RECONCILIATION_REQUIRED');
@@ -106,23 +115,28 @@ export async function openTelegramPublicReader(service,owner,{sourceId,username}
     nativeCheck(!cancelled && !owner.stopped && client.session.getAuthKey()?.getKey()?.length===256);
     owner.client=client;
     client.onError=async()=>fail();
-    const settled=fencePublicTelegramClient(client,{channelId:p.channelId,username,
+    const settled=fencePublicTelegramClient(client,{channelId:p.channelId,username,joinedPeer,
       ingress:update=>{listener?.(update).catch(fail);},fault:fail});
     await bounded(()=>{connecting=client.connect();connecting.then(()=>{connectionSettled=true;},()=>{connectionSettled=true;});return connecting;});
     const me=await bounded(()=>client.getMe());nativeCheck(decimal(me.id)===p.accountId);
-    const resolved=await bounded(()=>client.invoke(new Api.contacts.ResolveUsername({username})));
+    // The joined-peer lookup returns the real access hash; zero is used only
+    // for this scoped metadata query, never as provenance or a difference proof.
+    const resolved=await bounded(()=>client.invoke(joinedPeer
+      ? new Api.channels.GetChannels({id:[new Api.InputChannel({channelId:bigInt(p.channelId),accessHash:bigInt.zero})]})
+      : new Api.contacts.ResolveUsername({username})));
     const entity=resolved.chats.find(c=>c instanceof Api.Channel && decimal(c.id)===p.channelId);
-    nativeCheck(resolved.peer instanceof Api.PeerChannel && decimal(resolved.peer.channelId)===p.channelId
-      && entity && !entity.min && !entity.restricted && (entity.broadcast || entity.megagroup)
-      && (entity.username?.toLowerCase()===username.toLowerCase() || entity.usernames?.some(u=>u.active&&u.username.toLowerCase()===username.toLowerCase())));
+    nativeCheck(entity && !entity.min && !entity.restricted && (entity.broadcast || entity.megagroup) && entity.accessHash!=null
+      && (joinedPeer ? !entity.left : resolved.peer instanceof Api.PeerChannel && decimal(resolved.peer.channelId)===p.channelId
+        && (entity.username?.toLowerCase()===username.toLowerCase() || entity.usernames?.some(u=>u.active&&u.username.toLowerCase()===username.toLowerCase()))));
     const peer=new Api.InputChannel({channelId:entity.id,accessHash:entity.accessHash});
     nativeCheck(!cancelled && !owner.stopped && digest(telegramSourcePolicy(service,sourceId))===digest(p));
     const rpc=Object.freeze({invokeRead:request=>{nativeCheck(!cancelled && !owner.stopped);return client.invoke(request);},subscribe:(callback,onFault)=>{listener=callback;failure=onFault;},
       connected:()=>!cancelled&&!owner.stopped&&!!client.connected&&!client._sender?.isReconnecting&&settled(),close});
-    const reader=new TelegramPublicSourceReader(service,sourceId,rpc,peer,username);
+    const reader=new TelegramPublicSourceReader(service,sourceId,rpc,peer,username,{joinedPeer});
     await reader.bootstrap();nativeCheck(!cancelled && !owner.stopped);return reader;
   } catch {
     close().catch(()=>{});
-    throw new AppError('Public Telegram bootstrap failed; credentials and raw errors withheld',409,'PUBLIC_TELEGRAM_BOOTSTRAP_FAILED');
+    throw new AppError(`${joinedPeer?'Joined':'Public'} Telegram bootstrap failed; credentials and raw errors withheld`,409,
+      joinedPeer?'JOINED_TELEGRAM_BOOTSTRAP_FAILED':'PUBLIC_TELEGRAM_BOOTSTRAP_FAILED');
   }
 }

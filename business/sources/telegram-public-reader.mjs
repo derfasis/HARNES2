@@ -15,15 +15,23 @@ export async function telegramReadDeadline(operation,abandon) {
 
 export class TelegramPublicSourceReader {
   #service; #p; #rpc; #peer; #pending=new Map(); #baseline=null; #epoch=0; #confirmed=null; #watermark=null; #final=false; #blocked=false; #closed=false; #retryAt=0; #closing; #health; #authorization; #peerDirty=false; #ptsHint=0; #username;
-  constructor(service,sourceId,rpc,peer,username=null) {
+  #joinedPeer;
+  constructor(service,sourceId,rpc,peer,username=null,{joinedPeer=false}={}) {
     this.#service=service;this.#p=structuredClone(telegramSourcePolicy(service,sourceId));this.#rpc=rpc;this.#peer=peer;
     nativeCheck(peer instanceof Api.InputChannel && decimal(peer.channelId)===this.#p.channelId);
-    this.#username=username;this.#authorization=telegramRecoveryAuthorization(service,this.#p);
+    nativeCheck(typeof joinedPeer==='boolean' && (!joinedPeer || username===null));
+    this.#joinedPeer=joinedPeer;this.#username=username;this.#authorization=telegramRecoveryAuthorization(service,this.#p);
     this.#peerDirty=sourceCheckpoint(service,this.#p.sourceId)!==null;
     this.#health=()=>this.confirmCurrent();service.sourceTransportHealth??=new Map();service.sourceTransportHealth.set(sourceId,this.#health);
     rpc.subscribe(update=>this.receive(update),()=>this.fault());
   }
   #owns() {return this.#service.sourceTransportHealth.get(this.#p.sourceId)===this.#health;}
+  #allowedChannel(channel) {
+    return channel && !channel.min && !channel.restricted && (channel.broadcast || channel.megagroup)
+      && (this.#joinedPeer ? !channel.left : (channel.username || channel.usernames?.some(u=>u.active))
+        && (!this.#username || channel.username?.toLowerCase()===this.#username.toLowerCase()
+          || channel.usernames?.some(u=>u.active && u.username.toLowerCase()===this.#username.toLowerCase())));
+  }
   ownsSource() {return this.#owns() && !this.#closed;}
   recoveryAuthorization() {return this.#authorization && telegramRecoveryAuthorization(this.#service,this.#p)===this.#authorization ? this.#authorization : null;}
   #control(control) {
@@ -80,6 +88,8 @@ export class TelegramPublicSourceReader {
     nativeCheck(!this.#closed && digest(telegramSourcePolicy(this.#service,this.#p.sourceId))===digest(this.#p));
     nativeCheck(response.fullChat instanceof Api.ChannelFull && decimal(response.fullChat.id)===this.#p.channelId
       && nativeInt(response.fullChat.pts) && !response.fullChat.ttlPeriod);
+    if(this.#joinedPeer)nativeCheck(Array.isArray(response.chats)
+      && this.#allowedChannel(response.chats.find(c=>c instanceof Api.Channel && decimal(c.id)===this.#p.channelId)));
     const result=await bootstrapTelegramSource(this.#service,this.#p.sourceId,{pts:response.fullChat.pts,history:[]},
       ()=>!this.#blocked,()=>this.ownsSource());
     nativeCheck(!this.#closed && !this.#blocked && this.#owns());
@@ -106,10 +116,7 @@ export class TelegramPublicSourceReader {
       nativeCheck(!this.#closed && this.#owns() && full.fullChat instanceof Api.ChannelFull
         && decimal(full.fullChat.id)===p.channelId && !full.fullChat.ttlPeriod && Array.isArray(full.chats));
       const channel=full.chats.find(c=>c instanceof Api.Channel && decimal(c.id)===p.channelId);
-      nativeCheck(channel && !channel.min && !channel.restricted && (channel.broadcast || channel.megagroup)
-        && (channel.username || channel.usernames?.some(u=>u.active))
-        && (!this.#username || channel.username?.toLowerCase()===this.#username.toLowerCase()
-          || channel.usernames?.some(u=>u.active && u.username.toLowerCase()===this.#username.toLowerCase())));
+      nativeCheck(this.#allowedChannel(channel));
       if(epoch===this.#epoch)this.#peerDirty=false;
     }
     nativeCheck(this.#owns() && !this.#closed && !this.#blocked
