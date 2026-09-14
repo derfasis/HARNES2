@@ -57,11 +57,23 @@ function harness(t) {
     command:(a,p,actor={kind:'operator'},key=id())=>service.command(a,p,key,actor),
     ingest:(m=source())=>service.command('source.ingest',m,id(),{kind:'channel',sourceId:m.source_id}),
     tick:()=>scheduler.tick(),respond:fn=>{reply=fn;},
+    fail:cause=>{runtime.decide=async()=>{const error=new Error('provider failure');error.failure_cause=cause;throw error;}},
     cards:()=>store.all("SELECT * FROM tasks WHERE kind='opportunity_review'"),
     detail:()=>service.opportunityDetail(store.get("SELECT id FROM tasks WHERE kind='opportunity_review'").id),
     retryDue:()=>store.run("UPDATE runs SET finished_at='2026-01-01T00:00:00.000Z',created_at='2026-01-01T00:00:00.000Z' WHERE status IN ('failed','interrupted')"),
     restart:()=>{store.close();store=new Store(directory);store.recover();service=new BusinessService(store,config);scheduler=new Scheduler(service,runtime);}};
 }
+
+test('MODEL_FAILED retains only sanitized failure cause in the run result',async t=>{
+  const h=harness(t);h.fail({kind:'provider_error',http_status:402,provider_error_type:'billing_error',retryable:false,
+    attempt_count:1,child_exit_code:null,timed_out:false,stdout_json_valid:true,raw_body:'secret',url:'https://secret.invalid'});await h.ingest();await h.tick();
+  const run=h.store.get('SELECT status,error,result_json FROM runs');
+  assert.equal(run.status,'failed');assert.equal(run.error,'MODEL_FAILED');
+  const result=JSON.parse(run.result_json);
+  assert.equal(result.final_response,'');assert.deepEqual(result.failure_cause,{kind:'provider_error',http_status:402,
+    provider_error_type:'billing_error',retryable:false,attempt_count:1,child_exit_code:null,timed_out:false,stdout_json_valid:true});
+  assert.doesNotMatch(run.result_json,/provider failure|secret|Bearer|https?:/i);
+});
 function noEffects(h) {for(const table of ['drafts','approvals','delivery_attempts','outcome_events','tool_calls','messages'])assert.equal(h.store.get(`SELECT COUNT(*) AS n FROM ${table}`).n,0,table);
   assert.equal(h.store.get("SELECT COUNT(*) AS n FROM persons WHERE trim(permission)<>''").n,0);}
 async function linked(h,ownership='AI_OWNED') {

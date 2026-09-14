@@ -10,6 +10,74 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 
+_PROVIDER_ERROR_TYPES = {
+    "billing": "billing_error",
+    "timeout": "timeout",
+    "rate_limit": "rate_limit",
+    "auth": "auth_error",
+    "auth_permanent": "auth_error",
+    "server_error": "server_error",
+    "overloaded": "server_error",
+    "model_not_found": "model_not_found",
+    "format_error": "invalid_request",
+    "invalid_request": "invalid_request",
+    "unknown": "unknown",
+}
+
+
+def _http_status(value):
+    if isinstance(value, bool):
+        return None
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return None
+    return value if 100 <= value <= 599 else None
+
+
+def _status_from_safe_text(text):
+    import re
+    match = re.search(r"(?:http\s*|error\s+code:\s*)([1-5]\d{2})\b", str(text or ""), re.IGNORECASE)
+    return int(match.group(1)) if match else None
+
+
+def classify_provider_failure(result):
+    """Return only the closed, persisted failure-cause schema; never provider text."""
+    error_text = str(result.get("error") or "")
+    failure_reason = str(result.get("failure_reason") or "").lower()
+    lowered = error_text.lower()
+    status = _http_status(result.get("http_status")) or _status_from_safe_text(error_text)
+    if "timeout" in lowered or "timed out" in lowered or failure_reason == "timeout":
+        provider_type = "timeout"
+    elif any(marker in lowered for marker in ("connection error", "can't reach", "network error", "connection reset")):
+        provider_type = "connection_error"
+    else:
+        provider_type = _PROVIDER_ERROR_TYPES.get(failure_reason, "unknown")
+    explicit_retryable = result.get("failure_retryable")
+    if isinstance(explicit_retryable, bool):
+        retryable = explicit_retryable
+    else:
+        retryable = provider_type in {"connection_error", "timeout", "rate_limit", "server_error"}
+    attempt_count = result.get("api_calls")
+    if not isinstance(attempt_count, int) or isinstance(attempt_count, bool) or attempt_count < 0 or attempt_count > 1000:
+        attempt_count = 0
+    return {
+        "kind": "provider_error",
+        "http_status": status,
+        "provider_error_type": provider_type,
+        "retryable": retryable,
+        "attempt_count": attempt_count,
+        "child_exit_code": None,
+        "timed_out": False,
+        "stdout_json_valid": True,
+    }
+
+
+def worker_failure_cause(result):
+    if result.get("error") or result.get("failure_reason") or not result.get("completed", False):
+        return classify_provider_failure(result)
+    return None
+
 
 def main():
     envelope = json.load(sys.stdin)
@@ -58,6 +126,8 @@ def main():
         result = agent.run_conversation(
             user_message=json.dumps(envelope["context"], ensure_ascii=False), task_id=run_id,
         )
+        failure_cause = worker_failure_cause(result)
+        completed = bool(result.get("completed", False)) and not result.get("error")
         raw_messages = result.get("messages", [])
         assistant_texts = [
             message["content"] for message in raw_messages
@@ -67,13 +137,14 @@ def main():
             "schema_version": 1,
             "situation_id": envelope["situation_id"],
             "run_id": run_id,
-            "completed": bool(result.get("completed", False)) and not result.get("error"),
-            "final_response": result.get("final_response") or "",
-            "assistant_texts": assistant_texts,
+            "completed": completed,
+            "final_response": (result.get("final_response") or "") if completed else "",
+            "assistant_texts": assistant_texts if completed else [],
             "tool_calls": [],
-            "error": str(result.get("error"))[:4000] if result.get("error") else None,
-            "messages": raw_messages,
-            "api_calls": result.get("api_calls"),
+            "error": "MODEL_FAILED" if not completed else None,
+            "failure_cause": failure_cause,
+            "messages": raw_messages if completed else [],
+            "api_calls": result.get("api_calls") if isinstance(result.get("api_calls"), int) else None,
             "usage": {
                 "input_tokens": getattr(agent, "session_input_tokens", None),
                 "output_tokens": getattr(agent, "session_output_tokens", None),
@@ -96,6 +167,10 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except Exception as error:
-        print(json.dumps({"completed": False, "error": "Situation Router worker failed: " + type(error).__name__}))
+    except Exception:
+        print(json.dumps({"completed": False, "error": "WORKER_FAILURE", "failure_cause": {
+            "kind": "worker_failure", "http_status": None, "provider_error_type": None,
+            "retryable": False, "attempt_count": 0, "child_exit_code": None,
+            "timed_out": False, "stdout_json_valid": True,
+        }}))
         sys.exit(1)

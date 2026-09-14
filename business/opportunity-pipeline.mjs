@@ -4,6 +4,7 @@ import { runtimeReadiness, usageAccounting } from './config.mjs';
 import { captureOpportunity, consumeOpportunity } from './opportunity-consumer.mjs';
 import { parseOpportunityOutput } from './opportunity-projection.mjs';
 import { automaticBoundary, sourceContextState, SOURCE_MESSAGE, PIPELINE_FINISHED, finishSource } from './source-ingestion.mjs';
+import { normalizeFailureCause } from './failure-cause.mjs';
 
 const RUNTIME = 'hermes-opportunity';
 const MAX_ATTEMPTS = 3;
@@ -85,7 +86,10 @@ export async function processSourceOpportunity(service, runtime) {
   if (prepared.result) return prepared.result;
   let result;
   try { result = await runtime.decide(prepared.run, prepared.context); }
-  catch { result = { completed: false, error: 'MODEL_FAILED' }; }
+  catch (error) {
+    result = { completed: false, error: 'MODEL_FAILED',
+      failure_cause: normalizeFailureCause(error?.failure_cause) };
+  }
   // Never persist provider exceptions, credentials, tool transcripts or raw logs.
   const messages = Array.isArray(result?.messages) ? result.messages : [];
   const tools = result?.tool_calls?.length || result?.messages != null && !Array.isArray(result.messages)
@@ -95,7 +99,11 @@ export async function processSourceOpportunity(service, runtime) {
   try {
     await service.exclusive(() => service.store.transaction(() => {
     const { input, output, cost, costStatus } = usageAccounting(JSON.parse(prepared.run.context_json).model_config, result?.usage);
-    const clean = { final_response: ok ? result.final_response : '', api_calls: Number.isSafeInteger(result?.api_calls) && result.api_calls >= 0 ? result.api_calls : null };
+    const clean = {
+      final_response: ok ? result.final_response : '',
+      api_calls: Number.isSafeInteger(result?.api_calls) && result.api_calls >= 0 ? result.api_calls : null,
+      failure_cause: ok ? null : normalizeFailureCause(result?.failure_cause),
+    };
     service.store.run(`UPDATE runs SET status=?,result_json=?,error=?,input_tokens=?,output_tokens=?,estimated_cost_usd=?,cost_status=?,finished_at=?
       WHERE id=? AND status='running'`, ok ? 'analyzed' : 'failed', JSON.stringify(clean), ok ? null : 'MODEL_FAILED', input, output, cost, costStatus, now(), prepared.run.id);
   }));

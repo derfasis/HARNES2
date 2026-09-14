@@ -98,7 +98,7 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // draft.target_id to subject_id for every draft (live 11c mismatch fix).
     "business/opportunity-projection.mjs": "a5e9ac19202e6c7831f9b0bc4e8f76e7579742fb",
     "contracts/opportunity-projection.schema.json": "b53a1a7b05d89de66858f3e59bb14940918d1c96",
-    "scripts/situation_router_worker.py": "4d85f3ee82d207181a3b64a03cde33654594d2cb",
+    "scripts/situation_router_worker.py": "717a960ab4c3b92148afae084cd998bfeaaade86",
     // Reviewed extension: invalidate read-only source checkpoints on process recovery.
     "business/store.mjs": "ec4966f4768a6c1dec188ab9a6ff1701a2ac4180",
     "adapters/hermes/credentials.py": "2797bd89081eaf4a950178cec3d637015ee8f45f",
@@ -106,7 +106,7 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // Deliberate v0 extension: existing worker, no-tool envelope tested in opportunity-runtime.test.mjs.
     // Retry-budget extension: decision envelope raises maxIterations 1->2 so the pinned
     // Hermes empty-response ladder can actually re-enter the loop after an empty response.
-    "business/runtime.mjs": "517e9284d5b5430957052202428f7fee9273b604",
+    "business/runtime.mjs": "44d25722b433e20b2000d2673a54a52b0b4aff48",
     "business/channels/telegram.mjs": "1b4de6dc8c8465bed237375bd6295ab4dbfa2eda",
     "business/channels/telegram-mtproto.mjs": "e30171ab2a8bf83ba5cbc63de22c025288f99e01",
     "benchmarks/situation-router/README.md": "0da57bf3fcb53bbec5713f6a44c48654b16270b8",
