@@ -1,10 +1,11 @@
 import { id, hash } from './store.mjs';
 import { AppError, ensure, requiredText, dateTime, now } from './errors.mjs';
 
-import { captureOpportunity, consumeOpportunity, opportunityDetail, opportunityCapture, OPPORTUNITY_TASK } from './opportunity-consumer.mjs';
+import { captureOpportunity, consumeOpportunity, opportunityCapture, OPPORTUNITY_TASK } from './opportunity-consumer.mjs';
 
 import { ingestSource, sourceCheckpoint } from './source-ingestion.mjs';
 import { requestTelegramRecovery } from './sources/telegram-readonly.mjs';
+import { REVIEW_ACTIONS, reviewOpportunity, opportunityReviewDetail, opportunityReviews } from './opportunity-review.mjs';
 
 const OUTCOMES = new Set(['qualified','call_proposed','call_accepted','call_booked','call_attended','no_show','joined','declined','business_value']);
 export class BusinessService {
@@ -40,7 +41,20 @@ export class BusinessService {
     this.store.event(this.config.partnerId, conversationId, 'context_changed', 'system', { reason });
   }
   command(action, payload, requestId, actor = { kind: 'operator' }) {
-    return this.exclusive(() => this.store.transaction(() => this.execute(action, payload, requestId, actor)));
+    return this.exclusive(() => {
+      try { return this.store.transaction(() => this.execute(action, payload, requestId, actor)); }
+      catch (error) {
+        if (REVIEW_ACTIONS.includes(action)) {
+          // Denials survive the rolled-back command, without persisting untrusted text or grants.
+          const task = typeof payload?.task_id === 'string' && this.store.get('SELECT id FROM tasks WHERE id=? AND partner_id=? AND kind=?', payload.task_id, this.config.partnerId, OPPORTUNITY_TASK);
+          this.store.transaction(() => this.store.event(this.config.partnerId, null, 'opportunity.review.denied',
+            ['operator','agent','channel'].includes(actor.kind) ? actor.kind : 'unknown',
+            { action, task_id: task?.id ?? null, code: error.code ?? 'review_command_rejected',
+              request_id: typeof requestId === 'string' && /^[a-f0-9-]{36}$/i.test(requestId) ? requestId : null }));
+        }
+        throw error;
+      }
+    });
   }
   execute(action, p, requestId, actor) {
     requiredText(requestId, 'request_id', 150);
@@ -66,6 +80,9 @@ export class BusinessService {
       case 'source.ingest': result = ingestSource(this, p); break;
       case 'opportunity.capture': result = captureOpportunity(this, p); break;
       case 'opportunity.consume': result = consumeOpportunity(this, p); break;
+      case 'opportunity.review.edit':
+      case 'opportunity.review.approve':
+      case 'opportunity.review.reject': result = reviewOpportunity(this, action, p); break;
       case 'partner.update': {
         const mission = requiredText(p.mission, 'Цель', 5000);
         this.store.run('UPDATE partners SET mission=? WHERE id=?', mission, this.config.partnerId);
@@ -286,7 +303,8 @@ export class BusinessService {
       }
       default: throw new AppError('Неизвестная команда', 400);
     }
-    this.store.event(this.config.partnerId, conversationId, action, actor.kind, { ...p, result, run_id: actor.runId ?? null });
+    this.store.event(this.config.partnerId, conversationId, action, actor.kind, { ...p, result, run_id: actor.runId ?? null,
+      ...(REVIEW_ACTIONS.includes(action) ? { request_id: requestId } : {}) });
     this.store.run('INSERT INTO command_receipts VALUES(?,?,?,?)', requestId, fingerprint, JSON.stringify(result), now());
     return result;
   }
@@ -368,7 +386,8 @@ export class BusinessService {
   setTelegramAccount(accountId) { this.telegramAccountId = accountId ? String(accountId) : null; }
   telegramAccount() { return this.telegramAccountId || process.env.PARTNER_TELEGRAM_ACCOUNT_ID || process.env.PARTNER_TELEGRAM_BOT_TOKEN?.split(':')[0] || 'unconfigured'; }
   opportunityCapture(captureId) { return opportunityCapture(this, captureId); }
-  opportunityDetail(taskId) { return opportunityDetail(this, taskId); }
+  opportunityDetail(taskId) { return opportunityReviewDetail(this, taskId); }
+  opportunityReviews(options) { return opportunityReviews(this, options); }
   detail(conversationId) {
     const conversation = this.conversation(conversationId), person = this.person(conversation.person_id);
     return { conversation, person,

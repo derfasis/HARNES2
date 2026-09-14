@@ -99,6 +99,22 @@ test('native edit stales old review; native delete cannot be a reply task',async
   await applyTelegramDifference(h.service,sourceId,page([{kind:'delete',channel_id:'100',pts:13,pts_count:1,message_ids:[1]}],{from_pts:12,to_pts:13}));await h.tick();
   assert.equal(h.calls,2);for(const c of h.cards())assert.equal(h.service.opportunityDetail(c.id).freshness.fresh,false);noEffects(h);
 });
+
+test('human review approval is invalidated by native edit/delete and restart cannot execute it',async t=>{
+  const h=await telegramHarness(t);await applyTelegramDifference(h.service,sourceId,page());await h.tick();
+  const first=h.cards()[0];
+  const p=()=>{const d=h.service.opportunityDetail(first.id);return {task_id:first.id,fingerprint:d.fingerprint,expected_revision:d.review.revision};};
+  await h.command('opportunity.review.approve',p());
+  assert.equal(h.service.opportunityDetail(first.id).review.status,'approved');
+  await applyTelegramDifference(h.service,sourceId,page([update(12,{kind:'edit',message:wire({text:'Updated source'})})],{from_pts:11,to_pts:12}));
+  assert.equal(h.service.opportunityDetail(first.id).review.effective_status,'stale');
+  await h.command('opportunity.review.edit',{...p(),text:'Human correction, not fresh evidence.'});
+  await assert.rejects(h.command('opportunity.review.approve',p()),{code:'STALE_REVIEW'});
+  await applyTelegramDifference(h.service,sourceId,page([{kind:'delete',channel_id:'100',pts:13,pts_count:1,message_ids:[1]}],{from_pts:12,to_pts:13}));
+  await assert.rejects(h.command('opportunity.review.approve',p()),{code:'STALE_REVIEW'});
+  h.restart();assert.equal(h.service.opportunityDetail(first.id).freshness.fresh,false);
+  await h.tick();assert.equal(h.calls,1);assert.equal(h.cards().length,1);noEffects(h);
+});
 test('duplicate native delivery does not create a second review or model call',async t=>{
   const h=await telegramHarness(t);await applyTelegramDifference(h.service,sourceId,page());await h.tick();
   await applyTelegramDifference(h.service,sourceId,page());await h.tick();assert.equal(h.cards().length,1);assert.equal(h.calls,1);noEffects(h);

@@ -25,8 +25,9 @@ async function readBody(req) {
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
   catch { throw new AppError('Некорректный JSON'); }
 }
-export async function start() {
-  const config = loadConfig(), store = new Store(), service = new BusinessService(store,config);
+export async function start({ config = loadConfig(), directory = DATA } = {}) {
+  ensure(config.server.host === '127.0.0.1', 'Only loopback dashboard binding is supported', 409);
+  const store = new Store(directory), service = new BusinessService(store,config);
   ensure(service.partner(), 'partnerId не совпадает с профилем', 500);
   const operatorToken = randomBytes(32).toString('hex'), mcpToken = randomBytes(32).toString('hex'), runTokens = new Map();
   const telegram = config.telegram.transport === 'mtproto' ? new MtprotoTelegramChannel(service) : new TelegramChannel(service);
@@ -69,6 +70,8 @@ export async function start() {
         configuration:{opportunity_automatic:config.opportunity.automatic===true,runtime_enabled:config.runtime.enabled,provider:config.runtime.provider,model:config.runtime.model,base_url:config.runtime.baseUrl, max_runs_per_day:config.runtime.maxRunsPerDay,daily_budget_usd:config.runtime.dailyBudgetUsd,timezone:config.scheduler.timezone},
         release:{version:'0.1.0',tests:'not_run_by_user_request',model_validation:'not_run'} });
       if (req.method === 'GET' && url.pathname.startsWith('/api/opportunity-captures/')) return send(200,service.opportunityCapture(decodeURIComponent(url.pathname.split('/').at(-1))));
+      if (req.method === 'GET' && url.pathname === '/api/opportunities') return send(200,service.opportunityReviews({
+        status:url.searchParams.get('status') ?? 'pending', limit:Number(url.searchParams.get('limit') ?? 50), offset:Number(url.searchParams.get('offset') ?? 0) }));
       if (req.method === 'GET' && url.pathname.startsWith('/api/opportunities/')) return send(200,service.opportunityDetail(decodeURIComponent(url.pathname.split('/').at(-1))));
       if (req.method === 'GET' && url.pathname.startsWith('/api/conversations/')) return send(200,service.detail(decodeURIComponent(url.pathname.split('/').at(-1))));
       if (req.method === 'GET' && url.pathname.startsWith('/api/runs/')) {
@@ -105,9 +108,9 @@ export async function start() {
   catch (error) {store.close();throw error;}
   // Recovery occurs only after acquiring this server port; a duplicate launch cannot interrupt the live instance.
   store.recover();
-  fs.mkdirSync(path.join(DATA,'runtime'),{recursive:true});
-  fs.writeFileSync(path.join(DATA,'runtime/mcp-connection.json'),JSON.stringify({url:`http://127.0.0.1:${config.server.port}`,token:mcpToken}),{mode:0o600});
-  fs.writeFileSync(path.join(DATA,'runtime/service.json'),JSON.stringify({pid:process.pid,port:config.server.port,started_at:new Date().toISOString()}));
+  fs.mkdirSync(path.join(directory,'runtime'),{recursive:true});
+  fs.writeFileSync(path.join(directory,'runtime/mcp-connection.json'),JSON.stringify({url:`http://127.0.0.1:${config.server.port}`,token:mcpToken}),{mode:0o600});
+  fs.writeFileSync(path.join(directory,'runtime/service.json'),JSON.stringify({pid:process.pid,port:config.server.port,started_at:new Date().toISOString()}));
   scheduler.start(); telegram.start();
   console.log(`Digital AI Partner: http://127.0.0.1:${config.server.port}`);
   console.log(`Hermes ${runtimeReadiness(config).ready ? 'enabled' : 'waiting for model configuration'}; Telegram ${config.telegram.enabled ? 'enabled' : 'disabled'}.`);

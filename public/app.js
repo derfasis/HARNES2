@@ -9,6 +9,7 @@ const modeButton = (mode,current) => `<button class="mode-button ${mode===curren
 const empty = (title,text,action='') => `<div class="empty"><strong>${esc(title)}</strong><p>${esc(text)}</p>${action}</div>`;
 const panel = (title,content,action='') => `<section class="panel"><div class="panel-head"><h2>${esc(title)}</h2>${action}</div>${content}</section>`;
 let token='',state=null,tab='overview',selected=null,detail=null;
+let reviewFilter='pending',reviewOffset=0,reviewDetail=null;
 const pending = new Map();
 async function api(route,body) {
   const response = await fetch(route,{method:body === undefined?'GET':'POST',headers:{'x-partner-token':token,...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});
@@ -21,6 +22,7 @@ async function command(action,payload) {
 }
 async function refresh() {
   state=await api('/api/state');if(selected) detail=await api(`/api/conversations/${encodeURIComponent(selected)}`);
+  if(tab==='tasks')state.opportunity_reviews=await api(`/api/opportunities?status=${encodeURIComponent(reviewFilter)}&offset=${reviewOffset}`);
   $('#model-status').textContent=state.runtime.ready?'Модель подключена':'Ожидает подключения ИИ';
   $('#model-status').className=`pill${state.runtime.ready?' ready':''}`;render();
 }
@@ -54,7 +56,15 @@ function people(){
   ${panel('Факты о человеке',facts.length?facts.map(f=>`<div class="lesson"><h3>${esc(f.text)}</h3><p class="tiny muted">${esc(f.source_ref)}</p>${badge(f.status)} ${f.status==='candidate'?button('Подтвердить','fact-confirm',f.id)+button('Отклонить','fact-reject',f.id):''}</div>`).join(''):empty('Подтверждённых фактов пока нет','Сохраняйте наблюдения с источником. Предположения ИИ требуют рассмотрения.'))}
   ${panel('Результаты',outcomes.length?outcomes.map(o=>`<div class="feature"><div>${esc(label(o.kind))}<small>${esc(o.evidence)}</small></div><span class="muted tiny">${date(o.created_at)}</span></div>`).join(''):empty('Результат ещё не зафиксирован','Предложение звонка, согласие и состоявшаяся встреча — отдельные события.'),button('Записать результат','outcome'))}</div></div>`;
 }
-function tasks(){return opportunityPanel()+panel('Очередь работы',`<div class="section-note">${esc(state.scheduler.reason??'Задачи выполняются по сроку, когда подключена модель. Предложения новых задач сначала рассматривает владелец.')}</div>${state.tasks.length?`<div class="table-wrap"><table class="data-table"><thead><tr><th>Задача</th><th>Срок</th><th>Состояние</th><th>Действия</th></tr></thead><tbody>${state.tasks.map(t=>`<tr><td>${esc(t.title)}<small>${esc(t.instructions)}</small></td><td>${date(t.due_at)}</td><td>${badge(t.status)}</td><td>${t.kind==='opportunity_review'?button('Разобрать','opportunity-detail',t.id):t.status==='proposed'?button('Принять','task-approve',t.id):''}${t.kind!=='opportunity_review'&&['failed','interrupted','blocked','cancelled'].includes(t.status)?button('Повторить','task-retry',t.id):''}${!['done','cancelled'].includes(t.status)?button('Отменить','task-cancel',t.id):''}</td></tr>`).join('')}</tbody></table></div>`:empty('Очередь свободна','Сформулируйте полезное действие для партнёра.')}`,`<div class="actions">${button('Обработать очередь','wake')}${button('+ Задача','task-new','','primary')}</div>`)}
+function tasks(){
+  const work=state.tasks.filter(t=>t.kind!=='opportunity_review');
+  return opportunityQueuePanel()+panel('Очередь работы',`${work.length?`<div class="table-wrap"><table class="data-table"><thead><tr><th>Задача</th><th>Срок</th><th>Состояние</th><th>Действия</th></tr></thead><tbody>${work.map(t=>`<tr><td>${esc(t.title)}<small>${esc(t.instructions)}</small></td><td>${date(t.due_at)}</td><td>${badge(t.status)}</td><td>${t.status==='proposed'?button('Принять','task-approve',t.id):''}${['failed','interrupted','blocked','cancelled'].includes(t.status)?button('Повторить','task-retry',t.id):''}${!['done','cancelled'].includes(t.status)?button('Отменить','task-cancel',t.id):''}</td></tr>`).join('')}</tbody></table></div>`:empty('Очередь свободна','')}`,`<div class="actions">${button('Обработать очередь','wake')}${button('+ Задача','task-new','','primary')}</div>`)+`<details><summary>Ручные snapshots</summary>${opportunityPanel()}</details>`;
+}
+function opportunityQueuePanel(){
+  const q=state.opportunity_reviews??{items:[],total:0,offset:0,limit:50};
+  const filter=`<label class="review-filter">Статус разбора<select id="review-filter">${[['pending','Ожидает'],['approved','Одобрено'],['rejected','Отклонено'],['cancelled','Отменено'],['all','Все']].map(([v,l])=>`<option value="${v}"${v===reviewFilter?' selected':''}>${l}</option>`).join('')}</select></label>`;
+  return panel(`На рассмотрении (${q.total})`,q.items.length?`<div class="table-wrap"><table class="data-table"><thead><tr><th>Источник / субъект</th><th>Решение</th><th>Разбор / evidence</th><th></th></tr></thead><tbody>${q.items.map(d=>`<tr><td><span class="review-preview">${esc(d.source_message?.text)}</span><small>${esc(d.subject.source)} · ${esc(d.subject.author_id)}</small></td><td>${esc(d.decision)}<small class="review-preview">${esc(d.summary)}</small></td><td>${badge(d.review.effective_status)} <span class="badge ${d.freshness.fresh?'green':'red'}">${d.freshness.fresh?'Свежая evidence':'Устарела evidence'}</span></td><td>${button('Разобрать','opportunity-detail',d.task_id)}</td></tr>`).join('')}</tbody></table></div><div class="actions">${q.offset>0?button('Назад','opportunity-prev'):''}${q.offset+q.limit<q.total?button('Далее','opportunity-next'):''}</div>`:empty('Нет карточек в этом статусе','')+(q.offset>0?button('Назад','opportunity-prev'):''),filter);
+}
 function opportunityPanel(){
   return panel('Opportunity: только разбор оператором',`<p>Snapshot, активный offer и один результат Router. Candidate не является одобрением или разрешением на контакт. Источники и offer задаются в config/local.json, раздел opportunity.</p>
   <p>Автоматический source pipeline: ${state.configuration?.opportunity_automatic?'включён, только no-tool анализ':'выключен'}. Публичные source events обрабатываются отдельно от очереди agent tasks.</p>
@@ -63,8 +73,15 @@ function opportunityPanel(){
 }
 function opportunityReviewMarkup(d){
   const o=d.output, r=o.next_action, f=d.freshness;
+  const review=d.review??{status:'pending',effective_status:'pending',revision:0,draft_revision:0,draft_text:r.draft?.text};
+  const source=d.snapshot.messages?.find(m=>m.id===d.snapshot.anchor_message_id);
+  const available=d.task.status==='proposed';
   const spans=items=>items.length?items.map(e=>`<article class="lesson"><strong>${esc(e.message_id)} / ${esc(e.author_id)} / v${esc(e.version)}</strong><pre class="wrap">${esc(e.span)}</pre><small>${esc(e.kind)} · ${esc(e.attribution)}</small></article>`).join(''):'<p>Нет заявленных фрагментов.</p>';
-  return `<p><strong>Только candidate. Не одобрено. Контакт и отправка запрещены.</strong></p>
+  return `<div class="opportunity-detail"><p><strong>Candidate. Контакт и отправка запрещены.</strong></p>
+  <p>Разбор: ${badge(review.effective_status)} · версия ${review.revision}<br>Разрешение на контакт: отсутствует · Исполнение: запрещено</p>
+  <div class="actions">${available&&review.status==='pending'?`<button class="button" data-do="opportunity-approve" data-id="${esc(d.task.id)}"${!f.fresh?' disabled title="Evidence устарела"':''}>Одобрить разбор</button>`:''}${available&&r.draft?button('Изменить текст','opportunity-edit',d.task.id):''}${available&&review.status!=='rejected'?button('Отклонить','opportunity-reject',d.task.id,'danger'):''}${button('Обновить','opportunity-detail',d.task.id)}</div>
+  <p id="review-error" class="review-error" role="alert" hidden></p>
+  <h3>Исходное сообщение ${esc(source?.id??'')}</h3><pre class="wrap">${esc(source?.text??'Недоступно')}</pre>
   <p>Автор: ${esc(d.subject.author_id)}<br>Источник: ${esc(d.subject.source)}<br>Связь с CRM: ${d.subject.crm_link?esc(d.subject.crm_link.conversation_id)+' (указана оператором, не верифицирована)':'не установлена; suppression и ownership неизвестны'}</p>
   <p><strong>${f.fresh?'Свежесть подтверждена только по зарегистрированному snapshot':'УСТАРЕЛО / НЕДОСТУПНО'}</strong><br>${esc(f.reasons.join(', '))}<br>Проверено: ${date(f.checked_at)}; снимок: ${date(d.snapshot.source.captured_at)}</p>
   <h3>Offer ${esc(d.snapshot.active_offer.id)} / ${esc(d.snapshot.active_offer.version)}</h3><p>${esc(d.snapshot.active_offer.text)}</p>
@@ -72,10 +89,13 @@ function opportunityReviewMarkup(d){
   <h3>Evidence</h3>${spans(o.opportunity.evidence)}<h3>Противоречия</h3>${spans(o.opportunity.contradictions)}
   <h3>Неизвестно</h3><pre class="wrap">${esc([...o.opportunity.unknowns,...r.unknowns].join('\n')||'Не заявлено; это не доказательство полноты.')}</pre>
   <h3>Router: ${esc(r.decision)}</h3><p>${esc(r.strategy)}</p><p>${esc(r.reason)}</p>
-  ${r.draft?`<h3>Только предложение текста</h3><pre class="wrap">${esc(r.draft.text)}</pre>`:''}
+  <p>Субъект: ${esc(d.subject.author_id)}<br>Target: ${esc(r.draft?.target_id??d.subject.author_id)}</p>
+  ${r.draft?`<h3>Черновик · версия ${review.draft_revision}</h3><pre class="wrap">${esc(review.draft_text)}</pre>${review.draft_revision>0?`<details><summary>Исходный AI draft</summary><pre class="wrap">${esc(r.draft.text)}</pre></details>`:''}`:''}
+  <h3>История разбора</h3>${(d.review_history??[]).map(e=>`<div class="lesson"><strong>${esc(label(e.review.status))} · версия ${esc(e.review.revision)}</strong><small>${date(e.created_at)} · ${esc(label(e.actor))}</small>${e.review.reason?`<p>${esc(e.review.reason)}</p>`:''}${e.previous_text!==undefined?`<details><summary>Изменение текста</summary><pre class="wrap">${esc(e.previous_text)}</pre><pre class="wrap">${esc(e.review.draft_text)}</pre></details>`:''}</div>`).join('')||'<p>Решений оператора пока нет.</p>'}
+  ${(d.review_denials??[]).length?`<h3>Отказы проверок</h3>${d.review_denials.map(e=>`<p>${esc(e.code)}<br><small>${date(e.created_at)} · ${esc(label(e.actor))}</small></p>`).join('')}`:''}
   <p>Source identity: ${esc(d.source_identity?`${d.source_identity.source_id} / ${d.source_identity.message_id} / v${d.source_identity.version}`:'ручной snapshot')}<br>Display name (не identity): ${esc(d.source_identity?.display_name??'неизвестно')}<br>Duplicate state: ${esc(d.duplicate_state??'canonical_single_review')}</p>
   <p>Ключ дедупликации: ${esc(d.fingerprint)}<br>Задача: ${esc(d.task.id)} / ${esc(d.task.status)}</p>
-  <details><summary>Полный проверяемый пакет: версии, критерии, ограничения, coverage</summary><pre class="code">${esc(JSON.stringify(d,null,2))}</pre></details>`;
+  <details><summary>Полный проверяемый пакет: версии, критерии, ограничения, coverage</summary><pre class="code">${esc(JSON.stringify(d,null,2))}</pre></details></div>`;
 }
 function opportunityReadOnly(title,markup){
   $('#modal-title').textContent=title;$('#modal-body').innerHTML=markup;$('#modal').showModal();
@@ -87,14 +107,14 @@ function settings(){const mtproto=state.telegram.transport==='mtproto';return `<
 
 function field(name,title,type='text',value='',options=[]){return `<label for="f-${esc(name)}">${esc(title)}</label>${type==='textarea'?`<textarea id="f-${esc(name)}" name="${esc(name)}">${esc(value)}</textarea>`:type==='select'?`<select id="f-${esc(name)}" name="${esc(name)}">${options.map(([v,l])=>`<option value="${esc(v)}"${String(v)===String(value)?' selected':''}>${esc(l)}</option>`).join('')}</select>`:`<input id="f-${esc(name)}" name="${esc(name)}" type="${esc(type)}" value="${esc(value)}">`}`}
 function modal(title,content,onSubmit){
-  $('#modal-title').textContent=title;$('#modal-body').innerHTML=`<form id="modal-form">${content}<div class="form-actions"><button type="button" class="button secondary" data-do="modal-close">Отмена</button><button class="button" type="submit">Сохранить</button></div></form>`;
-  $('#modal-form').onsubmit=async e=>{e.preventDefault();const submit=e.submitter;submit.disabled=true;try{await onSubmit(Object.fromEntries(new FormData(e.currentTarget)));$('#modal').close();await refresh();notify('Сохранено.');}catch(error){notify(error.message,true);}finally{submit.disabled=false;}};
+  $('#modal-title').textContent=title;$('#modal-body').innerHTML=`<form id="modal-form">${content}<p id="modal-error" class="review-error" role="alert" hidden></p><div class="form-actions"><button type="button" class="button secondary" data-do="modal-close">Отмена</button><button class="button" type="submit">Сохранить</button></div></form>`;
+  $('#modal-form').onsubmit=async e=>{e.preventDefault();const submit=e.submitter;submit.disabled=true;try{await onSubmit(Object.fromEntries(new FormData(e.currentTarget)));$('#modal').close();await refresh();notify('Сохранено.');}catch(error){$('#modal-error').textContent=error.message;$('#modal-error').hidden=false;}finally{submit.disabled=false;}};
   $('#modal').showModal();
 }
 const convOptions=()=>[['','Общая работа партнёра'],...state.conversations.map(c=>[c.id,c.name])];
 const convPayload=()=>({conversation_id:selected});
 async function act(action,itemId,extra){
-  if(action.startsWith('go-')){tab=action.slice(3);render();return;}
+  if(action.startsWith('go-')){tab=action.slice(3);await refresh();return;}
   if(action==='modal-close'){$('#modal').close();return;}
   if(action==='person-select'){selected=itemId;detail=await api(`/api/conversations/${itemId}`);render();return;}
   if(action==='opportunity-capture'){
@@ -111,7 +131,23 @@ async function act(action,itemId,extra){
     opportunityReadOnly(`Контекст Router: snapshot ${itemId}`,`<p>Только данные для одного no-tool Router turn через существующий adapter. Эта кнопка не вызывает модель. ${esc(c.freshness.reasons.join(', '))}</p><pre class="code">${esc(JSON.stringify(c,null,2))}</pre>`);return;
   }
   if(action==='opportunity-detail'){
-    const d=await api(`/api/opportunities/${encodeURIComponent(itemId)}`);opportunityReadOnly('Opportunity: разбор оператором',opportunityReviewMarkup(d));return;
+    reviewDetail=await api(`/api/opportunities/${encodeURIComponent(itemId)}`);opportunityReadOnly('Opportunity: разбор оператором',opportunityReviewMarkup(reviewDetail));return;
+  }
+  if(action==='opportunity-prev'||action==='opportunity-next'){
+    reviewOffset=Math.max(0,reviewOffset+(action==='opportunity-next'?50:-50));await refresh();return;
+  }
+  if(['opportunity-approve','opportunity-edit','opportunity-reject'].includes(action)){
+    const d=reviewDetail;if(!d||d.task.id!==itemId)throw new Error('Перезагрузите карточку');
+    const p={task_id:itemId,fingerprint:d.fingerprint,expected_revision:d.review.revision};
+    if(action==='opportunity-edit'){
+      modal('Изменить review draft',field('text','Текст','textarea',d.review.draft_text)+field('reason','Причина изменения','textarea'),v=>command('opportunity.review.edit',{...p,...v}));return;
+    }
+    if(action==='opportunity-reject'){
+      modal('Отклонить review',field('reason','Причина','textarea'),v=>command('opportunity.review.reject',{...p,...v}));return;
+    }
+    try{await command('opportunity.review.approve',p);await act('opportunity-detail',itemId);await refresh();}
+    catch(error){const message=$('#review-error');message.textContent=error.message;message.hidden=false;}
+    return;
   }
   if(action==='mission'){modal('Направление работы',field('mission','Цель партнёра','textarea',state.partner.mission),p=>command('partner.update',p));return;}
   if(action==='person-new'){modal('Добавить человека',field('name','Имя')+field('source','Источник и почему человек релевантен','textarea')+field('notes','Заметки','textarea')+field('permission','Основание для контакта (если уже есть)','textarea')+field('channel','Канал','select','manual',[['manual','Ручной'],['telegram','Telegram Bot API']])+field('external_id','Числовой Telegram chat ID (только для Telegram)'),async p=>{if(p.channel!=='telegram')delete p.external_id;const r=await command('person.create',p);selected=r.conversation_id;tab='people';});return;}
@@ -141,7 +177,8 @@ async function act(action,itemId,extra){
   else if(action==='run-detail'){const run=await api(`/api/runs/${itemId}`);$('#modal-title').textContent=`Запуск · ${label(run.status)}`;$('#modal-body').innerHTML=`<pre class="wrap">${esc(run.result?.final_response??run.error??'Нет результата')}</pre><details><summary>Точный контекст</summary><pre class="code">${esc(JSON.stringify(run.context,null,2))}</pre></details><details><summary>Инструменты (${run.tools.length})</summary><pre class="code">${esc(JSON.stringify(run.tools,null,2))}</pre></details><details><summary>Полный результат runtime</summary><pre class="code">${esc(JSON.stringify(run.result,null,2))}</pre></details>`;$('#modal').showModal();return;}
   await refresh();notify('Сохранено.');
 }
-document.addEventListener('click',async event=>{const nav=event.target.closest('[data-tab]');if(nav){tab=nav.dataset.tab;render();return;}const btn=event.target.closest('[data-do]');if(!btn)return;btn.disabled=true;try{await act(btn.dataset.do,btn.dataset.id,btn.dataset.mode);}catch(error){notify(error.message,true);}finally{btn.disabled=false;}});
+document.addEventListener('click',async event=>{const nav=event.target.closest('[data-tab]');if(nav){tab=nav.dataset.tab;try{await refresh();}catch(error){notify(error.message,true);}return;}const btn=event.target.closest('[data-do]');if(!btn)return;btn.disabled=true;try{await act(btn.dataset.do,btn.dataset.id,btn.dataset.mode);}catch(error){notify(error.message,true);}finally{btn.disabled=false;}});
+document.addEventListener('change',async event=>{if(event.target.id==='review-filter'){reviewFilter=event.target.value;reviewOffset=0;try{await refresh();}catch(error){notify(error.message,true);}}});
 $('#close-modal').onclick=()=>$('#modal').close();
 $('#export-button').onclick=async()=>{try{const data=await api('/api/export');const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const link=document.createElement('a');link.href=url;link.download=`digital-ai-partner-${new Date().toISOString().slice(0,10)}.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);notify('Экспорт подготовлен. В нём есть персональные данные; храните его как рабочую базу.');}catch(error){notify(error.message,true);}};
 try{token=(await api('/api/session')).token;await refresh();}catch(error){notify(error.message,true);}

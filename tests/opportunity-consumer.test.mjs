@@ -69,6 +69,125 @@ function result(context, decision = 'PUBLIC_REPLY', positive = true) {
     authority: { contact_permission: false, allowed_effects: [] } };
 }
 
+function reviewPayload(h, task, extra = {}) {
+  const d = h.detail(task);
+  return { task_id: task.task_id, fingerprint: d.fingerprint, expected_revision: d.review.revision, ...extra };
+}
+
+test('operator edit preserves model output and approval remains review-state only', async t => {
+  const h = harness(t), c = await h.capture(), task = await h.consume(c), original = h.detail(task).output;
+  const edited = await h.command('opportunity.review.edit', reviewPayload(h, task, { text: '<script>untrusted human text</script>', reason: 'Correct the wording.' }));
+  assert.equal(edited.review.draft_revision, 1); assert.equal(edited.review.status, 'pending');
+  const approved = await h.command('opportunity.review.approve', reviewPayload(h, task));
+  assert.equal(approved.review.status, 'approved'); assert.equal(approved.review.approved_draft_revision, 1);
+  assert.equal(approved.review.approved_fingerprint, approved.fingerprint);
+  let d = h.detail(task);
+  assert.deepEqual(d.output, original); assert.equal(d.output.next_action.review.status, 'pending');
+  assert.equal(d.task.status, 'proposed'); assert.equal(d.review_history.length, 2);
+  assert.equal(d.review_history[0].actor, 'operator'); assert.equal(d.executable, false);
+  assert.equal(d.contact_permission, false); assert.deepEqual(d.allowed_effects, []);
+  await h.command('opportunity.review.edit', reviewPayload(h, task, { text: 'A second human revision.' }));
+  d = h.detail(task); assert.equal(d.review.status, 'pending'); assert.equal(d.review.approved_fingerprint, null);
+  assert.equal(d.review.approved_draft_revision, null); assert.equal(d.review.draft_revision, 2);
+  h.restart(); assert.equal(h.detail(task).review.draft_revision, 2); assert.deepEqual(h.detail(task).output, original);
+  const scheduler = new Scheduler(h.service, { run: () => { throw Error('Review executed'); } }, { sendApproved: () => { throw Error('Send'); } });
+  await scheduler.tick(); h.noEffects();
+});
+
+test('review commands dedupe request IDs and reject competing stale revisions', async t => {
+  const h = harness(t), c = await h.capture(), task = await h.consume(c), p = reviewPayload(h, task), requestId = id();
+  const approved = await h.command('opportunity.review.approve', p, undefined, requestId);
+  assert.deepEqual(await h.command('opportunity.review.approve', p, undefined, requestId), approved);
+  await assert.rejects(h.command('opportunity.review.reject', p), /REVIEW_REVISION_CONFLICT/);
+  assert.equal(h.detail(task).review_history.length, 1);
+  await h.command('opportunity.review.edit', reviewPayload(h, task, { text: 'Reset to pending.' }));
+  const sameVersion = reviewPayload(h, task);
+  const outcomes = await Promise.allSettled([
+    h.command('opportunity.review.approve', sameVersion),
+    h.command('opportunity.review.reject', sameVersion),
+  ]);
+  assert.equal(outcomes.filter(r => r.status === 'fulfilled').length, 1);
+  assert.equal(h.detail(task).review.revision, 3); h.noEffects();
+});
+
+test('stale source and changed offer prevent approval and invalidate effective review approval', async t => {
+  const h = harness(t), c = await h.capture(), task = await h.consume(c);
+  await h.command('opportunity.review.approve', reviewPayload(h, task));
+  h.config.opportunity.activeOffer.text += ' Changed policy.';
+  assert.equal(h.detail(task).review.effective_status, 'stale');
+  await h.command('opportunity.review.edit', reviewPayload(h, task, { text: 'Human wording can be corrected, not sent.' }));
+  await assert.rejects(h.command('opportunity.review.approve', reviewPayload(h, task)), /STALE_REVIEW/);
+  h.config.opportunity.activeOffer = structuredClone(h.input.active_offer);
+  const changed = structuredClone(h.input); changed.messages.at(-1).version++; changed.messages.at(-1).text += ' Updated question.';
+  changed.source.captured_at = new Date().toISOString(); await h.capture(changed);
+  await assert.rejects(h.command('opportunity.review.approve', reviewPayload(h, task)), /STALE_REVIEW/);
+  const denied = h.store.all("SELECT payload_json FROM events WHERE kind='opportunity.review.denied'");
+  assert.equal(denied.length, 2); assert.equal(JSON.parse(denied[0].payload_json).code, 'STALE_REVIEW'); h.noEffects();
+});
+
+test('review cannot grant authority, retarget a draft or use agent/channel actors', async t => {
+  const h = harness(t), c = await h.capture(), task = await h.consume(c);
+  for (const extra of [{ contact_permission: true }, { allowed_effects: ['send'] }, { target_id: 'someone-else' }, { text: 'Not an edit' }])
+    await assert.rejects(h.command('opportunity.review.approve', reviewPayload(h, task, extra)), /INVALID_REVIEW_FIELDS/);
+  for (const kind of ['agent', 'channel'])
+    await assert.rejects(h.command('opportunity.review.approve', reviewPayload(h, task), { kind }), /только владельцу/);
+  await assert.rejects(h.command('opportunity.review.approve', reviewPayload(h, task, { fingerprint: 'forged' })), /REVIEW_FINGERPRINT_MISMATCH/);
+  assert.equal(h.detail(task).review.revision, 0);
+  assert.equal(h.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='opportunity.review.denied'").n, 7);
+  h.noEffects();
+});
+
+test('no-draft HANDOFF can be reviewed but never given a fabricated reply', async t => {
+  const h = harness(t), c = await h.capture(), task = await h.consume(c, result(c.context, 'HANDOFF'));
+  await assert.rejects(h.command('opportunity.review.edit', reviewPayload(h, task, { text: 'Invented draft' })), /REVIEW_HAS_NO_DRAFT/);
+  await h.command('opportunity.review.approve', reviewPayload(h, task));
+  assert.equal(h.detail(task).review.draft_text, null); h.noEffects();
+});
+
+test('reject and cancel remain non-executable and queue status is independent of task scheduling', async t => {
+  const h = harness(t), c = await h.capture(), task = await h.consume(c);
+  assert.equal(h.service.opportunityReviews().total, 1);
+  await h.command('opportunity.review.reject', reviewPayload(h, task, { reason: 'Not useful.' }));
+  assert.equal(h.service.opportunityReviews().total, 0);
+  assert.equal(h.service.opportunityReviews({ status: 'rejected' }).items[0].review.reason, 'Not useful.');
+  await assert.rejects(h.command('opportunity.review.approve', reviewPayload(h, task)), /REVIEW_ALREADY_DECIDED/);
+  await h.command('opportunity.review.edit', reviewPayload(h, task, { text: 'Reconsider wording.' }));
+  await h.command('task.cancel', { task_id: task.task_id });
+  assert.equal(h.detail(task).review.effective_status, 'cancelled');
+  assert.equal(h.service.opportunityReviews({ status: 'cancelled' }).total, 1);
+  await assert.rejects(h.command('opportunity.review.approve', reviewPayload(h, task)), /REVIEW_TASK_UNAVAILABLE/);
+  await assert.rejects(h.command('task.approve', { task_id: task.task_id }), /candidate нельзя/); h.noEffects();
+});
+
+test('review event and receipt roll back together; rejected attempt is sanitized and durable', async t => {
+  const h = harness(t), c = await h.capture(), task = await h.consume(c), requestId = id(), run = h.store.run.bind(h.store);
+  const fault = mock.method(h.store, 'run', (sql, ...args) => {
+    if (sql.startsWith('INSERT INTO command_receipts')) throw Error('One-off receipt failure');
+    return run(sql, ...args);
+  });
+  await assert.rejects(h.command('opportunity.review.edit', reviewPayload(h, task, { text: 'Secret attack text', reason: 'Do not leak into denial' }), undefined, requestId));
+  fault.mock.restore();
+  assert.equal(h.detail(task).review.revision, 0);
+  assert.equal(h.store.get('SELECT COUNT(*) AS n FROM command_receipts WHERE id=?', requestId).n, 0);
+  const denied = h.store.get("SELECT payload_json FROM events WHERE kind='opportunity.review.denied'").payload_json;
+  assert.doesNotMatch(denied, /Secret attack|Do not leak/); h.noEffects();
+});
+
+test('review list is independently paginated, validated and partner-scoped', async t => {
+  const h = harness(t), c = await h.capture(), task = await h.consume(c);
+  for (let n = 0; n < 305; n++)h.service.addTask({ kind: 'research', title: 'Other work', instructions: 'Offline', due_at: new Date(Date.now() + 100000).toISOString() }, 'operator', 'pending');
+  assert.equal(h.service.snapshot().tasks.some(t => t.id === task.task_id), false);
+  const queue = h.service.opportunityReviews({ status: 'all', limit: 1 });
+  assert.equal(queue.total, 1); assert.equal(queue.items[0].task_id, task.task_id);
+  assert.equal(h.service.opportunityReviews({ offset: 1 }).items.length, 0);
+  assert.throws(() => h.service.opportunityReviews({ status: 'pending;DROP TABLE tasks' }), /INVALID_REVIEW_STATUS/);
+  assert.throws(() => h.service.opportunityReviews({ limit: 0 }), /INVALID_REVIEW_PAGE/);
+  assert.throws(() => h.service.opportunityReviews({ offset: -1 }), /INVALID_REVIEW_PAGE/);
+  const other = new BusinessService(h.store, { ...h.config, partnerId: 'different-partner' });
+  assert.equal(other.opportunityReviews({ status: 'all' }).total, 0);
+  assert.throws(() => other.opportunityDetail(task.task_id), /REVIEW_TASK_NOT_FOUND/); h.noEffects();
+});
+
 test('positive opportunity becomes a durable review task with exact source/offer and no approval', async t => {
   const h = harness(t), c = await h.capture(), saved = await h.consume(c), d = h.detail(saved);
   assert.equal(d.task.kind, 'opportunity_review'); assert.equal(d.task.status, 'proposed');

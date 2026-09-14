@@ -27,7 +27,8 @@ No new table or migration. Immutable `opportunity.snapshot` and
 It is not an executable job or a draft. Generic task approval/retry and the
 scheduler must exclude this kind. Planning/Conversation Brain contexts must
 not receive these review tasks or public source text as work instructions.
-Only task cancellation is available. No candidate approval command exists.
+Generic task approval remains forbidden. Task #19 adds operator review-state
+commands, not candidate contact authorization; see `DASHBOARD_REVIEW_V0.md`.
 
 The operator registers a latest-version public snapshot and imports the one
 Router response computed for the returned context. This slice does not call a
