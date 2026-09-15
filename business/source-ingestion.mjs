@@ -81,6 +81,7 @@ export function ingestSource(service, raw) {
   automaticBoundary(service);
   check(raw && typeof raw === 'object' && !Array.isArray(raw), 'INVALID_SOURCE_EVENT');
   const keys = ['source_id','source_kind','message_id','author_id','display_name','thread_id','reply_to_id','version','operation','text','created_at','updated_at'];
+  if(raw.operation==='unsupported')keys.push('unsupported');
   check(Object.keys(raw).length === keys.length && Object.keys(raw).every(k => keys.includes(k)), 'INVALID_SOURCE_FIELDS');
   check(Buffer.byteLength(JSON.stringify(raw)) <= 80000, 'SOURCE_EVENT_TOO_LARGE');
   allowed(service, raw.source_id);
@@ -88,8 +89,12 @@ export function ingestSource(service, raw) {
   check(validId(raw.message_id) && nullableId(raw.author_id) && nullableId(raw.thread_id) && nullableId(raw.reply_to_id), 'INVALID_SOURCE_IDENTITY');
   check(raw.display_name === null || typeof raw.display_name === 'string' && raw.display_name.length <= 200, 'INVALID_DISPLAY_NAME');
   check(Number.isInteger(raw.version) && raw.version >= 1 && raw.version <= 2147483647, 'INVALID_SOURCE_VERSION');
-  check(['upsert','delete'].includes(raw.operation), 'INVALID_SOURCE_OPERATION');
-  check(raw.operation === 'delete' ? raw.text === null : typeof raw.text === 'string' && raw.text.trim() && raw.text.length <= 16000, 'INVALID_SOURCE_TEXT');
+  check(['upsert','delete','unsupported'].includes(raw.operation), 'INVALID_SOURCE_OPERATION');
+  check(raw.operation !== 'upsert' ? raw.text === null : typeof raw.text === 'string' && raw.text.trim() && raw.text.length <= 16000, 'INVALID_SOURCE_TEXT');
+  if(raw.operation==='unsupported')check(raw.unsupported && typeof raw.unsupported==='object'
+    && Object.keys(raw.unsupported).sort().join(',')==='fingerprint,reason'
+    && typeof raw.unsupported.reason==='string' && /^[a-z_]{1,50}$/.test(raw.unsupported.reason)
+    && typeof raw.unsupported.fingerprint==='string' && /^[a-f0-9]{64}$/.test(raw.unsupported.fingerprint),'INVALID_SOURCE_UNSUPPORTED');
   const message = { ...structuredClone(raw), created_at: timestamp(raw.created_at), updated_at: timestamp(raw.updated_at) };
   check(message.created_at <= message.updated_at && Date.parse(message.updated_at) <= Date.now(), 'FUTURE_OR_REVERSED_SOURCE_TIME');
   const historical = service.store.get(`SELECT id,payload_json FROM events WHERE partner_id=? AND kind=? AND actor='system'
@@ -135,6 +140,7 @@ export function sourceContextState(service, eventId) {
   check(rows.length <= 1000, 'SOURCE_CAPACITY_EXCEEDED');
   check(rows.find(r => r.message.message_id === anchor.message_id)?.event_id === eventId, 'SOURCE_MESSAGE_SUPERSEDED');
   check(anchor.operation !== 'delete', 'SOURCE_MESSAGE_DELETED');
+  check(anchor.operation !== 'unsupported', 'SOURCE_MESSAGE_UNSUPPORTED');
   check(anchor.author_id !== null, 'UNKNOWN_SOURCE_AUTHOR');
   const byId = new Map(rows.map(r => [r.message.message_id, r]));
   const selected = new Map(rows.filter(r => r.message.message_id === anchor.message_id
@@ -150,6 +156,9 @@ export function sourceContextState(service, eventId) {
     }
   }
   const scope = [...selected.values()].sort((a,b) => a.message.message_id.localeCompare(b.message.message_id));
+  // Opaque observations supersede previous evidence but cannot become evidence.
+  // Never silently omit an unsupported ancestor/author/thread from LLM context.
+  check(!scope.some(r=>r.message.operation==='unsupported'), 'SOURCE_CONTEXT_UNSUPPORTED');
   const live = scope.filter(r => r.message.operation === 'upsert');
   check(!live.some(r => r.message.created_at > anchor.created_at), 'POST_ANCHOR_CONTEXT');
   check(live.every(r => r.message.author_id !== null), 'UNKNOWN_CONTEXT_AUTHOR');

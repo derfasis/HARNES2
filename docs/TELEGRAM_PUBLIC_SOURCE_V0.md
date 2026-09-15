@@ -1,5 +1,9 @@
 # Public Telegram native-proof bridge v0
 
+Current normalization: [Telegram normalization boundary](TELEGRAM_NORMALIZATION.md)
+supersedes this historical checkpoint's raw-field/content rejection policy.
+Ordinary extensions are ignored; safe unsupported content is durably opaque.
+
 Recovery follow-up: [Reconciliation v1](TELEGRAM_RECONCILIATION_V1.md) separates
 recovered Message snapshots from native event PTS. The v0 verification below is
 a historical checkpoint, not the final recovery contract.
