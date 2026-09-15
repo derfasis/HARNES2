@@ -1,5 +1,9 @@
 # Telegram recovery / reconciliation v1
 
+Current content policy: [Telegram normalization boundary](TELEGRAM_NORMALIZATION.md).
+The v1/v2 envelope and durable recovery guarantees below also apply to opaque
+message revisions; the historical blanket raw-field/content rejection is removed.
+
 Checkpoint base: `6370c350bf7f2d943e57f998781f68f0359a8505` on
 `codex/telegram-public-source-v0`. Main is not merged. No live Telegram or model
 calls are part of this slice.

@@ -9,7 +9,8 @@ import { normalizeFailureCause } from './failure-cause.mjs';
 const RUNTIME = 'hermes-opportunity';
 const MAX_ATTEMPTS = 3;
 const terminalSource = new Set(['SOURCE_MESSAGE_SUPERSEDED','SOURCE_MESSAGE_DELETED','UNKNOWN_SOURCE_AUTHOR',
-  'UNKNOWN_CONTEXT_AUTHOR','POST_ANCHOR_CONTEXT','SOURCE_NOT_ALLOWED','SUBJECT_SUPPRESSED','SOURCE_CONTEXT_CAPACITY_EXCEEDED']);
+  'UNKNOWN_CONTEXT_AUTHOR','POST_ANCHOR_CONTEXT','SOURCE_NOT_ALLOWED','SUBJECT_SUPPRESSED','SOURCE_CONTEXT_CAPACITY_EXCEEDED',
+  'SOURCE_MESSAGE_UNSUPPORTED','SOURCE_CONTEXT_UNSUPPORTED']);
 function disposition(service, run, value, extra = {}) {
   const context = JSON.parse(run.context_json);
   finishSource(service, context.source_event_id, value, { run_id: run.id, ...extra });

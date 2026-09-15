@@ -86,6 +86,129 @@ const recoveryFinished=h=>h.store.all("SELECT payload_json FROM events WHERE kin
 const authorize=h=>h.service.command('source.reconcile',{source_id:sourceId,checkpoint_fingerprint:digest(h.state()),
   reason:'Operator investigated the fault; retry the same cursor once.'},`recovery-${h.store.get('SELECT COUNT(*) AS n FROM events').n}`);
 
+test('normalization: SDK text, harmless extensions and formatting preserve the legacy semantic envelope',()=>{
+  const legacy={id:1,channel_id:'100',from_id:{kind:'user',id:'10'},post:false,text:message().rawText,
+    date:1767225600,edit_date:null,reply_to_msg_id:null,reply_to_top_id:null,reply_to_channel_id:null};
+  const m=Object.assign(message({media:new Api.MessageMediaEmpty(),postAuthor:'Display label',
+    entities:[new Api.MessageEntityBold({offset:0,length:4})],contact_permission:true}),
+    {futureDisplayField:{anything:true},contact_permission:true});
+  const u=Object.assign(update(11,'new',{message:m}),{futureDeliveryDisplay:true,contact_permission:true});
+  const page=Object.assign(difference(11,[m],[u]),{futurePageMetadata:{enabled:true}});
+  assert.deepEqual(mapTelegramMessage(p,m),legacy);
+  assert.deepEqual(mapTelegramUpdate(p,u),{kind:'new',channel_id:'100',pts:11,pts_count:1,message:legacy});
+  assert.equal(mapChannelDifference(p,10,page).response_fingerprint,mapChannelDifference(p,10,difference(11,[message()],[update()])).response_fingerprint);
+  const r=Object.assign(new Api.MessageReplyHeader({replyToMsgId:3}),{futureReplyDisplay:1});
+  assert.equal(mapTelegramMessage(p,message({replyTo:r})).reply_to_msg_id,3);
+  const control=Object.assign(new Api.UpdateChannelMessageViews({channelId:b(100),id:1,views:1}),{futureMetadata:1});
+  assert.equal(mapTelegramControl(p,control).kind,'ignore');
+});
+test('normalization: SDK binary decoding, raw text and event builders work without a client',()=>{
+  const {BinaryReader}=require('telegram/extensions/BinaryReader');
+  const encoded=update(11,'new',{message:message({entities:[new Api.MessageEntityBold({offset:0,length:4})]})}).getBytes();
+  const decoded=new BinaryReader(encoded).tgReadObject();
+  assert.ok(decoded instanceof Api.UpdateNewChannelMessage);
+  assert.equal(mapTelegramUpdate(p,decoded).message.text,message().rawText);
+  assert.deepEqual(mapTelegramUpdate(p,update(12,'delete')).message_ids,[1]);
+});
+test('normalization: opaque native edit supersedes evidence, survives replay/restart, then accepts a supported edit',async t=>{
+  const h=harness(t);await positive(h);const card=h.cards()[0];
+  const m=message({message:'Opaque caption must not reach inference',media:new Api.MessageMediaUnsupported(),editDate:1767225601});
+  const edit=update(12,'edit',{message:m});await h.receive(edit);h.reply(difference(12,[m],[edit]));await h.poll();await h.tick();
+  const row=h.rows()[0];assert.equal(row.message.operation,'unsupported');assert.equal(row.message.text,null);
+  assert.equal(row.message.unsupported.reason,'media');assert.equal(proofs(h).at(-1).pts,12);
+  assert.equal(h.state().phase,'current');assert.equal(h.state().pts,12);assert.equal(h.reader.status().buffered,0);
+  assert.equal(h.service.opportunityDetail(card.id).freshness.fresh,false);assert.equal(h.calls,1);
+  assert.doesNotMatch(JSON.stringify(h.store.all('SELECT * FROM events')),/Opaque caption/);
+  await h.receive(edit);h.reply(empty(12));await h.restart();await h.poll();await h.tick();
+  assert.equal(h.rows()[0].event_id,row.event_id);assert.equal(h.calls,1);
+  const supported=update(13,'edit',{message:message({message:'Updated real question?',editDate:1767225602})});
+  h.reply(difference(13,[],[supported]));await h.poll();await h.tick();
+  assert.equal(h.rows()[0].message.operation,'upsert');assert.equal(h.rows()[0].message.unsupported,undefined);assert.equal(h.calls,2);noEffects(h);
+});
+test('normalization: opaque snapshots and counterless edits retain recovery proof and dedupe without inference',async t=>{
+  const h=harness(t);await h.bootstrap();const m=message({media:new Api.MessageMediaUnsupported()});
+  h.reply(difference(11,[m]));await h.poll();await h.tick();const first=h.rows()[0];
+  assert.equal(first.message.operation,'unsupported');assert.equal(proofs(h).at(-1).kind,'reconciled_snapshot');
+  assert.equal(proofs(h).at(-1).pts,undefined);assert.equal(h.calls,0);
+  h.reply(difference(12,[Object.assign(message({media:new Api.MessageMediaUnsupported()}),{views:999,futureField:1})]));
+  await h.poll();await h.tick();assert.equal(h.rows()[0].event_id,first.event_id);
+  const edit=zeroEdit(13,{message:message({media:new Api.MessageMediaUnsupported(),editDate:1767225601})});
+  h.reply(difference(13,[],[edit]));await h.poll();await h.tick();const row=h.rows()[0];
+  assert.equal(proofs(h).at(-1).kind,'reconciled_event');assert.equal(proofs(h).at(-1).pts_count,0);
+  await h.restart();await h.poll();await h.tick();assert.equal(h.rows()[0].event_id,row.event_id);
+  assert.equal(h.state().phase,'current');assert.equal(h.calls,0);noEffects(h);
+});
+test('normalization: opaque media projection ignores rotating SDK file references',()=>{
+  const photo=bytes=>new Api.MessageMediaPhoto({photo:new Api.Photo({id:b(77),accessHash:b(88),fileReference:Buffer.from(bytes),date:1767225600,sizes:[]})});
+  const a=mapTelegramMessage(p,message({media:photo([1])})),bumped=mapTelegramMessage(p,message({media:photo([2,3])}));
+  assert.equal(a.unsupported.reason,'media');assert.deepEqual(a,bumped);
+});
+test('normalization: safe service messages are durable opaque observations; history-wide actions still block',async t=>{
+  const h=harness(t);await h.bootstrap();
+  const m=new Api.MessageService({id:1,peerId:new Api.PeerChannel({channelId:b(100)}),fromId:new Api.PeerUser({userId:b(10)}),
+    date:1767225600,action:new Api.MessageActionChatAddUser({users:[b(20)]})});
+  h.reply(difference(11,[m],[update(11,'new',{message:m})]));await h.poll();await h.tick();
+  assert.equal(h.rows()[0].message.unsupported.reason,'service');assert.equal(h.state().phase,'current');assert.equal(h.calls,0);
+  for(const action of [new Api.MessageActionHistoryClear(),new Api.MessageActionSetMessagesTTL({period:60})]) {
+    const unsafe=new Api.MessageService({...m.originalArgs,id:2,action});
+    assert.throws(()=>mapTelegramUpdate(p,update(12,'new',{message:unsafe})),mappingFailure);
+  }
+  noEffects(h);
+});
+test('normalization: related opaque ancestry blocks inference while an unrelated author remains usable',async t=>{
+  const h=harness(t);await h.bootstrap();
+  const parent=message({media:new Api.MessageMediaUnsupported()});
+  const child=message({id:2,fromId:new Api.PeerUser({userId:b(20)}),replyTo:new Api.MessageReplyHeader({replyToMsgId:1})});
+  const unrelated=message({id:3,fromId:new Api.PeerUser({userId:b(30)})});
+  h.reply(difference(13,[parent,child,unrelated]));await h.poll();await h.tick();await h.tick();
+  assert.equal(h.calls,0);
+  const childRow=h.rows().find(r=>r.message.message_id==='message:2');
+  assert.throws(()=>sourceContextState(h.service,childRow.event_id),{code:'SOURCE_CONTEXT_UNSUPPORTED'});
+  await h.tick();assert.equal(h.calls,1);assert.equal(h.cards().length,1);noEffects(h);
+});
+test('normalization: opaque new observation invalidates a dependent existing review',async t=>{
+  const h=harness(t);await positive(h);const card=h.cards()[0];
+  h.reply(difference(12,[],[update(12,'new',{message:message({id:2,media:new Api.MessageMediaUnsupported()})})]));
+  await h.poll();await h.tick();assert.equal(h.calls,1);
+  assert.equal(h.service.opportunityDetail(card.id).freshness.fresh,false);noEffects(h);
+});
+test('normalization: deleting opaque material preserves tombstone identity and prevents resurrection',async t=>{
+  const h=harness(t);await h.bootstrap();const m=message({media:new Api.MessageMediaUnsupported()});
+  h.reply(difference(11,[m]));await h.poll();await h.tick();
+  h.reply(difference(12,[],[update(12,'delete')]));await h.poll();await h.tick();
+  assert.equal(h.rows()[0].message.operation,'delete');assert.equal(h.rows()[0].message.unsupported,undefined);assert.equal(h.calls,0);
+  h.reply(difference(13,[],[update(13,'edit',{message:message({editDate:1767225601})})]));
+  await assert.rejects(h.poll(),{code:'TELEGRAM_MESSAGE_DELETED'});assert.equal(h.state().pts,12);noEffects(h);
+});
+test('normalization: opaque event/proof/receipt roll back with checkpoint before ACK',async t=>{
+  const h=harness(t);await h.bootstrap();const opaque=update(11,'new',{message:message({media:new Api.MessageMediaUnsupported()})});
+  await h.receive(opaque);h.reply(difference(11,[],[opaque]));const run=h.store.run.bind(h.store);let fail=true,acks=0;
+  const ack=h.reader.acknowledge.bind(h.reader);h.reader.acknowledge=pts=>{acks++;return ack(pts);};
+  h.store.run=(sql,...args)=>{if(fail && sql.startsWith('INSERT INTO channel_offsets') && JSON.parse(args[2]).pts===11){fail=false;throw Error('opaque commit fault');}return run(sql,...args);};
+  await assert.rejects(h.poll(),/opaque commit fault/);assert.equal(acks,0);assert.equal(h.rows().length,0);
+  assert.equal(h.state().pts,10);assert.equal(proofs(h).length,0);assert.equal(recoveryReceipts(h).length,0);
+  await h.restart();await h.poll();await h.tick();assert.equal(h.rows()[0].message.operation,'unsupported');assert.equal(h.calls,0);noEffects(h);
+});
+test('normalization: semantic conflicts still latch even when both messages are opaque',async t=>{
+  const h=harness(t);await h.bootstrap();const first=update(11,'new',{message:message({message:'Caption A',media:new Api.MessageMediaUnsupported()})});
+  h.reply(difference(11,[],[first]));await h.poll();await h.tick();const row=h.rows()[0];
+  const conflict=update(11,'new',{message:message({message:'Caption B',media:new Api.MessageMediaUnsupported()})});
+  h.reply(difference(11,[],[conflict]));await assert.rejects(h.poll(),{code:'TELEGRAM_PTS_COLLISION'});
+  assert.equal(h.rows()[0].event_id,row.event_id);assert.equal(h.state().pts,11);assert.equal(h.calls,0);noEffects(h);
+});
+test('normalization: strict HARNES2 semantic/envelope fields cannot grant permissions',async t=>{
+  const h=harness(t);await h.bootstrap();const page=mapChannelDifference(p,10,difference());
+  page.snapshots[0].contact_permission=true;
+  await assert.rejects(applyTelegramDifference(h.service,sourceId,page),{code:'UNSUPPORTED_TELEGRAM_FIELDS'});
+  assert.equal(h.state().pts,10);assert.equal(h.rows().length,0);noEffects(h);
+});
+test('normalization: raw reaction controls preserve source health and existing evidence',async t=>{
+  const h=harness(t);await positive(h);const state=h.state();
+  const reaction=Object.assign(new Api.UpdateMessageReactions({peer:new Api.PeerChannel({channelId:b(100)}),msgId:1,
+    reactions:new Api.MessageReactions({results:[]})}),{futureDisplayField:1});
+  await h.receive(reaction);await h.tick();assert.deepEqual(h.state(),state);assert.equal(h.calls,1);noEffects(h);
+});
+
 test('GLM F1: harmless pinned channel controls preserve freshness, cursor and review',async t=>{
   const h=harness(t);await positive(h);const state=h.state(),events=h.store.get('SELECT COUNT(*) AS n FROM events').n;
   const controls=[new Api.UpdateChannelMessageViews({channelId:b(100),id:1,views:100}),
@@ -121,9 +244,9 @@ test('GLM F1: metadata changes to private/restricted/wrong username/TTL fail clo
     assert.equal(h.service.opportunityDetail(h.cards()[0].id).freshness.fresh,false);assert.equal(h.calls,1);noEffects(h);
   }
 });
-test('GLM F1: unknown scoped controls and invented fields remain integrity failures',async t=>{
+test('GLM F1: unhandled history truncation and unexpected control PTS remain integrity failures',async t=>{
   for(const control of [new Api.UpdateChannelAvailableMessages({channelId:b(100),availableMinId:1}),
-    new Api.UpdateChannelMessageViews({channelId:b(100),id:1,views:1,pts:11})]) {
+    Object.assign(new Api.UpdateChannelMessageViews({channelId:b(100),id:1,views:1}),{pts:11})]) {
     const h=harness(t);await h.bootstrap();await h.receive(control);
     assert.equal(h.state().reason,'INTEGRITY_RECONCILIATION_REQUIRED');assert.equal(h.state().pts,10);noEffects(h);
   }
@@ -153,12 +276,12 @@ test('GLM F2: covered historical WebPage receives no material version or inferen
   const receipt=JSON.parse(h.store.get("SELECT payload_json FROM events WHERE kind='source.telegram.update'").payload_json);
   assert.equal(receipt.disposition,'covered_historical_event');assert.deepEqual(receipt.source_event_ids,[]);assert.equal(h.calls,1);noEffects(h);
 });
-test('GLM F2: malformed WebPage proof and entity-bearing messages remain unsupported',()=>{
+test('GLM F2: malformed WebPage proof fails closed while ordinary entities preserve raw text',()=>{
   for(const u of [new Api.UpdateChannelWebPage({channelId:b(100),pts:11,ptsCount:1}),
     new Api.UpdateChannelWebPage({channelId:b(100),pts:11,ptsCount:0,webpage:new Api.WebPageEmpty({id:b(1)})}),
     new Api.UpdateChannelWebPage({channelId:b(200),pts:11,ptsCount:1,webpage:new Api.WebPageEmpty({id:b(1)})})])
     assert.throws(()=>mapTelegramUpdate(p,u),mappingFailure);
-  assert.throws(()=>mapTelegramUpdate(p,update(11,'new',{message:message({entities:[new Api.MessageEntityUrl({offset:0,length:4})]})})),mappingFailure);
+  assert.equal(mapTelegramUpdate(p,update(11,'new',{message:message({entities:[new Api.MessageEntityUrl({offset:0,length:4})]})})).message.text,message().rawText);
 });
 test('GLM F2: WebPage cannot cover a native gap or silently drop a conflicting PTS',async t=>{
   for(const others of [[webpage(12)],[update(),webpage(11)]]) {
@@ -290,7 +413,7 @@ test('GLM F9: empty advance after a buffered native update applies both to the s
 test('GLM F10: authorized recovery rejects an Empty page as unproven and keeps the latch',async t=>{
   for(const to of [9,15]) {
     const h=harness(t);h.fullReply({...publicFull(),fullChat:new Api.ChannelFull({id:b(100),pts:8})});await h.bootstrap();
-    await h.receive(new Api.UpdateChannelTooLong({channelId:b(100),contact_permission:true}));
+    await h.receive(new Api.UpdateChannelTooLong({channelId:b(100),pts:-1}));
     assert.equal(h.state().pts,8);assert.equal(h.state().reason,'INTEGRITY_RECONCILIATION_REQUIRED');
     const auth=await authorize(h);await h.restart();
     h.reply(empty(to));await assert.rejects(h.poll(),{code:'TELEGRAM_RECOVERY_EMPTY_UNPROVEN'});
@@ -456,7 +579,7 @@ test('crash after zero-count durable commit before ACK cannot duplicate inferenc
   assert.equal(h.rows()[0].event_id,row.event_id);assert.equal(h.calls,2);assert.equal(h.cards().length,2);noEffects(h);
 });
 test('operator recovery of the live zero-count blocker retries the same cursor without reset',async t=>{
-  const h=harness(t);await recovered(h);await h.receive(new Api.UpdateChannelTooLong({channelId:b(100),contact_permission:true}));
+  const h=harness(t);await recovered(h);await h.receive(new Api.UpdateChannelTooLong({channelId:b(100),pts:-1}));
   assert.equal(h.state().reason,'INTEGRITY_RECONCILIATION_REQUIRED');const auth=await authorize(h);await h.restart();
   h.reply(difference(12,[],[zeroEdit()]));await h.poll();await h.tick();assert.equal(h.state().phase,'current');assert.equal(h.state().pts,12);
   assert.equal(recoveryFinished(h).at(-1).authorization_id,auth.authorization_id);assert.equal(recoveryFinished(h).at(-1).status,'validated_page');
@@ -478,7 +601,8 @@ test('zero-count ingress cannot fabricate coverage when the server difference om
 });
 test('zero-count malformed edit/delete, unknown updates and v1 envelopes remain fail closed',async t=>{
   for(const e of [zeroEdit(12,{ptsCount:-1}),zeroEdit(12,{ptsCount:0.5}),zeroEdit(12,{pts:undefined}),
-    zeroEdit(12,{message:message()}),zeroEdit(12,{contact_permission:true}),update(12,'delete',{ptsCount:0,messages:[]})])
+    zeroEdit(12,{message:message()}),update(12,'delete',{ptsCount:0,messages:[]}),
+    update(12,'delete',{messages:undefined}),update(12,'delete',{messages:'untrusted'}),update(12,'delete',{messages:Array(101).fill(1)})])
     assert.throws(()=>mapTelegramUpdate(p,e),mappingFailure);
   assert.throws(()=>mapChannelDifference(p,11,difference(12,[],[zeroEdit(13)])),mappingFailure);
   assert.throws(()=>mapChannelDifference(p,11,difference(12,[],[new Api.UpdateReadChannelInbox({channelId:b(100),pts:12,maxId:1,stillUnreadCount:0})])),mappingFailure);
@@ -754,18 +878,21 @@ test('peer-scoped message IDs cannot collide across channels',()=>{
 test('anonymous and broadcast authors are never guessed humans',()=>{
   assert.equal(mapTelegramMessage(p,message({fromId:null})).from_id,null);
   assert.equal(mapTelegramMessage(p,message({post:true,fromId:null})).post,true);
-  assert.throws(()=>mapTelegramUpdate(p,update(11,'new',{message:message({post:true})})),mappingFailure);
+  assert.equal(mapTelegramUpdate(p,update(11,'new',{message:message({post:true})})).message.unsupported.reason,'attribution');
 });
-test('reply/thread/topic ancestry retains explicit cross-peer IDs and rejects implicit topic roots',()=>{
+test('reply/thread/topic ancestry retains explicit cross-peer IDs and marks unresolved topic semantics opaque',()=>{
   const r=new Api.MessageReplyHeader({replyToMsgId:7,replyToTopId:3,forumTopic:true,replyToPeerId:new Api.PeerChannel({channelId:b(200)})});
   const wire=mapTelegramMessage(p,message({replyTo:r}));assert.equal(wire.reply_to_top_id,3);assert.equal(wire.reply_to_channel_id,'200');
-  assert.throws(()=>mapTelegramMessage(p,message({replyTo:new Api.MessageReplyHeader({forumTopic:true,replyToMsgId:3})})),mappingFailure);
+  const opaque=mapTelegramMessage(p,message({replyTo:new Api.MessageReplyHeader({forumTopic:true,replyToMsgId:3})}));
+  assert.equal(opaque.unsupported.reason,'reply_or_quote');assert.equal(opaque.reply_to_top_id,null);
 });
-test('unsupported TL semantics and injected extra fields cannot be stripped into supported text',()=>{
-  for(const extra of [{fwdFrom:{}},{media:new Api.MessageMediaEmpty()},{ttlPeriod:10},{postAuthor:'signature'},
-    {viaBotId:b(3)},{noforwards:true},{entities:[new Api.MessageEntityBold({offset:0,length:4})]},
-    {replyTo:new Api.MessageReplyHeader({quote:true,replyToMsgId:3})},{contact_permission:true}])
-    assert.throws(()=>mapTelegramUpdate(p,update(11,'new',{message:message(extra)})),mappingFailure);
+test('unsupported content becomes opaque; malformed message scope/time still fails closed',()=>{
+  for(const extra of [{fwdFrom:new Api.MessageFwdHeader({date:1767225600})},{media:new Api.MessageMediaUnsupported()},{ttlPeriod:10},
+    {viaBotId:b(3)},{noforwards:true},{entities:[new Api.MessageEntityBlockquote({offset:0,length:4})]},
+    {replyTo:new Api.MessageReplyHeader({quote:true,replyToMsgId:3})}]) {
+    const mapped=mapTelegramUpdate(p,update(11,'new',{message:message(extra)}));
+    assert.equal(mapped.message.text,null);assert.ok(mapped.message.unsupported);assert.equal(mapped.pts,11);
+  }
   assert.throws(()=>mapTelegramUpdate(p,update(11,'new',{message:new Api.MessageService({id:1,peerId:new Api.PeerChannel({channelId:b(100)})})})),mappingFailure);
 });
 test('missing native pts, zero pts_count and unaccounted native-only coverage fail closed',()=>{

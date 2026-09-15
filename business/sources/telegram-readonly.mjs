@@ -108,14 +108,19 @@ function peer(value) {
   return `${value.kind}:${value.id}`;
 }
 export function normalizeTelegramMessage(p, m, version) {
-  fields(m,['id','channel_id','from_id','post','text','date','edit_date','reply_to_msg_id','reply_to_top_id','reply_to_channel_id']);
+  fields(m,['id','channel_id','from_id','post','text','date','edit_date','reply_to_msg_id','reply_to_top_id','reply_to_channel_id','unsupported']);
   check(integer(m.id) && m.channel_id === p.channelId, 'TELEGRAM_PEER_MISMATCH');
   check(typeof m.post === 'boolean', 'TELEGRAM_POST_FLAG_REQUIRED');
-  check(typeof m.text === 'string' && m.text.trim() && m.text.length <= 16000, 'UNSUPPORTED_TELEGRAM_CONTENT');
+  if(m.unsupported!==undefined) {
+    fields(m.unsupported,['reason','fingerprint']);
+    check(['service','outgoing','restricted','attribution','reply_or_quote','media','interactive','empty'].includes(m.unsupported.reason)
+      && typeof m.unsupported.fingerprint==='string' && /^[a-f0-9]{64}$/.test(m.unsupported.fingerprint)
+      && m.text===null,'UNSUPPORTED_TELEGRAM_CONTENT');
+  } else check(typeof m.text === 'string' && m.text.trim() && m.text.length <= 16000, 'UNSUPPORTED_TELEGRAM_CONTENT');
   const author = m.from_id != null ? peer(m.from_id) : m.post ? `channel:${p.channelId}` : null;
-  // This restricted contract cannot prove personal authorship of a broadcast post.
-  // Signed/discussion/foreign-channel post variants require an explicit future mapper.
-  check(!m.post || author === `channel:${p.channelId}`, 'UNSUPPORTED_TELEGRAM_POST_AUTHOR');
+  // Personal/foreign authorship on a broadcast post remains uninterpreted.
+  // It can be retained as opaque state but must not become supported evidence.
+  check(!m.post || m.unsupported || author === `channel:${p.channelId}`, 'UNSUPPORTED_TELEGRAM_POST_AUTHOR');
   const created = timestamp(m.date), updated = m.edit_date == null ? created : timestamp(m.edit_date);
   check(updated >= created, 'TELEGRAM_TIME_ROLLBACK');
   for (const key of ['reply_to_msg_id','reply_to_top_id']) check(m[key] == null || integer(m[key]), 'INVALID_TELEGRAM_REPLY');
@@ -127,7 +132,8 @@ export function normalizeTelegramMessage(p, m, version) {
   return {source_id:p.sourceId, source_kind:p.sourceKind, message_id:`message:${m.id}`, author_id:author,
     display_name:null, thread_id:m.reply_to_top_id == null ? null : `${prefix}message:${m.reply_to_top_id}`,
     reply_to_id:m.reply_to_msg_id == null ? null : `${prefix}message:${m.reply_to_msg_id}`,
-    version, operation:'upsert', text:m.text, created_at:created, updated_at:updated};
+    version, operation:m.unsupported?'unsupported':'upsert', text:m.text, created_at:created, updated_at:updated,
+    ...(m.unsupported?{unsupported:structuredClone(m.unsupported)}:{})};
 }
 function proof(service,p,eventId,value) {
   service.store.event(service.config.partnerId,null,PROOF,'system',
@@ -176,7 +182,8 @@ function saveUpdate(service,p,u,recovery=null) {
       // Telegram deletion updates do not include author, body, creation or deletion time.
       // Unknown deletes stay native tombstones, never fabricate source identity or time.
       if (previous && previous.operation !== 'delete') {
-        const saved=ingestSource(service,{...previous,version:Math.max(u.pts,previous.version+1),operation:'delete',text:null});
+        const {unsupported,...material}=previous;
+        const saved=ingestSource(service,{...material,version:Math.max(u.pts,previous.version+1),operation:'delete',text:null});
         proof(service,p,saved.source_event_id,{kind:'native_event',...recovery,pts:u.pts,pts_count:u.pts_count,operation:'delete'});
       }
     }
