@@ -1,6 +1,8 @@
 # Telegram normalization boundary
 
-Implemented on `codex/telegram-public-source-v0`, based on `382b755`, 2026-09-15.
+Original implementation: `2fd7521` on `codex/telegram-public-source-v0`.
+Integrated on `codex/telegram-normalization-main` over main
+`fd75edaf74c78562e0b309f7b4bc1d6a1f0ba030`, 2026-09-15.
 This document supersedes the raw TL field/content rejection policy in earlier
 public-source and reconciliation checkpoints. Recovery guarantees remain intact.
 
@@ -67,13 +69,29 @@ native new/edit, recovered snapshots, and proven counterless edits.
 
 An opaque edit supersedes prior text and invalidates a dependent review. An
 opaque anchor finishes with `SOURCE_MESSAGE_UNSUPPORTED` before model readiness
-or billing. If the existing author/thread/ancestor scope includes opaque material,
-the anchor finishes with `SOURCE_CONTEXT_UNSUPPORTED`; silently removing that
-material would falsely claim complete evidence. Unrelated authors/threads still
-work. This is deliberately conservative: a relevant opaque item continues to
-block that context until it is replaced/deleted or a later content policy can
-represent it. This change does not reinterpret attachments or reopen old finished
-anchors automatically.
+or billing. The anchor's explicit `reply_to_id` chain is mandatory: any known
+opaque ancestor finishes that anchor with `SOURCE_CONTEXT_UNSUPPORTED`. This
+dependency check follows all known ancestors within the existing bounded source
+rows, including ancestors beyond the context inclusion depth. It does not guess
+missing or cross-peer parents; those remain unresolved for the existing Projection.
+
+Same-author and same-thread history is supplemental. An opaque item and any
+historical reply whose chain depends on it are omitted from this supplemental
+context. An old photo and an old "see photo" reply therefore cannot disable an
+independent later question, even from the same author in the same topic. Complete
+supported branches retain the existing ancestry, capacity and unknown-author
+checks. Dependency is determined by actual reply links, not guessed from a shared
+author, topic or proximity. The snapshot represents selected supported context,
+not all Telegram history; no synthetic text stands in for an attachment.
+
+`context_event_ids` still tracks the actual selected evidence and tombstones.
+If previously included text becomes opaque, removal of its branch changes that
+dependency set and stales earlier captures/approvals. New excluded media or edits
+to already excluded media do not invalidate an otherwise identical context;
+replacing such media with supported text changes the selected set and invalidates
+the old capture. Opaque source events and proofs remain in durable storage.
+No LLM/Router schema, new state store or time-window heuristic is introduced, and
+previously finished anchors are not automatically reopened.
 
 A later proven text edit can replace unsupported state. A delete removes the
 opaque descriptor, retains the message identity and writes the ordinary permanent
@@ -94,13 +112,18 @@ such fields injected into our normalized contract are still rejected.
 Offline regressions use pinned SDK constructors and binary decoding, real
 SQLite/ingest/Scheduler/validators/Consumer, and synthetic transport/model outputs.
 They cover neutral extensions, legacy identity, opaque native/snapshot/counterless
-application, stale evidence/context, unrelated progress, media-reference churn,
+application, mandatory versus supplemental branches, old-media author/topic
+poisoning, stale evidence/context, unrelated progress, media-reference churn,
 delete/resurrection, replay/restart, collision, transaction failure before ACK,
-and existing recovery/fence/ownership checks. No live Telegram or provider calls
+and existing recovery/fence/ownership checks. The combined joined-reader test
+also covers exact accessHash, private membership, opaque normalization, independent
+review, stale operator approval, restart, and a subsequent hash mismatch.
+No live Telegram or provider calls
 are part of this verification; no runtime or live sending setting is enabled.
 
-Verification result: `npm test` passed 357/357; `npm run build` compiled 53
-JavaScript/JSON files and 9 Python files. `git diff --check` passed.
+The original `2fd7521` verification passed 357/357 Node tests. The integrated
+baseline over `fd75eda` passed 379/379 before the context policy adjustment;
+final integration results are recorded in `TELEGRAM_NORMALIZATION_INTEGRATION.md`.
 
 Teleproto is not needed to close this boundary and is not installed. The SDK
 already supplies the transport and semantic primitives used here. SDK replacement

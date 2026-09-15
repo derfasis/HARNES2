@@ -166,11 +166,11 @@ test('normalization: related opaque ancestry blocks inference while an unrelated
   assert.throws(()=>sourceContextState(h.service,childRow.event_id),{code:'SOURCE_CONTEXT_UNSUPPORTED'});
   await h.tick();assert.equal(h.calls,1);assert.equal(h.cards().length,1);noEffects(h);
 });
-test('normalization: opaque new observation invalidates a dependent existing review',async t=>{
+test('normalization: supplemental opaque observation leaves existing supported evidence fresh',async t=>{
   const h=harness(t);await positive(h);const card=h.cards()[0];
   h.reply(difference(12,[],[update(12,'new',{message:message({id:2,media:new Api.MessageMediaUnsupported()})})]));
   await h.poll();await h.tick();assert.equal(h.calls,1);
-  assert.equal(h.service.opportunityDetail(card.id).freshness.fresh,false);noEffects(h);
+  assert.equal(h.service.opportunityDetail(card.id).freshness.fresh,true);noEffects(h);
 });
 test('normalization: deleting opaque material preserves tombstone identity and prevents resurrection',async t=>{
   const h=harness(t);await h.bootstrap();const m=message({media:new Api.MessageMediaUnsupported()});
@@ -1223,6 +1223,47 @@ test('joined reader: scoped metadata allowed, foreign peers/history/writes denie
     assert.throws(()=>sender._sendQueue.append(new RequestState(r)));assert.throws(()=>sender._sendQueue.prepend([new RequestState(r)]));}
   assert.throws(()=>client.invoke(new Api.InvokeWithLayer({layer:198,query:denied[3]})));
   assert.equal(accepted.length,1);
+});
+
+test('joined reader + normalization: old media permits independent review; opaque edit stales approval; hash fence remains exact',async t=>{
+  let reader;t.after(()=>reader?.close());
+  const h=harness(t,{joinedPeer:true});let peerMetadata=publicFull({username:null,left:false});
+  const f=await sdkFixture(t,h,{joinedPeer:true,full:()=>peerMetadata});
+  reader=await openTelegramJoinedReader(h.service,f.owner,{sourceId,accessHash:'200'});
+  const image=message({media:new Api.MessageMediaUnsupported()});
+  const dependent=message({id:2,message:'See the photo for my answer.',replyTo:new Api.MessageReplyHeader({replyToMsgId:1})});
+  const independent=Object.assign(message({id:3,message:'What does this offer include?',
+    entities:[new Api.MessageEntityBold({offset:0,length:4})]}),{futureDisplayMetadata:{enabled:true}});
+  f.reply(difference(13,[image,dependent,independent]));await h.tickWith(reader);
+  f.reply(empty(13));await h.tickWith(reader);await h.tickWith(reader);
+  assert.equal(h.state().phase,'current');assert.equal(h.state().pts,13);assert.equal(h.calls,1);assert.equal(h.cards().length,1);
+  const task=h.cards()[0],detail=h.service.opportunityDetail(task.id);
+  assert.deepEqual(detail.snapshot.messages.map(m=>m.id),['message:3']);
+  assert.doesNotMatch(JSON.stringify(detail.snapshot),/See the photo|futureDisplayMetadata|accessHash/);
+  const approved=await h.service.command('opportunity.review.approve',
+    {task_id:task.id,fingerprint:detail.fingerprint,expected_revision:0},'joined-normalization-review');
+  assert.equal(approved.review.status,'approved');assert.equal(approved.executable,false);
+  assert.equal(approved.contact_permission,false);assert.deepEqual(approved.allowed_effects,[]);
+  const edit=update(14,'edit',{message:message({id:3,media:new Api.MessageMediaUnsupported(),editDate:1767225601})});
+  await reader.receive(edit);f.reply(difference(14,[],[edit]));await h.tickWith(reader);
+  assert.equal(h.calls,1);assert.equal(h.service.opportunityDetail(task.id).review.effective_status,'stale');
+  const next=update(15,'new',{message:message({id:5,message:'Can you explain the offer?'})});
+  f.reply(difference(15,[],[next]));await h.tickWith(reader);
+  assert.equal(h.calls,2);assert.equal(h.cards().length,2);
+  const newest=h.cards().find(c=>c.id!==task.id);
+  assert.deepEqual(h.service.opportunityDetail(newest.id).snapshot.messages.map(m=>m.id),['message:5']);
+  await reader.close();reader=await openTelegramJoinedReader(h.service,f.owner,{sourceId,accessHash:'200'});
+  f.reply(empty(15));await h.tickWith(reader);assert.equal(h.calls,2);assert.equal(h.state().phase,'current');
+  await reader.receive(new Api.UpdateChannel({channelId:b(100)}));
+  peerMetadata=publicFull({username:null,left:false,accessHash:b(201)});
+  await assert.rejects(pollTelegramSource(h.service,sourceId,reader),mappingFailure);
+  assert.equal(h.state().pts,15);assert.equal(h.state().reason,'INTEGRITY_RECONCILIATION_REQUIRED');assert.equal(h.calls,2);
+  for(const request of f.requests) {
+    if(request instanceof Api.channels.GetChannels || request instanceof Api.channels.GetFullChannel || request instanceof Api.updates.GetChannelDifference)
+      assert.equal((request.channel??request.id[0]).accessHash.toString(),'200');
+    assert.ok(!(request instanceof Api.contacts.ResolveUsername || request instanceof Api.messages.GetDialogs));
+  }
+  noEffects(h);
 });
 
 test('joined reader: verified membership empty-history cutover, one review, duplicate and same-session restart',async t=>{

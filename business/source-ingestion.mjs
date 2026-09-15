@@ -143,9 +143,25 @@ export function sourceContextState(service, eventId) {
   check(anchor.operation !== 'unsupported', 'SOURCE_MESSAGE_UNSUPPORTED');
   check(anchor.author_id !== null, 'UNKNOWN_SOURCE_AUTHOR');
   const byId = new Map(rows.map(r => [r.message.message_id, r]));
+  // Only the anchor's reply chain is mandatory. Author/thread history is
+  // supplemental: omit an opaque item AND replies that depend on it. Otherwise
+  // an old attachment (or an old "see photo" reply) poisons every later anchor.
+  const supportedBranch = row => {
+    const seen = new Set();
+    for(let current=row; current && !seen.has(current.message.message_id);
+      current=byId.get(current.message.reply_to_id)) {
+      if(current.message.operation==='unsupported')return false;
+      seen.add(current.message.message_id);
+    }
+    return true;
+  };
+  // Check all known ancestors, even beyond the bounded context inclusion below.
+  // Missing/cross-peer parents remain unresolved for the existing Projection.
+  check(supportedBranch(event), 'SOURCE_CONTEXT_UNSUPPORTED');
   const selected = new Map(rows.filter(r => r.message.message_id === anchor.message_id
     || !isTelegramChannelAuthor(service,anchor) && r.message.author_id === anchor.author_id
-    || anchor.thread_id !== null && r.message.thread_id === anchor.thread_id).map(r => [r.message.message_id,r]));
+    || anchor.thread_id !== null && r.message.thread_id === anchor.thread_id)
+    .filter(supportedBranch).map(r => [r.message.message_id,r]));
   // Include actual ancestry without assuming that a display name identifies anyone.
   for (const row of [...selected.values()]) {
     let parent = row.message.reply_to_id;
@@ -156,9 +172,6 @@ export function sourceContextState(service, eventId) {
     }
   }
   const scope = [...selected.values()].sort((a,b) => a.message.message_id.localeCompare(b.message.message_id));
-  // Opaque observations supersede previous evidence but cannot become evidence.
-  // Never silently omit an unsupported ancestor/author/thread from LLM context.
-  check(!scope.some(r=>r.message.operation==='unsupported'), 'SOURCE_CONTEXT_UNSUPPORTED');
   const live = scope.filter(r => r.message.operation === 'upsert');
   check(!live.some(r => r.message.created_at > anchor.created_at), 'POST_ANCHOR_CONTEXT');
   check(live.every(r => r.message.author_id !== null), 'UNKNOWN_CONTEXT_AUTHOR');

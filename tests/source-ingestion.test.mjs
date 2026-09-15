@@ -34,6 +34,73 @@ function noEffects(h) {
   for (const table of ['persons','conversations','messages','tasks','runs','drafts','approvals','delivery_attempts','tool_calls'])
     assert.equal(h.store.get(`SELECT COUNT(*) AS n FROM ${table}`).n,0,table);
 }
+const opaque = extra => input({operation:'unsupported',text:null,unsupported:{reason:'media',fingerprint:'a'.repeat(64)},...extra});
+test('opaque context: an old image does not disable later independent messages by the same author',t=>{
+  const h=harness(t),image=h.ingest(opaque({message_id:'image',thread_id:null}));
+  const s=h.ingest(input({thread_id:null,created_at:'2026-01-02T00:00:00.000Z',updated_at:'2026-01-02T00:00:00.000Z'}));
+  h.restart();const ctx=sourceContextState(h.service,s.source_event_id);
+  assert.deepEqual(ctx.snapshot.messages.map(m=>m.id),['m1']);
+  assert.deepEqual(ctx.source_state.context_event_ids,[s.source_event_id]);
+  assert.equal(sourceEvent(h.service,image.source_event_id).message.operation,'unsupported');noEffects(h);
+});
+test('opaque context: optional same-thread image and its dependent reply are both omitted',t=>{
+  const h=harness(t);h.ingest(opaque({message_id:'image',author_id:'other'}));
+  h.ingest(input({message_id:'old-reply',reply_to_id:'image',text:'The attached image proves it.'}));
+  const s=h.ingest(input()),ctx=sourceContextState(h.service,s.source_event_id);
+  assert.deepEqual(ctx.snapshot.messages.map(m=>m.id),['m1']);
+  assert.doesNotMatch(JSON.stringify(ctx.snapshot),/proves it|image|unsupported/);noEffects(h);
+});
+test('opaque context: anchor and direct or transitive mandatory ancestry still block',t=>{
+  const h=harness(t),image=h.ingest(opaque({message_id:'image',author_id:'other',thread_id:'elsewhere'}));
+  assert.throws(()=>sourceContextState(h.service,image.source_event_id),{code:'SOURCE_MESSAGE_UNSUPPORTED'});
+  const direct=h.ingest(input({message_id:'direct',reply_to_id:'image'}));
+  const transitive=h.ingest(input({reply_to_id:'direct'}));
+  for(const s of [direct,transitive])assert.throws(()=>sourceContextState(h.service,s.source_event_id),{code:'SOURCE_CONTEXT_UNSUPPORTED'});
+  noEffects(h);
+});
+test('opaque context: dependency check cannot hide an opaque ancestor beyond the inclusion depth',t=>{
+  const h=harness(t);h.ingest(opaque({message_id:'image',author_id:'other',thread_id:null}));
+  let parent='image',s;
+  for(let i=0;i<20;i++) {
+    s=h.ingest(input({message_id:`r${i}`,author_id:`a${i}`,thread_id:null,reply_to_id:parent}));parent=`r${i}`;
+  }
+  assert.throws(()=>sourceContextState(h.service,s.source_event_id),{code:'SOURCE_CONTEXT_UNSUPPORTED'});
+  const independent=h.ingest(input({author_id:'a19',thread_id:null}));
+  assert.deepEqual(sourceContextState(h.service,independent.source_event_id).snapshot.messages.map(m=>m.id),['m1']);noEffects(h);
+});
+test('opaque context: mandatory text edited to opaque invalidates prior evidence and blocks its anchor',t=>{
+  const h=harness(t);h.ingest(input({message_id:'parent',author_id:'other',thread_id:'elsewhere'}));
+  const s=h.ingest(input({reply_to_id:'parent'})),state=sourceContextState(h.service,s.source_event_id).source_state;
+  h.ingest(opaque({message_id:'parent',author_id:'other',thread_id:'elsewhere',version:2}));
+  assert.deepEqual(sourceFreshnessReasons(h.service,state),['SOURCE_CONTEXT_UNSUPPORTED']);noEffects(h);
+});
+test('opaque context: optional evidence edited to opaque stales a capture but permits future independent anchors',t=>{
+  const h=harness(t),old=h.ingest(input({message_id:'old'}));
+  h.ingest(input({message_id:'old-reply',reply_to_id:'old',text:'That explains my old answer.'}));
+  const s=h.ingest(input()),before=sourceContextState(h.service,s.source_event_id).source_state;
+  assert.ok(before.context_event_ids.includes(old.source_event_id));
+  h.ingest(opaque({message_id:'old',version:2}));
+  const after=sourceContextState(h.service,s.source_event_id);
+  assert.deepEqual(after.snapshot.messages.map(m=>m.id),['m1']);
+  assert.deepEqual(sourceFreshnessReasons(h.service,before),['SOURCE_CONTEXT_OR_BINDING_CHANGED']);
+  const next=h.ingest(input({message_id:'next'}));
+  assert.deepEqual(sourceContextState(h.service,next.source_event_id).snapshot.messages.map(m=>m.id),['m1','next']);noEffects(h);
+});
+test('opaque context: editing excluded media is not a dependency; replacing it with text changes context',t=>{
+  const h=harness(t);h.ingest(opaque({message_id:'old'}));
+  const s=h.ingest(input()),before=sourceContextState(h.service,s.source_event_id).source_state;
+  h.ingest(opaque({message_id:'old',version:2,unsupported:{reason:'media',fingerprint:'b'.repeat(64)}}));
+  assert.deepEqual(sourceFreshnessReasons(h.service,before),[]);
+  h.ingest(input({message_id:'old',version:3,text:'Now available text.'}));
+  assert.deepEqual(sourceFreshnessReasons(h.service,before),['SOURCE_CONTEXT_OR_BINDING_CHANGED']);
+  assert.deepEqual(sourceContextState(h.service,s.source_event_id).snapshot.messages.map(m=>m.id),['m1','old']);noEffects(h);
+});
+test('opaque context: missing and cross-peer links are not invented from excluded media',t=>{
+  const h=harness(t);h.ingest(opaque({message_id:'image'}));
+  const s=h.ingest(input({reply_to_id:'channel:other:image'})),ctx=sourceContextState(h.service,s.source_event_id);
+  assert.deepEqual(ctx.snapshot.messages.map(m=>m.id),['m1']);
+  assert.equal(ctx.snapshot.messages[0].reply_to_id,'channel:other:image');noEffects(h);
+});
 test('new allowed public message preserves exact identity, text and configured offer', t => {
   const h=harness(t), raw=input({text:'  café Жизнь 👋  '}), saved=h.ingest(raw), state=sourceContextState(h.service,saved.source_event_id);
   assert.equal(saved.disposition,'registered'); assert.equal(state.snapshot.messages[0].text,raw.text);
