@@ -1,3 +1,5 @@
+> Реалізація Persistent Engagement v1: див. [канонічну модель](PERSISTENT_ENGAGEMENT.md), [інтеграцію](PERSISTENT_ENGAGEMENT_HANDOFF.md) і [межі перевірок](PERSISTENT_ENGAGEMENT_VALIDATION.md). Цей документ збережено як історичний review, а не другу незалежну специфікацію runtime.
+
 # HARNES2: cognitive loop над Situation Router
 
 Дата: 11 сентября 2026. Основание: статическое чтение checkout `85547ef5c2c401ebdf653ddc255b2a512282c24b`, существующих контрактов, бизнес-слоя, профиля и сохранённых отчётов. Рабочее дерево до review было чистым.

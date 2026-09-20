@@ -1,3 +1,5 @@
+> Новий opt-in increment: [Persistent Engagement v1](docs/PERSISTENT_ENGAGEMENT.md). Перед інтеграцією прочитайте [handoff](docs/PERSISTENT_ENGAGEMENT_HANDOFF.md) та [звіт перевірок](docs/PERSISTENT_ENGAGEMENT_VALIDATION.md). Review-first збережено; повний suite потребує штатних залежностей.
+
 # HARNES2 — ИИ Генерация Лидов в MLM
 
 Локальный проект постоянного ИИ-партнёра: собственные цель, контакты, задачи, память и навыки; Hermes выполняет цикл рассуждений и вызовов инструментов. Первый рабочий контур — рекрутинг PM International через диалоги и предложения следующих действий.

@@ -111,6 +111,10 @@ test('pinned text blob checks accept CRLF checkouts but reject content changes',
 });
 
 test('frozen components match base blobs; runtime matches the tested no-tool extension', () => {
+  // Persistent engagement increment: only Store export tables, runtime scoped tool
+  // discovery and runner system guidance are deliberately extended. Their new hashes
+  // are pinned below; source/router/transport/identity/old migration pins stay unchanged.
+  // Semantic engagement guards are exercised in engagement.test.mjs.
   const pinned = {
     "business/situation-router.mjs": "ef2a2b53f0cec4560920453c4ff5c1e3fd88df61",
     "contracts/situation-router.schema.json": "ee18ffd684545585c8868ebe424578774bd771a0",
@@ -120,13 +124,13 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     "contracts/opportunity-projection.schema.json": "b53a1a7b05d89de66858f3e59bb14940918d1c96",
     "scripts/situation_router_worker.py": "717a960ab4c3b92148afae084cd998bfeaaade86",
     // Reviewed extension: invalidate read-only source checkpoints on process recovery.
-    "business/store.mjs": "ec4966f4768a6c1dec188ab9a6ff1701a2ac4180",
+    "business/store.mjs": "9da789cf2b84b04e10c6c293fec4df05e0ac8954",
     "adapters/hermes/credentials.py": "2797bd89081eaf4a950178cec3d637015ee8f45f",
-    "adapters/hermes/runner.py": "9a810243d5d58467bf2886ea76a4fc7c4f5f9911",
+    "adapters/hermes/runner.py": "e631237829d9b7a4521799b4a19c4c500b33f5aa",
     // Deliberate v0 extension: existing worker, no-tool envelope tested in opportunity-runtime.test.mjs.
     // Retry-budget extension: decision envelope raises maxIterations 1->2 so the pinned
     // Hermes empty-response ladder can actually re-enter the loop after an empty response.
-    "business/runtime.mjs": "44d25722b433e20b2000d2673a54a52b0b4aff48",
+    "business/runtime.mjs": "4ec5cbf6c587e1bae0382785a90d240c9fb1718e",
     "business/channels/telegram.mjs": "1b4de6dc8c8465bed237375bd6295ab4dbfa2eda",
     "business/channels/telegram-mtproto.mjs": "e30171ab2a8bf83ba5cbc63de22c025288f99e01",
     "benchmarks/situation-router/README.md": "0da57bf3fcb53bbec5713f6a44c48654b16270b8",

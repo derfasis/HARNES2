@@ -1,10 +1,546 @@
 [
-  { "name": "partner_get_context", "description": "Read current scoped partner/person context and verified knowledge. Other people's conversations are excluded in a conversation run.", "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false } },
-  { "name": "partner_list_work", "description": "Read existing tasks in this run's scope. Do not duplicate them.", "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false } },
-  { "name": "partner_search_experience", "description": "Search owner-reviewed lessons. Private lessons from other conversations are excluded.", "inputSchema": { "type": "object", "properties": { "query": { "type": "string", "maxLength": 300 } }, "required": ["query"], "additionalProperties": false } },
-  { "name": "partner_propose_draft", "conversationOnly": true, "description": "Queue a proposed message for the current person. Does not approve or send. Use this tool for addressed messages; final prose is only an internal note.", "inputSchema": { "type": "object", "properties": { "text": { "type": "string", "minLength": 1, "maxLength": 4096 }, "action": { "enum": ["reply", "clarify", "propose_call", "handoff"] }, "reason": { "type": "string", "maxLength": 4000 } }, "required": ["text", "reason"], "additionalProperties": false } },
-  { "name": "partner_propose_fact", "conversationOnly": true, "description": "Propose a sourced fact about the current person for review. This does not confirm the fact.", "inputSchema": { "type": "object", "properties": { "text": { "type": "string", "maxLength": 4000 }, "source_message_id": { "type": "string" }, "source_ref": { "type": "string", "minLength": 1, "maxLength": 2000 } }, "required": ["text", "source_ref"], "additionalProperties": false } },
-  { "name": "partner_propose_task", "description": "Propose a future task with purpose and evidence. Follow-ups require a conversation and source of agreement. The owner approves before scheduling.", "inputSchema": { "type": "object", "properties": { "conversation_id": { "type": ["string", "null"] }, "kind": { "enum": ["reply", "follow_up", "research", "planning", "review"] }, "title": { "type": "string", "maxLength": 200 }, "instructions": { "type": "string", "maxLength": 6000 }, "due_at": { "type": "string", "description": "ISO timestamp with explicit timezone" }, "evidence": { "type": "string", "maxLength": 2000 } }, "required": ["kind", "title", "instructions", "due_at"], "additionalProperties": false } },
-  { "name": "partner_propose_lesson", "description": "Store a candidate lesson with evidence and applicability. It cannot become active without owner review.", "inputSchema": { "type": "object", "properties": { "title": { "type": "string", "maxLength": 200 }, "text": { "type": "string", "maxLength": 8000 }, "applicability": { "type": "string", "maxLength": 2000 }, "evidence": { "type": "string", "maxLength": 4000 } }, "required": ["title", "text", "applicability", "evidence"], "additionalProperties": false } },
-  { "name": "partner_propose_capability", "description": "Record a missing capability and optional SKILL.md proposal. Does not install code, grant rights or change active skills.", "inputSchema": { "type": "object", "properties": { "name": { "type": "string", "maxLength": 100 }, "purpose": { "type": "string", "maxLength": 4000 }, "permissions": { "type": "array", "maxItems": 20, "items": { "type": "string", "maxLength": 200 } }, "acceptance": { "type": "string", "maxLength": 4000 }, "skill_content": { "type": "string", "maxLength": 30000 } }, "required": ["name", "purpose", "permissions", "acceptance"], "additionalProperties": false } }
+  {
+    "name": "partner_get_context",
+    "description": "Read current scoped partner/person context and verified knowledge. Other people's conversations are excluded in a conversation run. Call with exactly {}.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "partner_list_work",
+    "description": "Read existing tasks in this run's scope. Do not duplicate them. Call with exactly {}.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "partner_search_experience",
+    "description": "Search owner-reviewed lessons. Private lessons from other conversations are excluded.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string",
+          "maxLength": 300
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "partner_propose_draft",
+    "conversationOnly": true,
+    "description": "Queue a proposed message for the current person. Does not approve or send. Use this tool for addressed messages; final prose is only an internal note.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "action": {
+          "enum": [
+            "reply",
+            "clarify",
+            "propose_call",
+            "handoff"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "maxLength": 4000
+        }
+      },
+      "required": [
+        "text",
+        "reason"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "partner_propose_fact",
+    "conversationOnly": true,
+    "description": "Propose a sourced fact about the current person for review. This does not confirm the fact.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string",
+          "maxLength": 4000
+        },
+        "source_message_id": {
+          "type": "string"
+        },
+        "source_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        }
+      },
+      "required": [
+        "text",
+        "source_ref"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "partner_propose_task",
+    "description": "Propose a future task with purpose and evidence. Follow-ups require a conversation and source of agreement. The owner approves before scheduling.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "conversation_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "enum": [
+            "reply",
+            "follow_up",
+            "research",
+            "planning",
+            "review"
+          ]
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "instructions": {
+          "type": "string",
+          "maxLength": 6000
+        },
+        "due_at": {
+          "type": "string",
+          "description": "ISO timestamp with explicit timezone"
+        },
+        "evidence": {
+          "type": "string",
+          "maxLength": 2000
+        }
+      },
+      "required": [
+        "kind",
+        "title",
+        "instructions",
+        "due_at"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "partner_propose_lesson",
+    "description": "Store a candidate lesson with evidence and applicability. It cannot become active without owner review.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "text": {
+          "type": "string",
+          "maxLength": 8000
+        },
+        "applicability": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "evidence": {
+          "type": "string",
+          "maxLength": 4000
+        }
+      },
+      "required": [
+        "title",
+        "text",
+        "applicability",
+        "evidence"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "partner_propose_capability",
+    "description": "Record a missing capability and optional SKILL.md proposal. Does not install code, grant rights or change active skills.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "purpose": {
+          "type": "string",
+          "maxLength": 4000
+        },
+        "permissions": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "maxLength": 200
+          }
+        },
+        "acceptance": {
+          "type": "string",
+          "maxLength": 4000
+        },
+        "skill_content": {
+          "type": "string",
+          "maxLength": 30000
+        }
+      },
+      "required": [
+        "name",
+        "purpose",
+        "permissions",
+        "acceptance"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "partner_record_belief",
+    "conversationOnly": true,
+    "engagementOnly": true,
+    "description": "Record an exact attributed CLAIM or an evidence-backed HYPOTHESIS. Neither grants permission. Call before committing the decision.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "engagement_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "kind": {
+          "enum": [
+            "CLAIM",
+            "HYPOTHESIS"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "enum": [
+                  "message",
+                  "fact",
+                  "outcome"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              }
+            },
+            "required": [
+              "type",
+              "id"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "counterevidence": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "enum": [
+                  "message",
+                  "fact",
+                  "outcome"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              }
+            },
+            "required": [
+              "type",
+              "id"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "supersedes_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "expires_at": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 50
+        }
+      },
+      "required": [
+        "engagement_id",
+        "expected_revision",
+        "kind",
+        "text",
+        "evidence"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "partner_commit_decision",
+    "conversationOnly": true,
+    "engagementOnly": true,
+    "description": "Commit exactly one scoped durable decision. ACT requires action and forbids wait_for/wake_at. WAIT requires wait_for and/or wake_at and forbids action. IGNORE/HANDOFF/STOP forbid action/wait_for/wake_at. Omit optional objects instead of adding placeholder keys. ACT is a draft, never a send; HANDOFF transfers responsibility; STOP suppresses contact.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "engagement_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "kind": {
+          "enum": [
+            "ACT",
+            "WAIT",
+            "IGNORE",
+            "HANDOFF",
+            "STOP"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "expected_next": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "enum": [
+                  "message",
+                  "fact",
+                  "outcome"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              }
+            },
+            "required": [
+              "type",
+              "id"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "wait_for": {
+          "type": "array",
+          "maxItems": 5,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "inbound",
+              "operator_response",
+              "permission_changed",
+              "commitment_due",
+              "outcome"
+            ]
+          }
+        },
+        "wake_at": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 50
+        },
+        "action": {
+          "type": "object",
+          "properties": {
+            "purpose": {
+              "enum": [
+                "reply",
+                "follow_up"
+              ]
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "explained": {
+              "type": "array",
+              "maxItems": 20,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000
+              }
+            },
+            "commitments": {
+              "type": "array",
+              "maxItems": 20,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000
+                  },
+                  "owner": {
+                    "enum": [
+                      "AI",
+                      "HUMAN"
+                    ]
+                  },
+                  "due_at": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 50
+                  }
+                },
+                "required": [
+                  "text",
+                  "owner"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "purpose",
+            "text"
+          ],
+          "additionalProperties": false
+        },
+        "state": {
+          "type": "object",
+          "properties": {
+            "current_need": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000
+            },
+            "unknowns": {
+              "type": "array",
+              "maxItems": 20,
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "engagement_id",
+        "expected_revision",
+        "kind",
+        "reason",
+        "expected_next",
+        "evidence"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "partner_propose_episode_lesson",
+    "conversationOnly": true,
+    "engagementOnly": true,
+    "description": "Propose a local candidate lesson only from explicitly linked observed outcomes. Does not activate strategy or grant permissions.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "engagement_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8000
+        },
+        "applicability": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "outcome_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        }
+      },
+      "required": [
+        "engagement_id",
+        "expected_revision",
+        "title",
+        "text",
+        "applicability",
+        "outcome_ids"
+      ],
+      "additionalProperties": false
+    }
+  }
 ]

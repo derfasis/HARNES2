@@ -68,11 +68,12 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
         capabilities:readJson(path.join(ROOT,'partner/capabilities.json')),
         knowledge:fs.readdirSync(path.join(ROOT,'partner/knowledge')).filter(f=>f.endsWith('.json')).map(f=>readJson(path.join(ROOT,'partner/knowledge',f))),
         configuration:{opportunity_automatic:config.opportunity.automatic===true,runtime_enabled:config.runtime.enabled,provider:config.runtime.provider,model:config.runtime.model,base_url:config.runtime.baseUrl, max_runs_per_day:config.runtime.maxRunsPerDay,daily_budget_usd:config.runtime.dailyBudgetUsd,timezone:config.scheduler.timezone},
-        release:{version:'0.1.0',tests:'not_run_by_user_request',model_validation:'not_run'} });
+        release:{version:'0.1.0-engagement-v1',tests:'see_docs_PERSISTENT_ENGAGEMENT_VALIDATION',model_validation:'controlled_disposable_smoke_pass'} });
       if (req.method === 'GET' && url.pathname.startsWith('/api/opportunity-captures/')) return send(200,service.opportunityCapture(decodeURIComponent(url.pathname.split('/').at(-1))));
       if (req.method === 'GET' && url.pathname === '/api/opportunities') return send(200,service.opportunityReviews({
         status:url.searchParams.get('status') ?? 'pending', limit:Number(url.searchParams.get('limit') ?? 50), offset:Number(url.searchParams.get('offset') ?? 0) }));
       if (req.method === 'GET' && url.pathname.startsWith('/api/opportunities/')) return send(200,service.opportunityDetail(decodeURIComponent(url.pathname.split('/').at(-1))));
+      if (req.method === 'GET' && url.pathname.startsWith('/api/decisions/')) return send(200,service.engagement.episode(decodeURIComponent(url.pathname.split('/').at(-1))));
       if (req.method === 'GET' && url.pathname.startsWith('/api/conversations/')) return send(200,service.detail(decodeURIComponent(url.pathname.split('/').at(-1))));
       if (req.method === 'GET' && url.pathname.startsWith('/api/runs/')) {
         const run = store.get('SELECT * FROM runs WHERE id=? AND partner_id=?', url.pathname.split('/').at(-1),config.partnerId); ensure(run,'Запуск не найден',404);

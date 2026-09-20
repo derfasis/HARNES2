@@ -7,9 +7,11 @@ import { ingestSource, sourceCheckpoint } from './source-ingestion.mjs';
 import { requestTelegramRecovery } from './sources/telegram-readonly.mjs';
 import { REVIEW_ACTIONS, reviewOpportunity, opportunityReviewDetail, opportunityReviews } from './opportunity-review.mjs';
 
+import { EngagementLoop, ENGAGEMENT_ACTIONS, ENGAGEMENT_AGENT_ACTIONS } from './engagement.mjs';
+
 const OUTCOMES = new Set(['qualified','call_proposed','call_accepted','call_booked','call_attended','no_show','joined','declined','business_value']);
 export class BusinessService {
-  constructor(store, config) { this.store = store; this.config = config; this.tail = Promise.resolve(); this.telegramAccountId = null; }
+  constructor(store, config) { this.store = store; this.config = config; this.tail = Promise.resolve(); this.telegramAccountId = null; this.engagement = new EngagementLoop(this); }
   exclusive(fn) { const job = this.tail.then(fn); this.tail = job.catch(() => {}); return job; }
   partner() { return this.store.get('SELECT * FROM partners WHERE id=?', this.config.partnerId); }
   person(personId) {
@@ -32,13 +34,14 @@ export class BusinessService {
     const conversation = this.conversation(conversationId), person = this.person(conversation.person_id);
     ensure(!person.suppressed, 'Контакт остановлен', 409, 'suppressed');
     ensure(conversation.ownership === 'AI_OWNED', 'Разговор ведёт человек', 409, 'human_owned');
-    if (permission) ensure(person.permission.trim(), 'Зафиксируйте основание для контакта', 409, 'permission_required');
+    if (permission && !this.engagement.managed(conversationId)) ensure(person.permission.trim(), 'Зафиксируйте основание для контакта', 409, 'permission_required');
     return { conversation, person };
   }
   invalidate(conversationId, reason) {
     this.store.run('UPDATE conversations SET revision=revision+1 WHERE id=?', conversationId);
     this.store.run("UPDATE drafts SET status='stale' WHERE conversation_id=? AND status IN ('pending','approved')", conversationId);
     this.store.event(this.config.partnerId, conversationId, 'context_changed', 'system', { reason });
+    this.engagement.onChange(conversationId, reason);
   }
   command(action, payload, requestId, actor = { kind: 'operator' }) {
     return this.exclusive(() => {
@@ -69,13 +72,19 @@ export class BusinessService {
     }
     const previous = this.store.get('SELECT * FROM command_receipts WHERE id=?', requestId);
     if (previous) { ensure(previous.fingerprint === fingerprint, 'request_id использован для другой операции', 409); return JSON.parse(previous.result_json); }
-    const agentActions = new Set(['draft.create','fact.propose','lesson.propose','task.propose','capability.propose']);
+    const agentActions = new Set(['draft.create','fact.propose','lesson.propose','task.propose','capability.propose', ...ENGAGEMENT_AGENT_ACTIONS]);
     ensure(actor.kind === 'operator' || (actor.kind === 'agent' && agentActions.has(action)) || (actor.kind === 'channel' && ['person.create','message.record','source.ingest'].includes(action)), 'Операция доступна только владельцу', 403);
     let conversationId = p.conversation_id ?? null;
     if (['person.permission','person.stop','person.resume','conversation.mode','conversation.takeover','conversation.release','message.record','draft.create','fact.propose','fact.create','outcome.record'].includes(action)) requiredText(conversationId, 'conversation_id', 100);
     if (conversationId) this.assertScope(actor, conversationId);
+    if(actor.kind==='agent' && conversationId && this.engagement.managed(conversationId)) {
+      ensure(!['fact.propose','task.propose','lesson.propose','capability.propose'].includes(action),'Use engagement-scoped proposals',403);
+    }
     let result;
-    switch (action) {
+    if (ENGAGEMENT_ACTIONS.has(action)) {
+      result = this.engagement.execute(action,p,actor);
+      if (p.engagement_id) conversationId = this.engagement.get(p.engagement_id).conversation_id;
+    } else switch (action) {
       case 'source.reconcile': result = requestTelegramRecovery(this,p,actor); break;
       case 'source.ingest': result = ingestSource(this, p); break;
       case 'opportunity.capture': result = captureOpportunity(this, p); break;
@@ -128,10 +137,18 @@ export class BusinessService {
       }
       case 'conversation.takeover':
       case 'conversation.release': {
+        if (action === 'conversation.release' && this.engagement.managed(conversationId)) {
+          const current = this.engagement.current(conversationId);
+          ensure(!current || !this.store.get("SELECT id FROM engagement_handoffs WHERE engagement_id=? AND status IN ('requested','accepted')",current.id), 'Resolve the active handoff explicitly',409);
+        }
         const ownership = action.endsWith('takeover') ? 'HUMAN_OWNED' : 'AI_OWNED';
         this.store.run('UPDATE conversations SET ownership=? WHERE id=?', ownership, conversationId);
         this.invalidate(conversationId, ownership);
         if (ownership === 'HUMAN_OWNED') this.store.run("UPDATE tasks SET status='cancelled' WHERE conversation_id=? AND status IN ('pending','proposed','running')", conversationId);
+        if (ownership === 'AI_OWNED') {
+          const e=this.engagement.current(conversationId);
+          if(e){this.store.run("UPDATE engagements SET status='OPEN' WHERE id=?",e.id);this.engagement.enqueue(this.engagement.get(e.id),{type:'operator_release'});}
+        }
         result = { ownership }; break;
       }
       case 'conversation.mode': {
@@ -150,18 +167,19 @@ export class BusinessService {
         this.store.run('INSERT INTO messages(id,conversation_id,direction,author,text,external_id,source,created_at) VALUES(?,?,?,?,?,?,?,?)', messageId, conversationId, direction, direction === 'in' ? 'person' : 'operator', text, externalId, source, now());
         this.invalidate(conversationId, 'message_recorded');
         const conv = this.conversation(conversationId), person = this.person(conv.person_id);
-        if (direction === 'in' && /(?:^\/stop\b|не\s+пишите|больше\s+не\s+писать|do\s+not\s+contact|stop\s+messaging|unsubscribe)/iu.test(text)) {
+        if (direction === 'in' && /(?:^\/stop\b|не\s+пишите|не\s+пишіть|не\s+писати|больше\s+не\s+писать|do\s+not\s+contact|stop\s+messaging|unsubscribe)/iu.test(text)) {
           this.store.run('UPDATE persons SET suppressed=1 WHERE id=?', person.id);
           for (const c of this.store.all('SELECT id FROM conversations WHERE person_id=?', person.id)) {
             this.invalidate(c.id, 'explicit_stop_message');
             this.store.run("UPDATE tasks SET status='cancelled' WHERE conversation_id=? AND status IN ('pending','proposed','running')", c.id);
           }
         } else if (direction === 'in' && !person.suppressed && conv.ownership === 'AI_OWNED') {
-          this.addTask({ conversation_id: conversationId, kind: 'reply', title: `Ответить: ${person.name}`, instructions: 'Разбери новое сообщение, сохрани нужные предложения и выбери следующий шаг.', due_at: now(), evidence: messageId, dedupe_key: `inbound:${messageId}` }, 'system', 'pending');
+          if (!this.engagement.inbound(conversationId,messageId)) this.addTask({ conversation_id: conversationId, kind: 'reply', title: `Ответить: ${person.name}`, instructions: 'Разбери новое сообщение, сохрани нужные предложения и выбери следующий шаг.', due_at: now(), evidence: messageId, dedupe_key: `inbound:${messageId}` }, 'system', 'pending');
         }
         result = { message_id: messageId }; break;
       }
       case 'draft.create': {
+        this.engagement.draftProposal(p,actor);
         const { conversation } = this.active(conversationId);
         if (actor.kind === 'agent') this.assertRunFresh(actor, conversationId);
         const text = requiredText(p.text, 'Текст черновика', 4096), draftId = id();
@@ -184,6 +202,7 @@ export class BusinessService {
       case 'draft.approve': {
         const draft = this.draft(p.draft_id); conversationId = draft.conversation_id;
         ensure(draft.status === 'pending', 'Одобряется только ожидающий черновик', 409);
+        this.engagement.assertDraft(draft);
         const { conversation } = this.active(conversationId, { permission: true });
         ensure(draft.context_revision === conversation.revision, 'Контекст изменился', 409);
         this.store.run('INSERT INTO approvals VALUES(?,?,?,?,?,?)', id(), draft.id, draft.current_version, conversation.revision, 'operator', now());
@@ -193,7 +212,10 @@ export class BusinessService {
       case 'draft.reject': {
         const draft = this.draft(p.draft_id); conversationId = draft.conversation_id;
         ensure(['pending','approved','stale'].includes(draft.status), 'Этот черновик уже исполнялся', 409);
-        this.store.run("UPDATE drafts SET status='rejected' WHERE id=?", draft.id); result = { rejected: true }; break;
+        this.store.run("UPDATE drafts SET status='rejected' WHERE id=?", draft.id);
+        const e=this.engagement.current(conversationId);
+        if(e){this.invalidate(conversationId,'draft_rejected');this.engagement.enqueue(this.engagement.get(e.id),{type:'operator_response',draft_id:draft.id});}
+        result = { rejected: true }; break;
       }
       case 'delivery.manual': {
         const draft = this.validApproved(p.draft_id); conversationId = draft.conversation_id;
@@ -228,7 +250,14 @@ export class BusinessService {
         if (action === 'task.retry') ensure(['failed','interrupted','cancelled','blocked'].includes(task.status), 'Повтор недоступен', 409);
         if (action === 'task.cancel') ensure(!['done','cancelled'].includes(task.status), 'Задача уже завершена', 409);
         const status = action === 'task.cancel' ? 'cancelled' : 'pending';
-        if (status === 'pending' && conversationId) this.active(conversationId);
+        if (status === 'pending' && conversationId) {
+          this.active(conversationId);
+          if(task.kind==='engagement_evaluate') {
+            const e=this.engagement.current(conversationId);ensure(e,'Engagement closed',409);
+            ensure(!this.store.get("SELECT decision_id FROM engagement_waits WHERE engagement_id=? AND status='waiting'",e.id) && !this.store.get("SELECT id FROM engagement_decisions WHERE engagement_id=? AND status='current'",e.id),'No new event permits reconsideration',409);
+            ensure(!this.store.get("SELECT t.id FROM tasks t JOIN engagement_tasks et ON et.task_id=t.id WHERE et.engagement_id=? AND t.status IN ('pending','running') AND t.id<>?",e.id,task.id),'Attention already queued',409);
+          }
+        }
         this.store.run('UPDATE tasks SET status=? WHERE id=?', status, task.id); result = { task_id: task.id, status }; break;
       }
       case 'fact.propose':
@@ -256,6 +285,7 @@ export class BusinessService {
         result = { lesson_id: lessonId, status: 'candidate' }; break;
       }
       case 'lesson.review': {
+        ensure(!this.store.get('SELECT lesson_id FROM learning_episodes WHERE lesson_id=?',p.lesson_id),'Use learning.review for evidence-linked lessons',409);
         ensure(['active','retired','rejected'].includes(p.status), 'Неизвестный статус');
         const lesson = this.store.get('SELECT * FROM lessons WHERE id=? AND partner_id=?', p.lesson_id, this.config.partnerId); ensure(lesson, 'Урок не найден', 404);
         this.store.run('UPDATE lessons SET status=?,reviewed_at=? WHERE id=?', p.status, now(), lesson.id); result = { status: p.status }; break;
@@ -273,7 +303,10 @@ export class BusinessService {
           this.invalidate(conversationId, p.kind);
           this.store.run("UPDATE tasks SET status='cancelled' WHERE conversation_id=? AND status IN ('pending','proposed','running')", conversationId);
         }
-        result = { outcome_id: outcomeId }; break;
+        result = { outcome_id: outcomeId }; this.engagement.outcome(p,result);
+        const e=this.engagement.current(conversationId);
+        if(e){this.invalidate(conversationId,'outcome_recorded');this.engagement.signal(this.engagement.get(e.id),'outcome',{outcome_id:outcomeId});}
+        break;
       }
       case 'capability.propose': {
         const proposalId = id();
@@ -312,7 +345,8 @@ export class BusinessService {
     const taskId = id(), due = dateTime(p.due_at ?? now()), convId = p.conversation_id ?? null;
     if (convId) this.conversation(convId);
     const key = p.dedupe_key ? requiredText(p.dedupe_key, 'dedupe_key', 200) : null;
-    const kind = p.kind ?? 'research'; ensure(['reply','follow_up','research','planning','review',OPPORTUNITY_TASK].includes(kind), 'Неизвестный вид задачи');
+    const kind = p.kind ?? 'research'; ensure(['reply','follow_up','research','planning','review','engagement_evaluate',OPPORTUNITY_TASK].includes(kind), 'Неизвестный вид задачи');
+    if (kind === 'engagement_evaluate') ensure(author === 'system' && status === 'pending','Engagement attention is system owned',403);
     if (kind === OPPORTUNITY_TASK) ensure(author === 'system' && status === 'proposed', 'Opportunity review создаёт только проверенный consumer', 403);
     if (key?.startsWith('opportunity:')) ensure(kind === OPPORTUNITY_TASK && author === 'system' && status === 'proposed', 'Зарезервированный ключ consumer', 403);
     if (key) { const old = this.store.get('SELECT * FROM tasks WHERE dedupe_key=?', key); if (old) return { task_id: old.id, duplicate: true }; }
@@ -334,13 +368,16 @@ export class BusinessService {
   validApproved(draftId) {
     const draft = this.draft(draftId), { conversation } = this.active(draft.conversation_id, { permission: true });
     ensure(draft.status === 'approved', 'Нет действующего одобрения', 409);
+    this.engagement.assertDraft(draft,{execution:true});
     ensure(conversation.revision === draft.context_revision, 'Разговор изменился', 409);
     ensure(this.store.get('SELECT id FROM approvals WHERE draft_id=? AND draft_version=? AND conversation_revision=?', draft.id, draft.current_version, conversation.revision), 'Одобрение не соответствует версии', 409);
     return draft;
   }
   recordDelivered(draft, externalId, source) {
     this.store.run("UPDATE drafts SET status='sent' WHERE id=?", draft.id);
-    this.store.run('INSERT INTO messages(id,conversation_id,direction,author,text,external_id,source,draft_id,created_at) VALUES(?,?,?,?,?,?,?,?,?)', id(), draft.conversation_id, 'out', source.startsWith('operator') ? 'operator' : 'agent_assisted', draft.text, externalId, source, draft.id, now());
+    const messageId = id();
+    this.store.run('INSERT INTO messages(id,conversation_id,direction,author,text,external_id,source,draft_id,created_at) VALUES(?,?,?,?,?,?,?,?,?)', messageId, draft.conversation_id, 'out', source.startsWith('operator') ? 'operator' : 'agent_assisted', draft.text, externalId, source, draft.id, now());
+    this.engagement.onDelivered(draft,messageId);
     this.invalidate(draft.conversation_id, 'outgoing_recorded');
     if (draft.action === 'handoff') {
       this.store.run("UPDATE conversations SET ownership='HUMAN_OWNED' WHERE id=?", draft.conversation_id);
@@ -351,10 +388,11 @@ export class BusinessService {
     const allowed = this.config.telegram.allowedChatIds.map(String);
     if (!allowed.length) return [];
     const slots = allowed.map(() => '?').join(',');
-    return this.store.all(`SELECT d.* FROM drafts d JOIN conversations c ON c.id=d.conversation_id JOIN persons p ON p.id=c.person_id JOIN channel_identities ci ON ci.id=c.channel_identity_id WHERE d.run_id=? AND d.status='pending' AND d.action IN ('reply','clarify','propose_call') AND c.mode='AUTOPILOT' AND c.ownership='AI_OWNED' AND p.suppressed=0 AND trim(p.permission)<>'' AND ci.channel='telegram' AND ci.account_id=? AND ci.external_id IN (${slots}) AND EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id=c.id AND m.direction='in') ORDER BY d.created_at`, runId, this.telegramAccount(), ...allowed);
+    return this.store.all(`SELECT d.* FROM drafts d JOIN conversations c ON c.id=d.conversation_id JOIN persons p ON p.id=c.person_id JOIN channel_identities ci ON ci.id=c.channel_identity_id WHERE NOT EXISTS (SELECT 1 FROM engagements e WHERE e.conversation_id=c.id) AND d.run_id=? AND d.status='pending' AND d.action IN ('reply','clarify','propose_call') AND c.mode='AUTOPILOT' AND c.ownership='AI_OWNED' AND p.suppressed=0 AND trim(p.permission)<>'' AND ci.channel='telegram' AND ci.account_id=? AND ci.external_id IN (${slots}) AND EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id=c.id AND m.direction='in') ORDER BY d.created_at`, runId, this.telegramAccount(), ...allowed);
   }
   approveAutopilot(draftId, runId) {
     const draft = this.draft(draftId);
+    ensure(!this.engagement.managed(draft.conversation_id),'Engagement loop is review-first',409);
     ensure(draft.run_id === runId, 'Черновик не принадлежит этому запуску', 409);
     ensure(draft.status === 'pending', 'Автономно отправляется только ожидающий черновик', 409);
     ensure(['reply','clarify','propose_call'].includes(draft.action), 'Действие требует участия владельца', 409);
@@ -372,7 +410,7 @@ export class BusinessService {
   }
   autopilotHandoff(runId) {
     const draft = this.store.get("SELECT d.*,c.mode,c.ownership,p.suppressed FROM drafts d JOIN conversations c ON c.id=d.conversation_id JOIN persons p ON p.id=c.person_id WHERE d.run_id=? AND d.status='pending' AND d.action='handoff' LIMIT 1", runId);
-    if (!draft || draft.mode !== 'AUTOPILOT' || draft.ownership !== 'AI_OWNED' || draft.suppressed) return null;
+    if (!draft || this.engagement.managed(draft.conversation_id) || draft.mode !== 'AUTOPILOT' || draft.ownership !== 'AI_OWNED' || draft.suppressed) return null;
     this.store.run("UPDATE conversations SET ownership='HUMAN_OWNED',revision=revision+1 WHERE id=?", draft.conversation_id);
     this.store.run("UPDATE drafts SET status='stale' WHERE conversation_id=? AND status IN ('pending','approved','sending')", draft.conversation_id);
     this.store.run("UPDATE tasks SET status='cancelled' WHERE conversation_id=? AND status IN ('pending','proposed','running','interrupted')", draft.conversation_id);
@@ -391,6 +429,9 @@ export class BusinessService {
   detail(conversationId) {
     const conversation = this.conversation(conversationId), person = this.person(conversation.person_id);
     return { conversation, person,
+      contact_permissions:this.store.all('SELECT * FROM contact_permissions WHERE conversation_id=? ORDER BY created_at',conversationId),
+      engagements:this.store.all('SELECT * FROM engagements WHERE conversation_id=? ORDER BY created_at,rowid',conversationId).map(e=>this.engagement.snapshot(e.id)),
+      decisions:this.store.all('SELECT d.* FROM engagement_decisions d JOIN engagements e ON e.id=d.engagement_id WHERE e.conversation_id=? ORDER BY d.created_at,d.rowid',conversationId),
       messages: this.store.all('SELECT * FROM messages WHERE conversation_id=? ORDER BY created_at,rowid', conversationId),
       facts: this.store.all('SELECT * FROM facts WHERE person_id=? ORDER BY created_at DESC', person.id),
       drafts: this.store.all('SELECT * FROM drafts WHERE conversation_id=? ORDER BY created_at DESC', conversationId).map(d => ({ ...d, versions: this.store.all('SELECT * FROM draft_versions WHERE draft_id=? ORDER BY version', d.id), attempts: this.store.all('SELECT * FROM delivery_attempts WHERE draft_id=? ORDER BY created_at', d.id) })),
@@ -404,7 +445,7 @@ export class BusinessService {
       conversations: this.store.all('SELECT c.*,p.name,p.source,p.permission,p.suppressed,(SELECT text FROM messages WHERE conversation_id=c.id ORDER BY created_at DESC,rowid DESC LIMIT 1) AS last_message,(SELECT COUNT(*) FROM drafts WHERE conversation_id=c.id AND status=\'pending\') AS pending_drafts FROM conversations c JOIN persons p ON p.id=c.person_id WHERE p.partner_id=? ORDER BY c.created_at DESC', partnerId),
       tasks: this.store.all('SELECT * FROM tasks WHERE partner_id=? ORDER BY due_at DESC LIMIT 300', partnerId),
       runs: this.store.all('SELECT id,task_id,conversation_id,status,runtime,model,error,input_tokens,output_tokens,estimated_cost_usd,cost_status,created_at,finished_at FROM runs WHERE partner_id=? ORDER BY created_at DESC LIMIT 100', partnerId),
-      lessons: this.store.all('SELECT * FROM lessons WHERE partner_id=? ORDER BY created_at DESC LIMIT 200', partnerId),
+      lessons: this.store.all('SELECT l.*,EXISTS(SELECT 1 FROM learning_episodes le WHERE le.lesson_id=l.id) AS controlled FROM lessons l WHERE l.partner_id=? ORDER BY l.created_at DESC LIMIT 200', partnerId),
       proposals: this.store.all('SELECT * FROM capability_proposals WHERE partner_id=? ORDER BY created_at DESC', partnerId),
       skills: this.store.all('SELECT s.* FROM skill_versions s JOIN capability_proposals p ON p.id=s.proposal_id WHERE p.partner_id=? ORDER BY s.created_at DESC', partnerId),
       metrics: this.metrics(), events: this.store.all('SELECT id,kind,actor,created_at FROM events WHERE partner_id=? ORDER BY id DESC LIMIT 30', partnerId) };

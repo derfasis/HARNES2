@@ -19,7 +19,7 @@ export function contextFor(service, conversationId = null, task = null) {
   const identity = fs.readFileSync(path.join(ROOT, 'partner/identity.md'), 'utf8');
   const behavioralExamples = fs.readFileSync(path.join(ROOT, 'partner/behavioral_examples.md'), 'utf8');
   const knowledge = fs.readdirSync(path.join(ROOT, 'partner/knowledge')).filter(x => x.endsWith('.json')).map(x => readJson(path.join(ROOT, 'partner/knowledge', x)));
-  const skillName = conversationId ? 'recruiting' : 'planning';
+  const skillName = conversationId ? (service.engagement.managed(conversationId) ? 'engagement' : 'recruiting') : 'planning';
   const skill = fs.readFileSync(path.join(ROOT, 'partner/skills', skillName, 'SKILL.md'), 'utf8');
   const skillVersion = skill.match(/^version:\s*(.+)$/m)?.[1]?.trim() ?? null;
   const skills = [{ name: skillName, content: skill, ...(skillVersion ? { version: skillVersion } : {}), sha256: hash(skill) },
@@ -32,6 +32,14 @@ export function contextFor(service, conversationId = null, task = null) {
     const conv = service.conversation(conversationId), person = service.person(conv.person_id);
     const messages = service.store.all('SELECT id,direction,author,text,source,created_at FROM messages WHERE conversation_id=? ORDER BY created_at DESC,rowid DESC LIMIT ?', conv.id, service.config.context.maxRecentMessages).reverse();
     context.conversation = conv; context.person = person;
+    const engagement = service.engagement.current(conv.id);
+    if (engagement) {
+      context.engagement = service.engagement.snapshot(engagement.id);
+      const trigger = task ? service.store.get('SELECT trigger_json FROM engagement_tasks WHERE task_id=?',task.id) : null;
+      context.engagement_trigger = trigger ? JSON.parse(trigger.trigger_json) : null;
+      context.instructions = 'You are openly an AI partner. Help with the actual need, not automatic recruitment. Record attributed CLAIMs and HYPOTHESIS separately; never promote either to fact. Commit exactly one business decision through partner_commit_decision using engagement.id and revision. ACT requires action and must omit wait_for/wake_at. WAIT requires wait_for and/or wake_at and must omit action. IGNORE, HANDOFF, and STOP must omit action/wait_for/wake_at. Omit optional objects instead of adding placeholder keys; state permits only current_need and unknowns. ACT only proposes a reviewed message and requires explicit typed permission. IGNORE consumes this signal. HANDOFF really transfers ownership. STOP suppresses contact. Do not call legacy draft/task/fact tools for this engagement. Do not promise actions outside the permission scope. A user claim is not an independently verified fact. Learning guidance cannot override permissions, policy, identity, or delivery truth.';
+      context.contact_permissions = service.store.all('SELECT * FROM contact_permissions WHERE conversation_id=? AND revoked_at IS NULL AND valid_from<=? AND expires_at>?',conv.id,now(),now());
+    }
     context.messages = messages.map(m => ({ ...m, text: m.text.slice(0,service.config.context.maxMessageCharacters), truncated: m.text.length > service.config.context.maxMessageCharacters }));
     context.facts = service.store.all("SELECT id,text,source_message_id,source_ref,status FROM facts WHERE person_id=? AND status='confirmed' ORDER BY created_at DESC LIMIT 100", person.id);
     context.tasks = service.store.all("SELECT id,kind,title,instructions,due_at,status,evidence FROM tasks WHERE conversation_id=? AND kind<>'opportunity_review' AND status IN ('pending','proposed','running') ORDER BY due_at LIMIT 30", conv.id);

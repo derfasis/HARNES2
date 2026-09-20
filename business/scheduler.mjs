@@ -25,6 +25,7 @@ export class Scheduler {
         const result = await processSourceOpportunity(this.service, this.runtime);
         this.lastReason = sourceReadFailed?'source_read_failed':result.disposition; return;
       }
+      await this.service.exclusive(() => this.service.store.transaction(() => this.service.engagement.sweep()));
       if (!runtimeReadiness(cfg).ready) { this.lastReason = 'Задачи сохранены. Ожидается подключение модели.'; return; }
       const day = now().slice(0,10), count = this.service.store.get('SELECT COUNT(*) AS n,COALESCE(SUM(estimated_cost_usd),0) AS cost,SUM(CASE WHEN cost_status=\'unknown\' THEN 1 ELSE 0 END) AS unknown FROM runs WHERE created_at>=?', day);
       if (count.n >= cfg.runtime.maxRunsPerDay) { this.lastReason = 'Достигнут дневной лимит запусков (UTC)'; return; }
@@ -35,6 +36,12 @@ export class Scheduler {
       const prepared = await this.service.exclusive(() => this.service.store.transaction(() => {
         const task = this.service.store.get("SELECT * FROM tasks WHERE partner_id=? AND status='pending' AND kind<>'opportunity_review' AND due_at<=? ORDER BY due_at,created_at LIMIT 1", cfg.partnerId, now());
         if (!task) return null;
+        if (task.conversation_id && this.service.engagement.managed(task.conversation_id)) {
+          const e=this.service.engagement.current(task.conversation_id);
+          if (!e || task.kind!=='engagement_evaluate' || !this.service.store.get('SELECT task_id FROM engagement_tasks WHERE task_id=? AND engagement_id=?',task.id,e.id)) {
+            this.service.store.run("UPDATE tasks SET status='blocked' WHERE id=?",task.id); return null;
+          }
+        }
         if (task.conversation_id) {
           try { this.service.active(task.conversation_id); }
           catch { this.service.store.run("UPDATE tasks SET status='blocked' WHERE id=?", task.id); return null; }
@@ -52,6 +59,9 @@ export class Scheduler {
       catch (error) { result = { completed: false, error: error.message }; }
       await this.service.exclusive(() => this.service.store.transaction(() => {
         const task = this.service.store.get('SELECT * FROM tasks WHERE id=?', run.task_id);
+        if (task.kind==='engagement_evaluate' && result.completed && !result.error && !this.service.store.get('SELECT id FROM engagement_decisions WHERE run_id=?',run.id)) {
+          result = {...result,completed:false,error:'ENGAGEMENT_DECISION_MISSING'};
+        }
         const cancelled = task.status === 'cancelled', status = cancelled ? 'cancelled' : result.completed && !result.error ? 'completed' : 'failed';
         const { input, output, cost, costStatus } = usageAccounting(cfg.runtime, result.usage);
         this.service.store.run('UPDATE runs SET status=?,result_json=?,error=?,input_tokens=?,output_tokens=?,estimated_cost_usd=?,cost_status=?,finished_at=? WHERE id=?', status, JSON.stringify(result), result.error ? String(result.error).slice(0,2000) : null, input, output, cost, costStatus, now(), run.id);

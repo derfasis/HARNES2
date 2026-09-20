@@ -27,7 +27,11 @@ def business_call(envelope, name, args):
         with urllib.request.urlopen(request, timeout=30) as response:
             return response.read().decode()
     except urllib.error.HTTPError as error:
-        return json.dumps({"error": error.read(8192).decode(errors="replace"), "status": error.code})
+        try:
+            body = json.loads(error.read(8192).decode(errors="replace"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            body = {"error": "Business tool rejected the request", "code": "tool_rejected"}
+        return json.dumps({**body, "status": error.code})
     except (OSError, TimeoutError):
         return json.dumps({"error": "Business service unavailable; action was not confirmed"})
 
@@ -96,6 +100,8 @@ def main():
         context = envelope["context"]
         system_parts = [context.get("behavioral_examples", "")]
         system_parts.extend(s["content"] for s in context["skills"])
+        if context.get("engagement"):
+            system_parts.append(context["instructions"])
         system = "\n\n".join(part for part in system_parts if part.strip())
         model_context = compact_prompt_context(context)
         api_key, credential_pool = runtime_credentials(cfg["baseUrl"])

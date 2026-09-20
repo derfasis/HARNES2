@@ -18,7 +18,9 @@
     "build": "node scripts/build.mjs",
     "export": "node --env-file-if-exists=.env scripts/export.mjs",
     "import": "node --env-file-if-exists=.env scripts/import.mjs",
-    "mcp": ".venv\\Scripts\\python.exe adapters/mcp/server.py"
+    "mcp": ".venv\\Scripts\\python.exe adapters/mcp/server.py",
+    "test:engagement": "node --test tests/engagement.test.mjs tests/engagement-ui.test.mjs",
+    "test:engagement:isolated": "node scripts/test-engagement-isolated.mjs"
   },
   "dependencies": {
     "ajv": "8.17.1",

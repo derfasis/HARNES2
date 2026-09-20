@@ -24,7 +24,7 @@ export class HermesAdapter {
     if (decision) automaticBoundary(this.service);
     else if (this.service.config.opportunity?.automatic) throw new Error('Agent runs are disabled in automatic review-only mode');
     const config = this.service.config, token = decision ? null : randomBytes(32).toString('hex');
-    const scope = { kind: 'agent', runId: run.id, conversationId: run.conversation_id, expiresAt: Date.now() + (config.runtime.timeoutSeconds + 30) * 1000 };
+    const scope = { kind: 'agent', runId: run.id, conversationId: run.conversation_id, engagementId: context.engagement?.id ?? null, expiresAt: Date.now() + (config.runtime.timeoutSeconds + 30) * 1000 };
     const tools = decision ? [] : (await import('./tools.mjs')).toolDefinitions(scope);
     if (token) this.tokens.set(token, scope);
     const python = path.join(ROOT, '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');

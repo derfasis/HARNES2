@@ -1,0 +1,1 @@
+export const ENGAGEMENT_TABLES = ['engagements','contact_permissions','engagement_beliefs','engagement_decisions','engagement_tasks','engagement_waits','engagement_actions','engagement_commitments','engagement_explanations','engagement_handoffs','decision_outcomes','learning_episodes','learning_reviews','engagement_strategies'];

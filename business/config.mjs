@@ -32,6 +32,7 @@ export function loadConfig() {
     const url = new URL(cfg.runtime.baseUrl);
     if (url.username || url.password || url.search || url.hash || !(url.protocol === 'https:' || (url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)))) throw new Error('Model URL must use HTTPS, or local HTTP, without credentials/query.');
   }
+  if (typeof cfg.engagement?.enabled !== 'boolean') throw new Error('Invalid engagement.enabled');
   if (typeof cfg.opportunity?.automatic !== 'boolean') throw new Error('Invalid opportunity.automatic');
   if (cfg.opportunity.automatic && (cfg.runtime.enabled !== false || cfg.telegram.enabled !== false || cfg.telegram.liveSending !== false))
     throw new Error('Automatic opportunity prerequisite requires runtime and Telegram disabled.');
