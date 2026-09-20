@@ -59,10 +59,15 @@ export class Scheduler {
       catch (error) { result = { completed: false, error: error.message }; }
       await this.service.exclusive(() => this.service.store.transaction(() => {
         const task = this.service.store.get('SELECT * FROM tasks WHERE id=?', run.task_id);
-        if (task.kind==='engagement_evaluate' && result.completed && !result.error && !this.service.store.get('SELECT id FROM engagement_decisions WHERE run_id=?',run.id)) {
+        const decision = task.kind==='engagement_evaluate' ? this.service.store.get('SELECT * FROM engagement_decisions WHERE run_id=?',run.id) : null;
+        if (task.kind==='engagement_evaluate' && result.completed && !result.error && !decision) {
           result = {...result,completed:false,error:'ENGAGEMENT_DECISION_MISSING'};
         }
-        const cancelled = task.status === 'cancelled', status = cancelled ? 'cancelled' : result.completed && !result.error ? 'completed' : 'failed';
+        // HANDOFF/STOP deliberately cancel AI-owned work, including their own
+        // running attention. A durable terminal decision from this exact run is
+        // completion; unrelated cancellation remains cancellation.
+        const terminal = result.completed && !result.error && ['HANDOFF','STOP'].includes(decision?.kind);
+        const cancelled = task.status === 'cancelled' && !terminal, status = cancelled ? 'cancelled' : result.completed && !result.error ? 'completed' : 'failed';
         const { input, output, cost, costStatus } = usageAccounting(cfg.runtime, result.usage);
         this.service.store.run('UPDATE runs SET status=?,result_json=?,error=?,input_tokens=?,output_tokens=?,estimated_cost_usd=?,cost_status=?,finished_at=? WHERE id=?', status, JSON.stringify(result), result.error ? String(result.error).slice(0,2000) : null, input, output, cost, costStatus, now(), run.id);
         if (!cancelled) this.service.store.run('UPDATE tasks SET status=? WHERE id=?', status === 'completed' ? 'done' : 'failed', task.id);

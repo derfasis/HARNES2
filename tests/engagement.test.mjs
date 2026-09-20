@@ -225,6 +225,21 @@ test('real Scheduler commits WAIT once; 100 idle ticks do not call runtime again
  for(let i=0;i<100;i++)await f.scheduler.tick();assert.equal(f.count,1);assert.equal(h.store.get('SELECT status FROM tasks WHERE id=(SELECT task_id FROM runs LIMIT 1)').status,'done');
 });
 
+test('Scheduler records committed HANDOFF and STOP as completed after they cancel AI work',async t=>{
+ for(const terminal of ['HANDOFF','STOP']) {
+  const h=await harness(t);const f=await schedulerFixture(t,h,async run=>{
+   await h.decide(terminal,{}, {kind:'agent',runId:run.id,conversationId:h.cid});
+   return {completed:true,usage:{input_tokens:1,output_tokens:1}};
+  });
+  await f.scheduler.tick();
+  assert.equal(f.count,1);
+  assert.equal(h.store.get('SELECT status FROM runs').status,'completed');
+  assert.equal(h.store.get('SELECT status FROM tasks WHERE id=(SELECT task_id FROM runs)').status,'done');
+  if(terminal==='HANDOFF')assert.equal(h.service.conversation(h.cid).ownership,'HUMAN_OWNED');
+  else assert.equal(h.service.person(h.pid).suppressed,1);
+ }
+});
+
 test('Scheduler refuses success without a durable decision and does not spin on failure',async t=>{
  const h=await harness(t);const f=await schedulerFixture(t,h,async()=>({completed:true}));await f.scheduler.tick();
  assert.equal(h.store.get('SELECT error FROM runs').error,'ENGAGEMENT_DECISION_MISSING');
