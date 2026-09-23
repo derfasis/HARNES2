@@ -16,6 +16,8 @@ import { Scheduler } from '../business/scheduler.mjs';
 import { contextFor } from '../business/context.mjs';
 import { callTool } from '../business/tools.mjs';
 import { consumeOpportunity } from '../business/opportunity-consumer.mjs';
+import { bootstrapTelegramSource, applyTelegramDifference, disconnectTelegramSource } from '../business/sources/telegram-readonly.mjs';
+import { sourceCheckpoint } from '../business/source-ingestion.mjs';
 
 let guards, originalKey;
 before(() => {
@@ -42,6 +44,18 @@ function output(context, decision='PUBLIC_REPLY',positive=true) {
       reason:'Synthetic deterministic response.',evidence_message_ids:[m.id],unknowns:[],risk_flags:[],
       draft:['PUBLIC_REPLY','DM'].includes(decision)?{channel:decision==='DM'?'dm':'public',action:'reply',target_id:m.author_id,text:'Review proposal only.',source_message_ids:[m.id]}:null,
       review:{required:true,status:'pending',authorization:'none'},reevaluate_after:null},authority:{contact_permission:false,allowed_effects:[]}};
+}
+const TRANSPORT_SOURCE='telegram:channel:100';
+const transportWire=(extra={})=>({id:1,channel_id:'100',from_id:{kind:'user',id:'10'},post:false,
+  text:'What does this offer include?',date:1767225600,...extra});
+const transportUpdate=(pts=11,extra={})=>({kind:'new',channel_id:'100',pts,pts_count:1,message:transportWire(),...extra});
+const transportPage=(from,to,updates=[],final=true)=>({kind:from===to?'empty':'difference',account_id:'999',channel_id:'100',
+  from_pts:from,to_pts:to,final,updates});
+async function telegramTransport(h) {
+  h.config.opportunity.telegramSources=[{sourceId:TRANSPORT_SOURCE,accountId:'999',channelId:'100',
+    sourceKind:'sanitized_fixture',processingBasis:'Offline source-freshness regression fixture',maxLagSeconds:120}];
+  h.config.opportunity.allowedSourceRefs=[TRANSPORT_SOURCE];
+  await bootstrapTelegramSource(h.service,TRANSPORT_SOURCE,{pts:10,history:[]});
 }
 function harness(t) {
   const directory=fs.mkdtempSync(path.join(os.tmpdir(),'harnes2-auto-'));let store=new Store(directory);
@@ -153,6 +167,53 @@ test('consumer transaction failure preserves analyzed output for restart without
   assert.equal(h.store.get("SELECT COUNT(*) AS n FROM events WHERE kind IN ('opportunity.candidate','opportunity.pipeline.finished')").n,0);
   assert.equal(h.store.get('SELECT status FROM runs').status,'analyzed');h.service.addTask=add;h.restart();await h.tick();
   assert.equal(h.calls,1);assert.equal(h.cards().length,1);noEffects(h);
+});
+test('analyzed opportunity waits through transport catch-up and finalizes saved output once current',async t=>{
+  const h=harness(t);await telegramTransport(h);
+  await applyTelegramDifference(h.service,TRANSPORT_SOURCE,transportPage(10,11,[transportUpdate()]));
+  assert.equal(sourceCheckpoint(h.service,TRANSPORT_SOURCE).phase,'current');
+  h.respond(async context=>{await disconnectTelegramSource(h.service,TRANSPORT_SOURCE);return output(context);});
+  await h.tick();assert.equal(h.scheduler.lastReason,'waiting_source');
+  assert.equal(h.calls,1);assert.equal(h.store.get('SELECT status FROM runs').status,'analyzed');
+  assert.equal(h.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='opportunity.pipeline.finished'").n,0);
+  assert.equal(h.cards().length,0);assert.equal(sourceCheckpoint(h.service,TRANSPORT_SOURCE).phase,'catching_up');
+  h.restart();assert.equal(h.store.get('SELECT status FROM runs').status,'analyzed');
+  assert.equal(sourceCheckpoint(h.service,TRANSPORT_SOURCE).phase,'catching_up');
+
+  await applyTelegramDifference(h.service,TRANSPORT_SOURCE,transportPage(11,11));
+  await h.tick();assert.equal(h.scheduler.lastReason,'review_created');assert.equal(h.calls,1);
+  assert.equal(h.cards().length,1);assert.equal(h.detail().freshness.fresh,true);noEffects(h);
+});
+test('integrity-latched transport stays blocked while an analyzed result remains pending',async t=>{
+  const h=harness(t);await telegramTransport(h);
+  await applyTelegramDifference(h.service,TRANSPORT_SOURCE,transportPage(10,11,[transportUpdate()]));
+  h.respond(async context=>{await disconnectTelegramSource(h.service,TRANSPORT_SOURCE,'INTEGRITY_RECONCILIATION_REQUIRED');return output(context);});
+  await h.tick();const checkpoint=sourceCheckpoint(h.service,TRANSPORT_SOURCE);
+  assert.equal(h.scheduler.lastReason,'waiting_source');assert.equal(checkpoint.phase,'blocked');
+  assert.equal(checkpoint.reason,'INTEGRITY_RECONCILIATION_REQUIRED');
+  assert.equal(h.store.get('SELECT status FROM runs').status,'analyzed');assert.equal(h.calls,1);
+  assert.equal(h.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='opportunity.pipeline.finished'").n,0);
+  assert.equal(h.cards().length,0);noEffects(h);
+});
+test('saved opportunity result is discarded after transport recovery if its source version changed',async t=>{
+  const h=harness(t);await telegramTransport(h);
+  await applyTelegramDifference(h.service,TRANSPORT_SOURCE,transportPage(10,11,[transportUpdate()]));
+  assert.equal(sourceCheckpoint(h.service,TRANSPORT_SOURCE).phase,'current');
+  h.respond(async context=>{
+    await disconnectTelegramSource(h.service,TRANSPORT_SOURCE);
+    return output(context);
+  });
+  await h.tick();assert.equal(h.scheduler.lastReason,'waiting_source');assert.equal(h.calls,1);
+  await applyTelegramDifference(h.service,TRANSPORT_SOURCE,transportPage(11,12,[transportUpdate(12,{kind:'edit',
+    message:transportWire({text:'Updated question',edit_date:1767225660})})],false));
+  await h.tick();assert.equal(h.scheduler.lastReason,'waiting_source');assert.equal(h.calls,1);
+  await applyTelegramDifference(h.service,TRANSPORT_SOURCE,transportPage(12,12));
+  await h.tick();assert.equal(h.scheduler.lastReason,'stale');assert.equal(h.calls,1);assert.equal(h.cards().length,0);
+  const stale=JSON.parse(h.store.get("SELECT payload_json FROM events WHERE kind='opportunity.pipeline.finished'").payload_json);
+  assert.equal(stale.disposition,'stale');assert.ok(stale.reasons.includes('SOURCE_MESSAGE_SUPERSEDED'));
+  h.respond(context=>output(context));
+  await h.tick();assert.equal(h.scheduler.lastReason,'review_created');assert.equal(h.calls,2);assert.equal(h.cards().length,1);
+  assert.equal(h.detail().snapshot.messages.at(-1).version,12);assert.equal(h.detail().freshness.fresh,true);noEffects(h);
 });
 test('HUMAN_OWNED blocks active proposal but permits owner-only HANDOFF',async t=>{
   const h=harness(t);await linked(h,'HUMAN_OWNED');await h.ingest();await h.tick();assert.equal(h.cards().length,0);
