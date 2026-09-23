@@ -23,6 +23,10 @@ function disposition(service, run, value, extra = {}) {
 function complete(service, run) {
   const saved = JSON.parse(run.context_json), result = JSON.parse(run.result_json);
   const captured = service.opportunityCapture(saved.capture_id);
+  // A non-current transport cannot establish that this capture is still fresh.
+  // Keep the analyzed run pending until reconciliation can establish freshness.
+  if (captured.freshness.reasons.includes('SOURCE_TRANSPORT_NOT_CURRENT'))
+    return { disposition: 'waiting_source', reasons: captured.freshness.reasons };
   if (!captured.freshness.fresh) return disposition(service, run, 'stale', { reasons: captured.freshness.reasons });
   let output;
   try { output = parseOpportunityOutput(result.final_response, captured.context); }
@@ -41,12 +45,17 @@ function prepare(service) {
     AND NOT EXISTS (SELECT 1 FROM events d WHERE d.partner_id=e.partner_id AND d.kind=? AND d.actor='system'
       AND json_extract(d.payload_json,'$.source_event_id')=CAST(e.id AS TEXT)) ORDER BY e.id LIMIT 100`,
   service.config.partnerId, SOURCE_MESSAGE, PIPELINE_FINISHED);
+  let waitingForSource = false;
   for (const source of pending) {
     const eventId = String(source.id);
     const attempts = service.store.all(`SELECT * FROM runs WHERE partner_id=? AND runtime=?
       AND json_extract(context_json,'$.source_event_id')=? ORDER BY rowid DESC`, service.config.partnerId, RUNTIME, eventId);
     const last = attempts[0];
-    if (last?.status === 'analyzed') return { result: complete(service, last) };
+    if (last?.status === 'analyzed') {
+      const result = complete(service, last);
+      if (result.disposition === 'waiting_source') { waitingForSource = true; continue; }
+      return { result };
+    }
     if (last?.status === 'running') continue;
     if (attempts.length >= MAX_ATTEMPTS) {
       finishSource(service, eventId, 'attempt_limit'); return { result: { disposition: 'attempt_limit' } };
@@ -67,7 +76,8 @@ function prepare(service) {
         return { result: { disposition: 'budget_blocked' } };
       capture = captureOpportunity(service, { snapshot: state.snapshot, ...(state.conversation_id ? { conversation_id: state.conversation_id } : {}) }, state.source_state);
     } catch (error) {
-      if (['SOURCE_TRANSPORT_POLICY_UNAVAILABLE','SOURCE_TRANSPORT_NOT_READY','SOURCE_TRANSPORT_NOT_CURRENT','SOURCE_TRANSPORT_STALE','SOURCE_TRANSPORT_DIRTY'].includes(error.code)) continue;
+      if (error.code === 'SOURCE_TRANSPORT_NOT_CURRENT') { waitingForSource = true; continue; }
+      if (['SOURCE_TRANSPORT_POLICY_UNAVAILABLE','SOURCE_TRANSPORT_NOT_READY','SOURCE_TRANSPORT_STALE','SOURCE_TRANSPORT_DIRTY'].includes(error.code)) continue;
       if (!terminalSource.has(error.code) && error.code !== 'STALE_OR_FUTURE_SNAPSHOT') throw error;
       finishSource(service, eventId, error.code); return { result: { disposition: error.code } };
     }
@@ -79,7 +89,7 @@ function prepare(service) {
     service.store.event(service.config.partnerId, null, 'opportunity.inference.started', 'system', { source_event_id: eventId, run_id: runId });
     return { run: service.store.get('SELECT * FROM runs WHERE id=?', runId), context: capture.context };
   }
-  return { result: { disposition: pending.length ? 'waiting_retry_or_running' : 'idle' } };
+  return { result: { disposition: waitingForSource ? 'waiting_source' : pending.length ? 'waiting_retry_or_running' : 'idle' } };
 }
 export async function processSourceOpportunity(service, runtime) {
   automaticBoundary(service);
