@@ -655,6 +655,34 @@ test('GAP R2 limit=1 bounds every durable maintenance effect', async (t) => {
   assert.equal(new Set(finalMarkers.map((row) => row.source_event_id)).size, 20);
   assert.equal(h.markers('discovery.observation.pending').length, 20);
   noContactEffects(h);
+
+  const fair = harness(t);
+  const allowedRef = 'public:maintenance-allowed';
+  const revokedRef = 'public:maintenance-revoked';
+  fair.settings.opportunity.allowedSourceRefs = [allowedRef, revokedRef];
+  const fairOriginal = fair.service.discoveryApply;
+  try {
+    fair.service.discoveryApply = () => { throw new Error('synthetic maintenance cursor pending'); };
+    for (const [index, sourceRef] of [allowedRef, revokedRef].entries()) {
+      await fair.ingest(source({
+        source_id: sourceRef,
+        message_id: `message:maintenance-${index}`,
+        author_id: `user:maintenance-${index}`,
+        thread_id: `thread:maintenance-${index}`,
+      }), { kind: 'channel', sourceId: sourceRef }, `maintenance-cursor-${index}`);
+    }
+  } finally {
+    fair.service.discoveryApply = fairOriginal;
+  }
+  fair.settings.opportunity.allowedSourceRefs = [allowedRef];
+  reconcileDiscoveryPending(fair.service, 1);
+  assert.equal(fair.markers('discovery.observation.applied')
+    .filter((row) => JSON.parse(row.payload_json).projection_status === 'source_revoked').length, 0);
+  fair.restart();
+  reconcileDiscoveryPending(fair.service, 1);
+  assert.equal(fair.markers('discovery.observation.applied')
+    .filter((row) => JSON.parse(row.payload_json).projection_status === 'source_revoked').length, 1);
+  noContactEffects(fair);
 });
 
 async function createTarget(h, raw, { channel = 'manual', accountId = null, externalId = '12345' } = {}) {

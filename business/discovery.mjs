@@ -227,14 +227,65 @@ export function staleMaterialEvidence(service) {
 }
 
 const DISCOVERY_MAINTENANCE_MAX = 1000;
+const REVOKED_MAINTENANCE_CURSOR_CHANNEL = 'discovery-revoked-maintenance-v1';
+
+function readRevokedMaintenanceCursor(service) {
+  const row = service.store.get('SELECT cursor FROM channel_offsets WHERE channel=? AND account_id=?',
+    REVOKED_MAINTENANCE_CURSOR_CHANNEL, service.config.partnerId);
+  if (!row) return null;
+  try {
+    const value = parse(row.cursor);
+    return typeof value.source_ref === 'string' ? value.source_ref : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeRevokedMaintenanceCursor(service, sourceRef) {
+  service.store.run(`INSERT INTO channel_offsets(channel,account_id,cursor) VALUES(?,?,?)
+    ON CONFLICT(channel,account_id) DO UPDATE SET cursor=excluded.cursor`,
+  REVOKED_MAINTENANCE_CURSOR_CHANNEL, service.config.partnerId, JSON.stringify({ source_ref: sourceRef }));
+}
 
 export function invalidateRevokedDiscoverySources(service, limit = DISCOVERY_MAINTENANCE_MAX) {
   check(Number.isInteger(limit) && limit >= 1 && limit <= DISCOVERY_MAINTENANCE_MAX,
     'DISCOVERY_MAINTENANCE_LIMIT');
   return service.store.transaction(() => {
-    let budget = limit;
-    const active = service.store.all(`SELECT * FROM discovery_situations WHERE partner_id=?
-      AND status IN ('OBSERVING','CANDIDATE') ORDER BY updated_at,id LIMIT ?`, service.config.partnerId, limit);
+    const scanLimit = limit;
+    const maintenanceRows = (after, take, before = null) => {
+      const predicates = [], params = [service.config.partnerId, service.config.partnerId,
+        DISCOVERY_PENDING, DISCOVERY_APPLIED];
+      if (after !== null) { predicates.push('source_ref > ?'); params.push(after); }
+      if (before !== null) { predicates.push('source_ref <= ?'); params.push(before); }
+      params.push(take);
+      const predicate = predicates.length ? `WHERE ${predicates.join(' AND ')}` : '';
+      return service.store.all(`SELECT source_ref FROM (
+          SELECT COALESCE(source_ref,'') AS source_ref
+          FROM discovery_situations
+          WHERE partner_id=? AND status IN ('OBSERVING','CANDIDATE')
+          UNION
+          SELECT COALESCE(json_extract(s.payload_json,'$.source_id'),'') AS source_ref
+          FROM events p
+          JOIN events s ON s.partner_id=p.partner_id AND s.kind='source.message'
+            AND s.id=CAST(p.payload_json->>'$.source_event_id' AS INTEGER)
+          WHERE p.partner_id=? AND p.kind=?
+            AND NOT EXISTS (SELECT 1 FROM events a WHERE a.partner_id=p.partner_id AND a.kind=?
+              AND a.payload_json->>'$.source_event_id'=p.payload_json->>'$.source_event_id')
+        ) AS grouped ${predicate} ORDER BY source_ref LIMIT ?`, ...params);
+    };
+    const cursor = readRevokedMaintenanceCursor(service);
+    let sourceRefs = maintenanceRows(cursor, scanLimit);
+    if (cursor !== null && sourceRefs.length < scanLimit) {
+      sourceRefs = sourceRefs.concat(maintenanceRows(null, scanLimit - sourceRefs.length, cursor));
+    }
+    writeRevokedMaintenanceCursor(service, sourceRefs.length
+      ? String(sourceRefs[sourceRefs.length - 1].source_ref ?? '') : null);
+
+    const refsJson = JSON.stringify(sourceRefs.map(row => String(row.source_ref ?? '')));
+    const active = service.store.all(`SELECT * FROM discovery_situations
+      WHERE partner_id=? AND status IN ('OBSERVING','CANDIDATE')
+        AND source_ref IN (SELECT value FROM json_each(?))
+      ORDER BY updated_at,id LIMIT ?`, service.config.partnerId, refsJson, scanLimit);
     const pending = service.store.all(`SELECT DISTINCT COALESCE(json_extract(s.payload_json,'$.source_id'),'') AS source_ref,
         CAST(p.payload_json->>'$.source_event_id' AS INTEGER) AS source_event_id
       FROM events p
@@ -243,10 +294,14 @@ export function invalidateRevokedDiscoverySources(service, limit = DISCOVERY_MAI
       WHERE p.partner_id=? AND p.kind=?
         AND NOT EXISTS (SELECT 1 FROM events a WHERE a.partner_id=p.partner_id AND a.kind=?
           AND a.payload_json->>'$.source_event_id'=p.payload_json->>'$.source_event_id')
+        AND COALESCE(json_extract(s.payload_json,'$.source_id'),'')
+          IN (SELECT value FROM json_each(?))
       ORDER BY p.id LIMIT ?`,
-    service.config.partnerId, DISCOVERY_PENDING, DISCOVERY_APPLIED, limit);
-    const sourceRefs = new Set([...active.map(row => row.source_ref), ...pending.map(row => row.source_ref)]);
-    const revoked = new Set([...sourceRefs].filter(sourceRef => sourceAccessReadiness(service, sourceRef).reason === 'SOURCE_NOT_ALLOWED'));
+    service.config.partnerId, DISCOVERY_PENDING, DISCOVERY_APPLIED, refsJson, scanLimit);
+    const sourceRefSet = new Set([...active.map(row => row.source_ref), ...pending.map(row => row.source_ref)]);
+    const revoked = new Set([...sourceRefSet]
+      .filter(sourceRef => sourceAccessReadiness(service, sourceRef).reason === 'SOURCE_NOT_ALLOWED'));
+    let budget = limit;
     let count = 0;
     for (const row of active) {
       if (!budget) break;
@@ -684,7 +739,7 @@ export function reconcileDiscoveryPending(service, limit = 50) {
   const maintained = invalidateRevokedDiscoverySources(service, limit - reserveNormalSlot);
   const budget = Math.max(0, limit - maintained);
   if (service.config.discovery?.enabled !== true || budget === 0) return { processed: 0, failed: 0, deferred: 0 };
-  const sourceLimit = Math.min(1000, Math.max(budget * 4, budget));
+  const sourceLimit = Math.min(1000, Math.max(limit * 4, limit));
   const sourceRefRows = (after, take, before = null) => {
     const predicates = [], params = [service.config.partnerId, DISCOVERY_PENDING, DISCOVERY_APPLIED];
     if (after !== null) { predicates.push('source_ref > ?'); params.push(after); }
@@ -733,6 +788,7 @@ export function reconcileDiscoveryPending(service, limit = 50) {
     sourceRef, service.config.partnerId, DISCOVERY_PENDING, DISCOVERY_APPLIED, DISCOVERY_FAILED, limit);
     const access = sourceAccessReadiness(service, sourceRef);
     if (!access.current && access.reason !== 'SOURCE_NOT_ALLOWED') { deferred += rows.length; continue; }
+    if (access.reason === 'SOURCE_NOT_ALLOWED') continue;
     if (rows.length) queues.push({ rows, index: 0 });
   }
   let processed = 0, failed = 0, attempts = 0;
