@@ -521,6 +521,20 @@ function review(service, p, actor) {
     executable: false, contact_permission: false, allowed_effects: [] };
 }
 
+function requireTransferAuthorBinding(service, situationRow, conversationId) {
+  const evidence = evidenceRows(service, situationRow.id)[0];
+  check(evidence, 'DISCOVERY_AUTHOR_BINDING_REQUIRED');
+  const bindings = service.config.opportunity?.authorBindings;
+  check(Array.isArray(bindings), 'DISCOVERY_AUTHOR_BINDING_REQUIRED');
+  const valid = bindings.every(binding => binding && typeof binding === 'object'
+    && Object.keys(binding).length === 3
+    && typeof binding.source_id === 'string' && typeof binding.author_id === 'string'
+    && typeof binding.conversation_id === 'string');
+  const matches = valid ? bindings.filter(binding => binding.source_id === evidence.source.source_id
+    && binding.author_id === evidence.source.author_id && binding.conversation_id === conversationId) : [];
+  check(valid && matches.length === 1, 'DISCOVERY_AUTHOR_BINDING_REQUIRED');
+}
+
 function transfer(service, p) {
   const limits = config(service);
   invalidateChangedOffers(service, limits.offerFingerprint, limits.purpose);
@@ -534,17 +548,19 @@ function transfer(service, p) {
   check(approved, 'DISCOVERY_REVIEW_REQUIRED');
   const conversation = service.conversation(p.conversation_id), person = service.person(conversation.person_id);
   check(!person.suppressed && conversation.ownership === 'AI_OWNED', 'DISCOVERY_CONVERSATION_UNAVAILABLE');
+  requireTransferAuthorBinding(service, row, conversation.id);
   const inbound = service.store.get("SELECT * FROM messages WHERE id=? AND conversation_id=? AND direction='in'",
     requiredText(p.inbound_message_id, 'inbound_message_id', 150), conversation.id);
   check(inbound, 'DISCOVERY_INBOUND_REQUIRED');
   service.engagement.resolvePermission(conversation.id, 'reply');
   const basis = requiredText(p.basis, 'transfer basis', 4000);
-  check(!service.engagement.managed(conversation.id), 'DISCOVERY_ENGAGEMENT_EXISTS');
-  const opened = service.engagement.open({ conversation_id: conversation.id, topic: 'Вхідне звернення після Discovery',
-    current_need: 'Уточнити актуальну потребу за реальним вхідним повідомленням.',
-    unknowns: ['Discovery is background evidence, not consent or confirmed interest.'],
-    close_condition: 'Потребу з вхідного повідомлення вирішено або людина відмовилася.' }, { kind: 'operator' }, false);
-  const engagement = service.engagement.get(opened.engagement_id);
+  const existing = service.engagement.current(conversation.id);
+  const engagement = existing ? service.engagement.get(existing.id) : service.engagement.get(
+    service.engagement.open({ conversation_id: conversation.id, topic: 'Вхідне звернення після Discovery',
+      current_need: 'Уточнити актуальну потребу за реальним вхідним повідомленням.',
+      unknowns: ['Discovery is background evidence, not consent or confirmed interest.'],
+      close_condition: 'Потребу з вхідного повідомлення вирішено або людина відмовилася.' }, { kind: 'operator' }, false).engagement_id,
+  );
   service.engagement.signal(engagement, 'inbound', { message_id: inbound.id });
   const updated = touch(service, row, 'TRANSFERRED');
   service.store.run('UPDATE discovery_situations SET transferred_engagement_id=? WHERE id=?', engagement.id, row.id);
