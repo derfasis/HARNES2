@@ -281,40 +281,39 @@ export function invalidateRevokedDiscoverySources(service, limit = DISCOVERY_MAI
     writeRevokedMaintenanceCursor(service, sourceRefs.length
       ? String(sourceRefs[sourceRefs.length - 1].source_ref ?? '') : null);
 
-    const refsJson = JSON.stringify(sourceRefs.map(row => String(row.source_ref ?? '')));
-    const active = service.store.all(`SELECT * FROM discovery_situations
-      WHERE partner_id=? AND status IN ('OBSERVING','CANDIDATE')
-        AND source_ref IN (SELECT value FROM json_each(?))
-      ORDER BY updated_at,id LIMIT ?`, service.config.partnerId, refsJson, scanLimit);
-    const pending = service.store.all(`SELECT DISTINCT COALESCE(json_extract(s.payload_json,'$.source_id'),'') AS source_ref,
-        CAST(p.payload_json->>'$.source_event_id' AS INTEGER) AS source_event_id
-      FROM events p
-      JOIN events s ON s.partner_id=p.partner_id AND s.kind='source.message'
-        AND s.id=CAST(p.payload_json->>'$.source_event_id' AS INTEGER)
-      WHERE p.partner_id=? AND p.kind=?
-        AND NOT EXISTS (SELECT 1 FROM events a WHERE a.partner_id=p.partner_id AND a.kind=?
-          AND a.payload_json->>'$.source_event_id'=p.payload_json->>'$.source_event_id')
-        AND COALESCE(json_extract(s.payload_json,'$.source_id'),'')
-          IN (SELECT value FROM json_each(?))
-      ORDER BY p.id LIMIT ?`,
-    service.config.partnerId, DISCOVERY_PENDING, DISCOVERY_APPLIED, refsJson, scanLimit);
-    const sourceRefSet = new Set([...active.map(row => row.source_ref), ...pending.map(row => row.source_ref)]);
+    const sourceRefValues = sourceRefs.map(row => String(row.source_ref ?? ''));
+    const sourceRefSet = new Set(sourceRefValues);
     const revoked = new Set([...sourceRefSet]
       .filter(sourceRef => sourceAccessReadiness(service, sourceRef).reason === 'SOURCE_NOT_ALLOWED'));
+    const queues = sourceRefValues.map(sourceRef => {
+      const active = service.store.get(`SELECT * FROM discovery_situations
+        WHERE partner_id=? AND status IN ('OBSERVING','CANDIDATE') AND source_ref=?
+        ORDER BY updated_at,id LIMIT 1`, service.config.partnerId, sourceRef);
+      const pending = service.store.get(`SELECT DISTINCT COALESCE(json_extract(s.payload_json,'$.source_id'),'') AS source_ref,
+          CAST(p.payload_json->>'$.source_event_id' AS INTEGER) AS source_event_id
+        FROM events p
+        JOIN events s ON s.partner_id=p.partner_id AND s.kind='source.message'
+          AND s.id=CAST(p.payload_json->>'$.source_event_id' AS INTEGER)
+        WHERE p.partner_id=? AND p.kind=?
+          AND NOT EXISTS (SELECT 1 FROM events a WHERE a.partner_id=p.partner_id AND a.kind=?
+            AND a.payload_json->>'$.source_event_id'=p.payload_json->>'$.source_event_id')
+          AND COALESCE(json_extract(s.payload_json,'$.source_id'),'')=?
+        ORDER BY p.id LIMIT 1`, service.config.partnerId, DISCOVERY_PENDING, DISCOVERY_APPLIED, sourceRef);
+      const items = [];
+      if (active) items.push({ kind: 'active', row: active });
+      if (pending) items.push({ kind: 'pending', row: pending });
+      return { sourceRef, items };
+    });
     let budget = limit;
     let count = 0;
-    for (const row of active) {
-      if (!budget) break;
-      if (revoked.has(row.source_ref)) {
-        markStale(service, row, 'SOURCE_REVOKED');
-        count++;
-        budget--;
-      }
-    }
-    for (const row of pending) {
-      if (!budget) break;
-      if (revoked.has(row.source_ref)) {
-        record(service, DISCOVERY_APPLIED, { source_event_id: String(row.source_event_id),
+    const rounds = Math.max(0, ...queues.map(queue => queue.items.length));
+    for (let round = 0; round < rounds && budget > 0; round += 1) {
+      for (const queue of queues) {
+        if (!budget) break;
+        const item = queue.items[round];
+        if (!item || !revoked.has(queue.sourceRef)) continue;
+        if (item.kind === 'active') markStale(service, item.row, 'SOURCE_REVOKED');
+        else record(service, DISCOVERY_APPLIED, { source_event_id: String(item.row.source_event_id),
           stage: 'source_projection', projection_status: 'source_revoked' });
         count++;
         budget--;

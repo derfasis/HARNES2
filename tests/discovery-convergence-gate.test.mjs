@@ -683,6 +683,41 @@ test('GAP R2 limit=1 bounds every durable maintenance effect', async (t) => {
   assert.equal(fair.markers('discovery.observation.applied')
     .filter((row) => JSON.parse(row.payload_json).projection_status === 'source_revoked').length, 1);
   noContactEffects(fair);
+
+  const crowded = harness(t);
+  const crowdedAllowed = 'public:maintenance-crowded-a';
+  const crowdedRevoked = 'public:maintenance-crowded-b';
+  crowded.settings.opportunity.allowedSourceRefs = [crowdedAllowed, crowdedRevoked];
+  const crowdedOriginal = crowded.service.discoveryApply;
+  try {
+    crowded.service.discoveryApply = () => { throw new Error('synthetic crowded maintenance pending'); };
+    for (let index = 0; index < 3; index += 1) {
+      await crowded.ingest(source({
+        source_id: crowdedAllowed,
+        message_id: `message:crowded-allowed-${index}`,
+        author_id: `user:crowded-allowed-${index}`,
+        thread_id: `thread:crowded-allowed-${index}`,
+      }), { kind: 'channel', sourceId: crowdedAllowed }, `crowded-allowed-${index}`);
+    }
+    await crowded.ingest(source({
+      source_id: crowdedRevoked,
+      message_id: 'message:crowded-revoked',
+      author_id: 'user:crowded-revoked',
+      thread_id: 'thread:crowded-revoked',
+    }), { kind: 'channel', sourceId: crowdedRevoked }, 'crowded-revoked');
+  } finally {
+    crowded.service.discoveryApply = crowdedOriginal;
+  }
+  crowded.settings.opportunity.allowedSourceRefs = [crowdedAllowed];
+  crowded.settings.discovery.enabled = false;
+  reconcileDiscoveryPending(crowded.service, 2);
+  assert.equal(crowded.markers('discovery.observation.applied')
+    .filter((row) => JSON.parse(row.payload_json).projection_status === 'source_revoked').length, 1);
+  crowded.restart();
+  reconcileDiscoveryPending(crowded.service, 2);
+  assert.equal(crowded.markers('discovery.observation.applied')
+    .filter((row) => JSON.parse(row.payload_json).projection_status === 'source_revoked').length, 1);
+  noContactEffects(crowded);
 });
 
 async function createTarget(h, raw, { channel = 'manual', accountId = null, externalId = '12345' } = {}) {
