@@ -8,10 +8,11 @@ import { requestTelegramRecovery } from './sources/telegram-readonly.mjs';
 import { REVIEW_ACTIONS, reviewOpportunity, opportunityReviewDetail, opportunityReviews } from './opportunity-review.mjs';
 
 import { EngagementLoop, ENGAGEMENT_ACTIONS, ENGAGEMENT_AGENT_ACTIONS } from './engagement.mjs';
+import { discoveryCommand, discoveryDetail, ensureDiscoveryApplied, hasDiscoveryPending, invalidateDiscoveryOffers, markDiscoveryPending, reconcileDiscoveryPending, recordDiscoveryFailure, staleMaterialEvidence, DISCOVERY_ACTIONS, DISCOVERY_REVIEW_TASK } from './discovery.mjs';
 
 const OUTCOMES = new Set(['qualified','call_proposed','call_accepted','call_booked','call_attended','no_show','joined','declined','business_value']);
 export class BusinessService {
-  constructor(store, config) { this.store = store; this.config = config; this.tail = Promise.resolve(); this.telegramAccountId = null; this.engagement = new EngagementLoop(this); }
+  constructor(store, config) { this.store = store; this.config = config; this.tail = Promise.resolve(); this.telegramAccountId = null; this.engagement = new EngagementLoop(this); this.discoveryApply = ensureDiscoveryApplied; this.reconcileDiscovery = () => reconcileDiscoveryPending(this, 50); }
   exclusive(fn) { const job = this.tail.then(fn); this.tail = job.catch(() => {}); return job; }
   partner() { return this.store.get('SELECT * FROM partners WHERE id=?', this.config.partnerId); }
   person(personId) {
@@ -45,8 +46,13 @@ export class BusinessService {
   }
   command(action, payload, requestId, actor = { kind: 'operator' }) {
     return this.exclusive(() => {
-      try { return this.store.transaction(() => this.execute(action, payload, requestId, actor)); }
-      catch (error) {
+      if (DISCOVERY_ACTIONS.has(action) && this.config.discovery?.enabled === true)
+        this.store.transaction(() => invalidateDiscoveryOffers(this));
+      if (action === 'discovery.observe' && this.config.discovery?.enabled === true) staleMaterialEvidence(this);
+      let result;
+      try {
+        result = this.store.transaction(() => this.execute(action, payload, requestId, actor));
+      } catch (error) {
         if (REVIEW_ACTIONS.includes(action)) {
           // Denials survive the rolled-back command, without persisting untrusted text or grants.
           const task = typeof payload?.task_id === 'string' && this.store.get('SELECT id FROM tasks WHERE id=? AND partner_id=? AND kind=?', payload.task_id, this.config.partnerId, OPPORTUNITY_TASK);
@@ -57,6 +63,18 @@ export class BusinessService {
         }
         throw error;
       }
+      // Source truth commits first. Discovery is a derived projection and may
+      // fail without rolling back the canonical source event.
+      if (action === 'source.ingest' && this.config.discovery?.enabled === true
+        && result?.source_event_id && hasDiscoveryPending(this, result.source_event_id)) {
+        try {
+          this.discoveryApply(this, result.source_event_id);
+        } catch (error) {
+          try { this.store.transaction(() => recordDiscoveryFailure(this, result.source_event_id, error)); }
+          catch { /* preserve the committed source result if the audit write is unavailable */ }
+        }
+      }
+      return result;
     });
   }
   execute(action, p, requestId, actor) {
@@ -73,20 +91,30 @@ export class BusinessService {
     const previous = this.store.get('SELECT * FROM command_receipts WHERE id=?', requestId);
     if (previous) { ensure(previous.fingerprint === fingerprint, 'request_id использован для другой операции', 409); return JSON.parse(previous.result_json); }
     const agentActions = new Set(['draft.create','fact.propose','lesson.propose','task.propose','capability.propose', ...ENGAGEMENT_AGENT_ACTIONS]);
-    ensure(actor.kind === 'operator' || (actor.kind === 'agent' && agentActions.has(action)) || (actor.kind === 'channel' && ['person.create','message.record','source.ingest'].includes(action)), 'Операция доступна только владельцу', 403);
+    ensure((actor.kind === 'operator' && action !== 'discovery.observe')
+      || (actor.kind === 'system' && action === 'discovery.observe')
+      || (actor.kind === 'agent' && agentActions.has(action))
+      || (actor.kind === 'channel' && ['person.create','message.record','source.ingest'].includes(action)),
+    'Операция доступна только владельцу', 403, action === 'discovery.observe' ? 'DISCOVERY_SYSTEM_ONLY' : undefined);
     let conversationId = p.conversation_id ?? null;
-    if (['person.permission','person.stop','person.resume','conversation.mode','conversation.takeover','conversation.release','message.record','draft.create','fact.propose','fact.create','outcome.record'].includes(action)) requiredText(conversationId, 'conversation_id', 100);
+    if (['person.permission','person.stop','person.resume','conversation.mode','conversation.takeover','conversation.release','message.record','draft.create','fact.propose','fact.create','outcome.record','discovery.transfer'].includes(action)) requiredText(conversationId, 'conversation_id', 100);
     if (conversationId) this.assertScope(actor, conversationId);
     if(actor.kind==='agent' && conversationId && this.engagement.managed(conversationId)) {
       ensure(!['fact.propose','task.propose','lesson.propose','capability.propose'].includes(action),'Use engagement-scoped proposals',403);
     }
     let result;
-    if (ENGAGEMENT_ACTIONS.has(action)) {
+    if (DISCOVERY_ACTIONS.has(action)) {
+      result = discoveryCommand(this, action, p, actor);
+    } else if (ENGAGEMENT_ACTIONS.has(action)) {
       result = this.engagement.execute(action,p,actor);
       if (p.engagement_id) conversationId = this.engagement.get(p.engagement_id).conversation_id;
     } else switch (action) {
       case 'source.reconcile': result = requestTelegramRecovery(this,p,actor); break;
-      case 'source.ingest': result = ingestSource(this, p); break;
+      case 'source.ingest': {
+        result = ingestSource(this, p);
+        if (this.config.discovery?.enabled === true && result.source_event_id && result.disposition === 'registered') markDiscoveryPending(this, result.source_event_id);
+        break;
+      }
       case 'opportunity.capture': result = captureOpportunity(this, p); break;
       case 'opportunity.consume': result = consumeOpportunity(this, p); break;
       case 'opportunity.review.edit':
@@ -245,8 +273,9 @@ export class BusinessService {
       case 'task.retry': {
         const task = this.store.get('SELECT * FROM tasks WHERE id=? AND partner_id=?', p.task_id, this.config.partnerId);
         ensure(task, 'Задача не найдена', 404); conversationId = task.conversation_id;
-        ensure(task.kind !== OPPORTUNITY_TASK || action === 'task.cancel', 'Opportunity candidate нельзя одобрить или поставить на исполнение', 409, 'candidate_not_executable');
+        ensure(task.kind !== DISCOVERY_REVIEW_TASK && (task.kind !== OPPORTUNITY_TASK || action === 'task.cancel'), 'Review candidate нельзя менять generic task-командами', 409, 'candidate_not_executable');
         if (action === 'task.approve') ensure(task.status === 'proposed', 'Задача уже рассмотрена', 409);
+        if (action === 'task.retry') ensure(task.kind !== DISCOVERY_REVIEW_TASK && task.status !== 'proposed' && task.status !== 'pending', 'Review task нельзя перезапускать', 409, 'candidate_not_executable');
         if (action === 'task.retry') ensure(['failed','interrupted','cancelled','blocked'].includes(task.status), 'Повтор недоступен', 409);
         if (action === 'task.cancel') ensure(!['done','cancelled'].includes(task.status), 'Задача уже завершена', 409);
         const status = action === 'task.cancel' ? 'cancelled' : 'pending';
@@ -345,10 +374,12 @@ export class BusinessService {
     const taskId = id(), due = dateTime(p.due_at ?? now()), convId = p.conversation_id ?? null;
     if (convId) this.conversation(convId);
     const key = p.dedupe_key ? requiredText(p.dedupe_key, 'dedupe_key', 200) : null;
-    const kind = p.kind ?? 'research'; ensure(['reply','follow_up','research','planning','review','engagement_evaluate',OPPORTUNITY_TASK].includes(kind), 'Неизвестный вид задачи');
+    const kind = p.kind ?? 'research'; ensure(['reply','follow_up','research','planning','review','engagement_evaluate',OPPORTUNITY_TASK,DISCOVERY_REVIEW_TASK].includes(kind), 'Неизвестный вид задачи');
     if (kind === 'engagement_evaluate') ensure(author === 'system' && status === 'pending','Engagement attention is system owned',403);
     if (kind === OPPORTUNITY_TASK) ensure(author === 'system' && status === 'proposed', 'Opportunity review создаёт только проверенный consumer', 403);
+    if (kind === DISCOVERY_REVIEW_TASK) ensure(author === 'system' && status === 'proposed', 'Discovery review создаётся только assessment-системой', 403);
     if (key?.startsWith('opportunity:')) ensure(kind === OPPORTUNITY_TASK && author === 'system' && status === 'proposed', 'Зарезервированный ключ consumer', 403);
+    if (key?.startsWith('discovery-review:')) ensure(kind === DISCOVERY_REVIEW_TASK && author === 'system' && status === 'proposed', 'Зарезервированный ключ discovery review', 403);
     if (key) { const old = this.store.get('SELECT * FROM tasks WHERE dedupe_key=?', key); if (old) return { task_id: old.id, duplicate: true }; }
     if (kind === 'follow_up') { ensure(convId, 'Для follow-up нужен разговор'); requiredText(p.evidence, 'Основание follow-up', 2000); }
     this.store.run('INSERT INTO tasks(id,partner_id,conversation_id,kind,title,instructions,due_at,status,evidence,dedupe_key,author,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)', taskId, this.config.partnerId, convId, kind, requiredText(p.title, 'Задача', 200), requiredText(p.instructions, 'Цель действия', 6000), due, status, String(p.evidence ?? '').slice(0,2000), key, author, now());
@@ -426,6 +457,7 @@ export class BusinessService {
   opportunityCapture(captureId) { return opportunityCapture(this, captureId); }
   opportunityDetail(taskId) { return opportunityReviewDetail(this, taskId); }
   opportunityReviews(options) { return opportunityReviews(this, options); }
+  discoveryDetail(situationId) { return discoveryDetail(this, situationId); }
   detail(conversationId) {
     const conversation = this.conversation(conversationId), person = this.person(conversation.person_id);
     return { conversation, person,
@@ -441,6 +473,7 @@ export class BusinessService {
   snapshot() {
     const partnerId = this.config.partnerId;
     return { partner: this.partner(),
+      discovery_situations: this.store.all('SELECT id,source_ref,source_kind,subject_ref,context_key,purpose,status,revision,expires_at,transferred_engagement_id,created_at,updated_at FROM discovery_situations WHERE partner_id=? ORDER BY updated_at DESC LIMIT 100', partnerId),
       opportunity_captures: this.store.all("SELECT id,created_at,json_extract(payload_json,'$.snapshot.source.ref') AS source FROM events WHERE partner_id=? AND kind='opportunity.snapshot' AND actor='system' ORDER BY id DESC LIMIT 20", partnerId),
       conversations: this.store.all('SELECT c.*,p.name,p.source,p.permission,p.suppressed,(SELECT text FROM messages WHERE conversation_id=c.id ORDER BY created_at DESC,rowid DESC LIMIT 1) AS last_message,(SELECT COUNT(*) FROM drafts WHERE conversation_id=c.id AND status=\'pending\') AS pending_drafts FROM conversations c JOIN persons p ON p.id=c.person_id WHERE p.partner_id=? ORDER BY c.created_at DESC', partnerId),
       tasks: this.store.all('SELECT * FROM tasks WHERE partner_id=? ORDER BY due_at DESC LIMIT 300', partnerId),

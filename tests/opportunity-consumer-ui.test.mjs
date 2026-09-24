@@ -41,9 +41,9 @@ test('review UI displays stale reasons and does not imply live verification', ()
 
 test('review queue has inspect, never ordinary approval or retry; work queue excludes reviews', () => {
   for (const status of ['proposed', 'cancelled', 'blocked', 'interrupted']) {
-    const d=card();const html = ui.tasksView({ scheduler: {}, opportunity_captures: [],tasks:[{id:'review-1',kind:'opportunity_review',status}],opportunity_reviews:{items:[{task_id:'review-1',subject:d.subject,source_message:d.snapshot.messages[0],decision:'PUBLIC_REPLY',summary:attack,review:d.review,freshness:d.freshness}],total:1,limit:50,offset:0} });
+    const d=card();const html = ui.tasksView({ scheduler: {}, opportunity_captures: [],tasks:[{id:'review-1',kind:'opportunity_review',status},{id:'discovery-review-1',kind:'discovery_review',status}],opportunity_reviews:{items:[{task_id:'review-1',subject:d.subject,source_message:d.snapshot.messages[0],decision:'PUBLIC_REPLY',summary:attack,review:d.review,freshness:d.freshness}],total:1,limit:50,offset:0} });
     assert.match(html, /data-do="opportunity-detail"/);
-    assert.doesNotMatch(html, /data-do="task-approve"|data-do="task-retry"|<img/);
+     assert.doesNotMatch(html, /data-do="task-approve"|data-do="task-retry"|<img|discovery-review-1/);
   }
 });
 
@@ -81,9 +81,9 @@ test('capture list and import controls exist inside the existing Tasks product U
 });
 
 test('static queue/tool guards exclude review records even if a task status is corrupted to pending', () => {
-  assert.match(read('business/scheduler.mjs'), /status='pending' AND kind<>'opportunity_review'/);
-  assert.equal((read('business/context.mjs').match(/kind<>'opportunity_review'/g) ?? []).length, 2);
-  assert.equal((read('business/tools.mjs').match(/kind<>'opportunity_review'/g) ?? []).length, 2);
+  assert.match(read('business/scheduler.mjs'), /status='pending' AND kind NOT IN \('opportunity_review','discovery_review'\)/);
+  assert.equal((read('business/context.mjs').match(/kind NOT IN \('opportunity_review','discovery_review'\)/g) ?? []).length, 2);
+  assert.equal((read('business/tools.mjs').match(/kind NOT IN \('opportunity_review','discovery_review'\)/g) ?? []).length, 2);
   // This is a source guard assertion, not a scheduler execution/integration test.
 });
 
@@ -124,7 +124,8 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     "contracts/opportunity-projection.schema.json": "b53a1a7b05d89de66858f3e59bb14940918d1c96",
     "scripts/situation_router_worker.py": "717a960ab4c3b92148afae084cd998bfeaaade86",
     // Reviewed extension: invalidate read-only source checkpoints on process recovery.
-    "business/store.mjs": "9da789cf2b84b04e10c6c293fec4df05e0ac8954",
+    // textBlobHash normalizes CRLF, so this is the LF-normalized R7 blob hash.
+    "business/store.mjs": "0f173b662506808a76766c12bc38d3e14b026865",
     "adapters/hermes/credentials.py": "2797bd89081eaf4a950178cec3d637015ee8f45f",
     "adapters/hermes/runner.py": "e631237829d9b7a4521799b4a19c4c500b33f5aa",
     // Deliberate v0 extension: existing worker, no-tool envelope tested in opportunity-runtime.test.mjs.

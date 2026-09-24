@@ -5,10 +5,11 @@ import { randomUUID, createHash } from 'node:crypto';
 import { ROOT, DATA, readJson } from './config.mjs';
 import { now } from './errors.mjs';
 import { ENGAGEMENT_TABLES } from './engagement-tables.mjs';
+import { DISCOVERY_TABLES } from './discovery-tables.mjs';
 
 export const id = () => randomUUID();
 export const hash = value => createHash('sha256').update(value).digest('hex');
-export const TABLES = ['partners','persons','channel_identities','conversations','messages','facts','tasks','runs','drafts','draft_versions','approvals','delivery_attempts','outcome_events','lessons','capability_proposals','skill_versions','events','command_receipts','channel_offsets','tool_calls',...ENGAGEMENT_TABLES];
+export const TABLES = ['partners','persons','channel_identities','conversations','messages','facts','tasks','runs','drafts','draft_versions','approvals','delivery_attempts','outcome_events','lessons','capability_proposals','skill_versions','events','command_receipts','channel_offsets','tool_calls',...ENGAGEMENT_TABLES,...DISCOVERY_TABLES];
 export class Store {
   constructor(directory = DATA) {
     fs.mkdirSync(directory, { recursive: true });

@@ -22,8 +22,16 @@ export class Scheduler {
           try { await pollTelegramSource(this.service, sourceId, transport); }
           catch { sourceReadFailed=true; }
         }
+        if (cfg.discovery?.enabled === true) {
+          try { await this.service.reconcileDiscovery(); }
+          catch { this.lastReason = 'Discovery reconciliation failed; source truth remains durable'; }
+        }
         const result = await processSourceOpportunity(this.service, this.runtime);
         this.lastReason = sourceReadFailed?'source_read_failed':result.disposition; return;
+      }
+      if (cfg.discovery?.enabled === true) {
+        try { await this.service.reconcileDiscovery(); }
+        catch { this.lastReason = 'Discovery reconciliation failed; source truth remains durable'; }
       }
       await this.service.exclusive(() => this.service.store.transaction(() => this.service.engagement.sweep()));
       if (!runtimeReadiness(cfg).ready) { this.lastReason = 'Задачи сохранены. Ожидается подключение модели.'; return; }
@@ -34,7 +42,7 @@ export class Scheduler {
       }
       await this.ensurePlanningTask();
       const prepared = await this.service.exclusive(() => this.service.store.transaction(() => {
-        const task = this.service.store.get("SELECT * FROM tasks WHERE partner_id=? AND status='pending' AND kind<>'opportunity_review' AND due_at<=? ORDER BY due_at,created_at LIMIT 1", cfg.partnerId, now());
+        const task = this.service.store.get("SELECT * FROM tasks WHERE partner_id=? AND status='pending' AND kind NOT IN ('opportunity_review','discovery_review') AND due_at<=? ORDER BY due_at,created_at LIMIT 1", cfg.partnerId, now());
         if (!task) return null;
         if (task.conversation_id && this.service.engagement.managed(task.conversation_id)) {
           const e=this.service.engagement.current(task.conversation_id);

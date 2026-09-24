@@ -74,7 +74,7 @@ function people(){
   ${panel('Результаты',outcomes.length?outcomes.map(o=>`<div class="feature"><div>${esc(label(o.kind))}<small>${esc(o.evidence)}</small></div><span class="muted tiny">${date(o.created_at)}</span></div>`).join(''):empty('Результат ещё не зафиксирован','Предложение звонка, согласие и состоявшаяся встреча — отдельные события.'),button('Записать результат','outcome'))}</div></div>`;
 }
 function tasks(){
-  const work=state.tasks.filter(t=>t.kind!=='opportunity_review');
+  const work=state.tasks.filter(t=>!['opportunity_review','discovery_review'].includes(t.kind));
   return opportunityQueuePanel()+panel('Очередь работы',`${work.length?`<div class="table-wrap"><table class="data-table"><thead><tr><th>Задача</th><th>Срок</th><th>Состояние</th><th>Действия</th></tr></thead><tbody>${work.map(t=>`<tr><td>${esc(t.title)}<small>${esc(t.instructions)}</small></td><td>${date(t.due_at)}</td><td>${badge(t.status)}</td><td>${t.status==='proposed'?button('Принять','task-approve',t.id):''}${['failed','interrupted','blocked','cancelled'].includes(t.status)?button('Повторить','task-retry',t.id):''}${!['done','cancelled'].includes(t.status)?button('Отменить','task-cancel',t.id):''}</td></tr>`).join('')}</tbody></table></div>`:empty('Очередь свободна','')}`,`<div class="actions">${button('Обработать очередь','wake')}${button('+ Задача','task-new','','primary')}</div>`)+`<details><summary>Ручные snapshots</summary>${opportunityPanel()}</details>`;
 }
 function opportunityQueuePanel(){

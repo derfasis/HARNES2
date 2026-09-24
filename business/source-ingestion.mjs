@@ -1,5 +1,6 @@
 import { hash } from './store.mjs';
 import { ensure } from './errors.mjs';
+import { validateTelegramSources } from './config.mjs';
 
 export const SOURCE_MESSAGE = 'source.message';
 export const PIPELINE_FINISHED = 'opportunity.pipeline.finished';
@@ -27,8 +28,9 @@ export function validateSourceCheckpoint(state, p) {
       : state.confirmed_at===null), 'SOURCE_TRANSPORT_CORRUPT_CHECKPOINT');
 }
 function sourceTransportBoundary(service, sourceId) {
-  const bindings = service.config.opportunity.telegramSources ?? [];
-  const configured = Array.isArray(bindings) ? bindings.filter(p => p.sourceId === sourceId) : [];
+  validateTelegramSources(service.config);
+  const bindings = service.config.opportunity.telegramSources;
+  const configured = bindings.filter(p => p.sourceId === sourceId);
   const state = sourceCheckpoint(service, sourceId);
   if (!configured.length && !state) return; // Existing operator/fixture sources remain unchanged.
   check(configured.length === 1, 'SOURCE_TRANSPORT_POLICY_UNAVAILABLE');
@@ -42,6 +44,27 @@ function sourceTransportBoundary(service, sourceId) {
   check(Number.isInteger(p.maxLagSeconds) && p.maxLagSeconds > 0 && p.maxLagSeconds <= 3600
     && Number.isFinite(age) && age >= 0 && age <= p.maxLagSeconds * 1000, 'SOURCE_TRANSPORT_STALE');
 }
+export function sourceTransportReadiness(service, sourceId) {
+  try {
+    sourceTransportBoundary(service, sourceId);
+    return { current: true, reason: null };
+  } catch (error) {
+    if (typeof error.code === 'string' && error.code.startsWith('SOURCE_TRANSPORT_'))
+      return { current: false, reason: error.code };
+    throw error;
+  }
+}
+export function sourceAllowlist(service) {
+  const refs = service.config.opportunity?.allowedSourceRefs;
+  check(Array.isArray(refs) && refs.every(ref => typeof ref === 'string'), 'INVALID_SOURCE_ALLOWLIST');
+  return refs;
+}
+
+export function sourceAccessReadiness(service, sourceId) {
+  const refs = sourceAllowlist(service);
+  if (!refs.includes(sourceId)) return { current: false, reason: 'SOURCE_NOT_ALLOWED' };
+  return sourceTransportReadiness(service, sourceId);
+}
 
 const validId = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,149}$/.test(value);
 const nullableId = value => value === null || validId(value);
@@ -51,8 +74,9 @@ export function automaticBoundary(service) {
     && service.config.telegram.liveSending === false, 'READ_ONLY_BOUNDARY_REQUIRED');
 }
 function allowed(service, sourceId) {
+  const refs = sourceAllowlist(service);
   check(typeof sourceId === 'string' && sourceId.length > 0 && sourceId.length <= 300
-    && service.config.opportunity?.allowedSourceRefs?.includes(sourceId), 'SOURCE_NOT_ALLOWED');
+    && refs.includes(sourceId), 'SOURCE_NOT_ALLOWED');
 }
 function timestamp(value) {
   check(typeof value === 'string' && Number.isFinite(Date.parse(value)), 'INVALID_SOURCE_TIME');
@@ -60,13 +84,18 @@ function timestamp(value) {
   check(value === normalized || value === normalized.replace('.000Z', 'Z'), 'INVALID_SOURCE_TIME');
   return normalized;
 }
-export function sourceRows(service, sourceId) {
+export function sourceRows(service, sourceId, messageIds = null) {
+  const messageFilter = Array.isArray(messageIds)
+    ? "AND json_extract(e.payload_json,'$.message_id') IN (SELECT value FROM json_each(?))" : '';
+  const params = [service.config.partnerId, SOURCE_MESSAGE, sourceId];
+  if (Array.isArray(messageIds)) params.push(JSON.stringify([...new Set(messageIds)]));
+  params.push(1001);
   return service.store.all(`SELECT e.id,e.created_at,e.payload_json FROM events e WHERE e.partner_id=? AND e.kind=? AND e.actor='system'
-    AND json_extract(e.payload_json,'$.source_id')=? AND NOT EXISTS
+    AND json_extract(e.payload_json,'$.source_id')=? ${messageFilter} AND NOT EXISTS
     (SELECT 1 FROM events n WHERE n.partner_id=e.partner_id AND n.kind=e.kind AND n.actor='system'
       AND json_extract(n.payload_json,'$.source_id')=json_extract(e.payload_json,'$.source_id')
       AND json_extract(n.payload_json,'$.message_id')=json_extract(e.payload_json,'$.message_id') AND n.id>e.id)
-    ORDER BY e.id DESC LIMIT 1001`, service.config.partnerId, SOURCE_MESSAGE, sourceId)
+    ORDER BY e.id DESC LIMIT ?`, ...params)
     .map(row => ({ event_id: String(row.id), observed_at: row.created_at, message: JSON.parse(row.payload_json) }));
 }
 export function sourceEvent(service, eventId) {
