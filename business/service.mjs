@@ -8,6 +8,8 @@ import { requestTelegramRecovery } from './sources/telegram-readonly.mjs';
 import { REVIEW_ACTIONS, reviewOpportunity, opportunityReviewDetail, opportunityReviews } from './opportunity-review.mjs';
 
 import { EngagementLoop, ENGAGEMENT_ACTIONS, ENGAGEMENT_AGENT_ACTIONS } from './engagement.mjs';
+import { DISCOVERY_ACTIONS, discoveryCommand } from './discovery.mjs';
+import { DISCOVERY_LINK_ACTIONS, discoveryLinkCommand } from './discovery-links.mjs';
 
 const OUTCOMES = new Set(['qualified','call_proposed','call_accepted','call_booked','call_attended','no_show','joined','declined','business_value']);
 export class BusinessService {
@@ -81,7 +83,11 @@ export class BusinessService {
       ensure(!['fact.propose','task.propose','lesson.propose','capability.propose'].includes(action),'Use engagement-scoped proposals',403);
     }
     let result;
-    if (ENGAGEMENT_ACTIONS.has(action)) {
+    if (DISCOVERY_ACTIONS.includes(action)) {
+      result=discoveryCommand(this,action,p,actor);
+    } else if (DISCOVERY_LINK_ACTIONS.includes(action)) {
+      result=discoveryLinkCommand(this,action,p,actor);
+    } else if (ENGAGEMENT_ACTIONS.has(action)) {
       result = this.engagement.execute(action,p,actor);
       if (p.engagement_id) conversationId = this.engagement.get(p.engagement_id).conversation_id;
     } else switch (action) {
@@ -336,7 +342,7 @@ export class BusinessService {
       }
       default: throw new AppError('Неизвестная команда', 400);
     }
-    this.store.event(this.config.partnerId, conversationId, action, actor.kind, { ...p, result, run_id: actor.runId ?? null,
+    this.store.event(this.config.partnerId, conversationId, action, actor.kind, { ...(action.startsWith('discovery.') ? {situation_id:result.situation_id??null,lesson_id:result.lesson_id??null} : p), result, run_id: actor.runId ?? null,
       ...(REVIEW_ACTIONS.includes(action) ? { request_id: requestId } : {}) });
     this.store.run('INSERT INTO command_receipts VALUES(?,?,?,?)', requestId, fingerprint, JSON.stringify(result), now());
     return result;

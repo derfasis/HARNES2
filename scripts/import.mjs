@@ -4,6 +4,8 @@ import path from 'node:path';
 import { ROOT, readJson } from '../business/config.mjs';
 import { Store, TABLES, hash } from '../business/store.mjs';
 import { ENGAGEMENT_TABLES } from '../business/engagement-tables.mjs';
+import { DISCOVERY_TABLES } from '../business/discovery-tables.mjs';
+import { DISCOVERY_LINK_TABLES } from '../business/discovery-link-tables.mjs';
 
 const [source,destinationArg] = process.argv.slice(2);
 if (!source || !destinationArg) throw new Error('Usage: npm run import -- export.json exports/restore-new');
@@ -12,14 +14,15 @@ const relative = path.relative(ROOT,destination);
 if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Choose a new staging directory inside this project.');
 if (fs.existsSync(destination)) throw new Error('Destination already exists. Choose a NEW directory.');
 if (bundle.format !== 'digital-ai-partner' || bundle.schema_version !== 1 || !bundle.tables) throw new Error('Unsupported bundle');
-const legacyTables = TABLES.filter(t => !ENGAGEMENT_TABLES.includes(t));
-const legacy = Array.isArray(bundle.migrations) && bundle.migrations.length === 2;
-const inputTables = legacy ? legacyTables : TABLES;
+const count=Array.isArray(bundle.migrations)?bundle.migrations.length:0;
+if (![2,3,4,5].includes(count)) throw new Error('Unknown migration prefix');
+const absent=[...(count<3?ENGAGEMENT_TABLES:[]),...(count<4?DISCOVERY_TABLES:[]),...(count<5?DISCOVERY_LINK_TABLES:[])];
+const inputTables=TABLES.filter(t=>!absent.includes(t));
 if (Object.keys(bundle.tables).sort().join('|') !== [...inputTables].sort().join('|')) throw new Error('Bundle table list differs from this release');
 if (hash(JSON.stringify(bundle.tables)) !== bundle.tables_sha256) throw new Error('Table checksum mismatch');
 const migrations = fs.readdirSync(path.join(ROOT,'business/migrations')).filter(f=>f.endsWith('.sql')).sort();
-if (!Array.isArray(bundle.migrations) || bundle.migrations.length !== (legacy ? 2 : migrations.length)) throw new Error('Migration version differs');
-if (bundle.migrations.map(m=>m.version).sort().join('|') !== migrations.slice(0,legacy?2:migrations.length).join('|')) throw new Error('Migration prefix differs');
+if (!Array.isArray(bundle.migrations) || bundle.migrations.length !== count) throw new Error('Migration version differs');
+if (bundle.migrations.map(m=>m.version).sort().join('|') !== migrations.slice(0,count).join('|')) throw new Error('Migration prefix differs');
 for (const migration of bundle.migrations) {
   if (!migrations.includes(migration.version) || hash(fs.readFileSync(path.join(ROOT,'business/migrations',migration.version),'utf8')) !== migration.checksum) throw new Error('Migration checksum differs');
 }

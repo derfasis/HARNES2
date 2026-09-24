@@ -1,3 +1,5 @@
+> Новый opt-in слой: [Discovery Intelligence v1](docs/DISCOVERY_INTELLIGENCE_V1.md), [handoff](docs/DISCOVERY_V1_HANDOFF.md), [проверки](docs/DISCOVERY_V1_VALIDATION.md). Наблюдение во времени → operator review → существующий Engagement. По умолчанию выключен; никаких новых send permissions.
+
 > Новий opt-in increment: [Persistent Engagement v1](docs/PERSISTENT_ENGAGEMENT.md). Перед інтеграцією прочитайте [handoff](docs/PERSISTENT_ENGAGEMENT_HANDOFF.md) та [звіт перевірок](docs/PERSISTENT_ENGAGEMENT_VALIDATION.md). Review-first збережено; повний suite потребує штатних залежностей.
 
 # HARNES2 — ИИ Генерация Лидов в MLM

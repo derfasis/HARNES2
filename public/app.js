@@ -10,6 +10,7 @@ const empty = (title,text,action='') => `<div class="empty"><strong>${esc(title)
 const panel = (title,content,action='') => `<section class="panel"><div class="panel-head"><h2>${esc(title)}</h2>${action}</div>${content}</section>`;
 let token='',state=null,tab='overview',selected=null,detail=null;
 let reviewFilter='pending',reviewOffset=0,reviewDetail=null;
+let discoveryDetail=null;
 const pending = new Map();
 async function api(route,body) {
   const response = await fetch(route,{method:body === undefined?'GET':'POST',headers:{'x-partner-token':token,...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});
@@ -23,13 +24,14 @@ async function command(action,payload) {
 async function refresh() {
   state=await api('/api/state');if(selected) detail=await api(`/api/conversations/${encodeURIComponent(selected)}`);
   if(tab==='tasks')state.opportunity_reviews=await api(`/api/opportunities?status=${encodeURIComponent(reviewFilter)}&offset=${reviewOffset}`);
+  if(tab==='discovery')state.discovery=await api('/api/discovery');
   $('#model-status').textContent=state.runtime.ready?'Модель подключена':'Ожидает подключения ИИ';
   $('#model-status').className=`pill${state.runtime.ready?' ready':''}`;render();
 }
 function render(){
-  const titles={overview:'Обзор',people:'Люди и диалоги',tasks:'Задачи',experience:'Память и опыт',capabilities:'Способности',runs:'История работы',settings:'Подключения'};
+  const titles={overview:'Обзор',people:'Люди и диалоги',tasks:'Задачи',discovery:'Наблюдение',experience:'Память и опыт',capabilities:'Способности',runs:'История работы',settings:'Подключения'};
   $('#page-title').textContent=titles[tab];document.querySelectorAll('[data-tab]').forEach(x=>x.classList.toggle('active',x.dataset.tab===tab));
-  $('#content').innerHTML=({overview:overview,people:people,tasks:tasks,experience:experience,capabilities:capabilities,runs:runs,settings:settings}[tab])();
+  $('#content').innerHTML=({overview:overview,people:people,tasks:tasks,discovery:discovery,experience:experience,capabilities:capabilities,runs:runs,settings:settings}[tab])();
 }
 function overview(){
   const m=state.metrics,pendingTasks=state.tasks.filter(t=>['pending','proposed','running'].includes(t.status));
@@ -117,6 +119,75 @@ function opportunityReviewMarkup(d){
 function opportunityReadOnly(title,markup){
   $('#modal-title').textContent=title;$('#modal-body').innerHTML=markup;$('#modal').showModal();
 }
+const discoveryText=value=>typeof value==='string'?value:value?.text??value?.reason??(value==null?'Не заявлено':JSON.stringify(value));
+function discoveryAvailability(d){
+  const available=d.availability??'unknown';
+  const names={current:'Источник актуален',waiting_source:'Ожидание сверки источника',integrity_blocked:'Источник заблокирован: нужна проверка целостности'};
+  return `<p class="discovery-freshness"><strong>${esc(names[available]??available)}</strong><br>${d.freshness?.fresh?'Evidence соответствует зарегистрированным версиям':'Evidence устарело или пока не подтверждено'}${(d.freshness?.reasons??[]).length?`<br>${esc(d.freshness.reasons.join(', '))}`:''}</p>`;
+}
+function discovery(){
+  const data=state.discovery??{situations:[],enabled:false};
+  return `<div class="section-note">Наблюдаем ситуации во времени. Гипотеза — не факт. Одобрение разбора не даёт разрешения на контакт или отправку.</div>${!data.enabled?'<p class="section-note">Автоматическое наблюдение выключено. Сохранённые ситуации доступны для просмотра.</p>':''}${panel('Наблюдаемые ситуации',data.situations.length?`<div class="table-wrap"><table class="data-table"><thead><tr><th>Контекст и цель</th><th>Последнее решение</th><th>Проверка</th><th>Срок</th><th></th></tr></thead><tbody>${data.situations.map(s=>`<tr><td>${esc(s.subject_id)}<small>${esc(s.source_id)}</small><small>Цель: ${esc(s.purpose_id)}</small></td><td>${badge(s.status)}<p>${esc(s.decision??'Ожидает анализа')} · ${esc(s.assessment??'Недостаточно данных')}</p></td><td>${discoveryAvailability(s)}</td><td>${date(s.expires_at)}<small>Версия ${esc(s.revision)}</small></td><td>${button('Ситуация и evidence','discovery-detail',s.id)}</td></tr>`).join('')}</tbody></table></div>`:empty('Пока нет наблюдаемых ситуаций','Разрешённые наблюдения складываются в ограниченный по цели и времени контекст. Профессия или активность в чате сами по себе не означают opportunity.'))}`;
+}
+function discoveryEvidenceMarkup(items,observations=[]){
+  return (items??[]).map(e=>{
+    const observation=observations.find(o=>String(o.source_event_id)===String(e.source_event_id));
+    return `<article class="discovery-evidence"><strong>Event ${esc(e.source_event_id)} · ${esc(observation?.message_id??'сообщение недоступно')} · v${esc(observation?.version??'?')}</strong><small>Автор: ${esc(observation?.author_id??'не установлен')} · ${esc(e.kind)} · ${esc(e.attribution)}</small><pre class="wrap">${esc(e.span)}</pre></article>`;
+  }).join('')||'<p class="muted">Фрагменты не заявлены.</p>';
+}
+function discoveryDecisionMarkup(decision,observations=[]){
+  const o=decision.output??{},evidence=items=>discoveryEvidenceMarkup(items,observations);
+  return `<div class="discovery-decision"><p><strong>${esc(o.decision??'Нет решения')}</strong> · ${esc(o.assessment)}</p>
+  <h3>Потребность человека</h3><p>${esc(discoveryText(o.human_need))}</p>
+  <h3>Утверждения из сообщений · claims</h3>${(o.claims??[]).map(c=>`<article class="lesson"><p>${esc(c.text)}</p>${evidence(c.evidence)}</article>`).join('')||'<p>Не заявлены.</p>'}
+  <h3>Рабочая гипотеза · не установленный факт</h3>${o.hypothesis?`<p>${esc(o.hypothesis.status)} · ${esc(o.hypothesis.text)}</p>${evidence(o.hypothesis.evidence)}<h3>Противоречия гипотезе</h3>${evidence(o.hypothesis.counterevidence)}`:'<p>Гипотеза не сформирована. Это допустимый результат наблюдения.</p>'}
+  <h3>Почему сейчас · WHY NOW</h3>${o.why_now?`<p>${esc(o.why_now.reason)}</p>${evidence(o.why_now.evidence)}`:'<p>Основание действовать сейчас не заявлено.</p>'}
+  <h3>Связь с предложением</h3><p>${esc(o.offer_fit?.status)} · ${esc(o.offer_fit?.reason)}</p>
+  <h3>Что ещё неизвестно</h3><ul>${(o.unknowns??[]).map(x=>`<li>${esc(discoveryText(x))}</li>`).join('')||'<li>Не заявлено; это не доказательство полноты.</li>'}</ul>
+  <h3>Возможное продолжение разговора</h3>${o.opening?`<pre class="wrap discovery-opening">${esc(o.opening.text)}</pre><p>${esc(o.opening.reason)}</p>${evidence(o.opening.evidence)}<p class="muted">Предложение для рассмотрения. Не отправлено; разрешение на контакт проверяется отдельно.</p>`:'<p>Продолжение не предложено. WAIT / IGNORE не требуют черновика.</p>'}</div>`;
+}
+function discoveryReviewMarkup(d){
+  const decision=d.current_decision,closed=['expired','forgotten','engaged','handed_off','transferred','stopped'].includes(String(d.status).toLowerCase());
+  const actionable=Boolean(decision)&&!closed&&d.availability==='current'&&d.freshness?.fresh===true;
+  const pendingReview=decision?.output?.decision==='REVIEW'&&decision?.review_status==='pending';
+  return `<div class="discovery-detail"><p class="section-note"><strong>Одобрение разбора ≠ разрешение на контакт ≠ отправка.</strong> Discovery передаёт работу Engagement только по существующему входящему сообщению и отдельному разрешению.</p>
+  <p>Источник: ${esc(d.source_id)}<br>Субъект: ${esc(d.subject_id)}<br>Цель: ${esc(d.purpose_id)}<br>Состояние: ${esc(d.status)} · версия ${esc(d.revision)}<br>Срок наблюдения: ${date(d.expires_at)}</p>${discoveryAvailability(d)}
+  <div class="actions">${pendingReview&&!closed?`<button class="button" data-do="discovery-approve" data-id="${esc(d.id)}"${!actionable?' disabled':''}>Одобрить разбор</button>${button('Отклонить разбор','discovery-reject',d.id,'danger')}`:''}${actionable&&decision.review_status==='approved'?button('Передать в Engagement','discovery-engage',d.id):''}${decision?button('Оценить исходную гипотезу','discovery-assess',d.id):''}${String(d.status).toLowerCase()!=='forgotten'?button('Забыть ситуацию','discovery-forget',d.id,'danger'):''}${button('Обновить','discovery-detail',d.id)}</div>
+  ${decision?`<p>Решение ${esc(decision.id)} · разбор: ${esc(decision.review_status)}</p>${discoveryDecisionMarkup(decision,d.observations)}`:empty('Решение ещё не сформировано','Наблюдения не означают установленной потребности или права на контакт.')}
+  <h3>Наблюдения и версии источника</h3>${(d.observations??[]).map(o=>`<article class="discovery-evidence"><strong>Event ${esc(o.source_event_id)} · ${esc(o.message_id)} · v${esc(o.version)}</strong><small>${esc(o.author_id)} · ${esc(o.operation)} · создано ${date(o.created_at)} · изменено ${date(o.updated_at)}</small><pre class="wrap">${o.operation==='upsert'?esc(o.text):esc(o.operation==='unsupported'?'Содержимое не поддерживается; не используется как текстовое evidence.':'Удалено; содержимое не используется как evidence.')}</pre></article>`).join('')||'<p>Доступных наблюдений нет.</p>'}
+  <h3>Журнал решений, включая WAIT / IGNORE</h3>${(d.decisions??[]).map(x=>`<details><summary>${esc(x.output?.decision??x.decision)} · ${esc(x.output?.assessment??x.assessment)} · ${date(x.created_at)} · ${esc(x.id)}</summary><p>Историческое решение: не является действующим approval.</p>${discoveryDecisionMarkup(x,d.observations)}</details>`).join('')||'<p>Журнал пока пуст.</p>'}
+  <h3>Передача ответственности</h3>${(d.links??[]).map(x=>`<pre class="code">${esc(JSON.stringify(x,null,2))}</pre>`).join('')||'<p>Discovery ещё не передал работу Engagement.</p>'}
+  <h3>Поздняя оценка и кандидаты уроков</h3><p class="muted">Связь с outcome не доказывает причинность. Рассмотрение урока не меняет критерии автоматически.</p>${(d.assessments??[]).map(x=>`<article class="lesson"><p>${esc(x.classification)} · ${esc(x.reason)}</p><small>Исходное решение: ${esc(x.decision_id)}</small><pre class="code">${esc(JSON.stringify(x,null,2))}</pre></article>`).join('')||'<p>Оценок пока нет.</p>'}
+  ${(d.lessons??[]).map(x=>`<article class="lesson"><p>${esc(x.lesson_text??x.text)}</p><p>${esc(x.status)} · ${esc(x.limitations)}</p>${['candidate','pending'].includes(x.status)?button('Рассмотреть урок','discovery-lesson-review',x.id):''}</article>`).join('')}
+  <details><summary>Полный пакет происхождения, ограничений и версий</summary><pre class="code">${esc(JSON.stringify(d,null,2))}</pre></details></div>`;
+}
+async function discoveryAction(action,itemId){
+  if(action==='discovery-detail'){
+    discoveryDetail=await api(`/api/discovery/${encodeURIComponent(itemId)}`);
+    opportunityReadOnly('Наблюдаемая ситуация',discoveryReviewMarkup(discoveryDetail));return;
+  }
+  const d=discoveryDetail;if(!d)throw new Error('Сначала откройте ситуацию.');
+  const base={situation_id:d.id,expected_revision:d.revision};
+  if(['discovery-approve','discovery-reject'].includes(action)){
+    if(!d.current_decision)throw new Error('Нет текущего решения.');
+    modal('Разбор ситуации — без разрешения на контакт','<p>Сохраняется оценка текущей гипотезы. Никакие сообщения не отправляются.</p>'+field('reason','Обоснование','textarea'),p=>command('discovery.review',{...base,decision_id:d.current_decision.id,verdict:action==='discovery-approve'?'approve':'reject',reason:p.reason}));return;
+  }
+  if(action==='discovery-forget'){
+    modal('Забыть ситуацию','<p>Удаление наблюдаемой ситуации не является командой удалить сообщения в Telegram. Сервер применит политику забывания и сохранит минимальный аудит.</p>'+field('reason','Основание забывания','textarea'),p=>command('discovery.forget',{...base,reason:p.reason}));return;
+  }
+  if(action==='discovery-engage'){
+    modal('Передать ответственность в Engagement','<p>Нужны уже существующие точные ссылки на разрешённый разговор, входящее сообщение и типизированное разрешение. Разбор не создаёт разрешение и не отправляет сообщение.</p>'+field('conversation_id','ID существующего разговора')+field('inbound_message_id','ID входящего сообщения')+field('permission_id','ID существующего разрешения'),p=>command('discovery.engage',{...base,decision_id:d.current_decision.id,...p}));return;
+  }
+  if(action==='discovery-assess'){
+    const journal=d.decisions?.length?d.decisions:[d.current_decision].filter(Boolean);
+    modal('Поздняя оценка исходного решения',field('decision_id','Исходное решение','select',d.current_decision?.id??'',journal.map(x=>[x.id,`${x.output?.decision??x.decision} · ${x.id}`]))+field('classification','Оценка','select','unknown',[['supported','Подтверждено'],['refuted','Опровергнуто'],['missed_existing_evidence','Пропущено уже имевшееся evidence'],['later_need_only','Потребность появилась позднее'],['unknown','Пока неизвестно']])+field('reason','Почему эта оценка обоснована','textarea')+field('source_event_ids','ID событий evidence через запятую')+field('outcome_ids','ID связанных outcomes через запятую')+field('lesson_text','Кандидат урока','textarea')+field('limitations','Ограничения вывода','textarea'),p=>command('discovery.assess',{situation_id:d.id,...p,source_event_ids:p.source_event_ids.split(',').map(x=>x.trim()).filter(Boolean),outcome_ids:p.outcome_ids.split(',').map(x=>x.trim()).filter(Boolean)}));return;
+  }
+  if(action==='discovery-lesson-review'){
+    const lesson=(d.lessons??[]).find(x=>x.id===itemId);if(!lesson)throw new Error('Обновите ситуацию: урок недоступен.');
+    modal('Рассмотреть кандидат урока','<p>Урок останется кандидатом для дальнейшей проверки. Критерии runtime автоматически не изменяются.</p>'+field('decision','Решение','select','approve',[['approve','Одобрить кандидат'],['reject','Отклонить']])+field('evaluation','Оценка evidence и контрпримеров','textarea')+field('limitations','Ограничения','textarea',lesson.limitations??''),p=>command('discovery.lesson.review',{lesson_id:itemId,expected_revision:lesson.revision,...p}));return;
+  }
+  throw new Error('Неизвестное действие наблюдения.');
+}
 function experience(){return `<div class="section-note">Факты о человеке находятся в его карточке. Здесь — рассмотренные уроки. Общие уроки должны быть обезличены; урок конкретного диалога доступен только в нём.</div><div class="grid-two">${panel('Накопленный опыт',state.lessons.length?state.lessons.map(l=>`<article class="lesson"><div class="panel-head"><h3>${esc(l.title)}</h3>${badge(l.status)}</div><p>${esc(l.text)}</p><small class="muted">Применимость: ${esc(l.applicability)}<br>Основание: ${esc(l.evidence)}<br>${l.conversation_id?'Для одного разговора':'Общий обезличенный опыт'}</small><div class="actions">${l.status==='candidate'?button('Активировать',l.controlled?'learning-activate':'lesson-active',l.id)+button('Отклонить',l.controlled?'learning-reject':'lesson-rejected',l.id):''}${l.status==='active'?button('В архив',l.controlled?'learning-retire':'lesson-retired',l.id):''}</div></article>`).join(''):empty('Опыт будет расти вместе с работой','Сохраните конкретный вывод, источник и условия, в которых он полезен.'),button('+ Урок','lesson-new','','primary'))}${panel('Проверенные знания',state.knowledge.map(k=>`<div class="lesson"><h3>${esc(k.title)}</h3><p class="muted">${k.status==='needs_owner_materials'?'Ожидаются материалы владельца':esc(k.status)}</p>${k.facts.map(f=>`<p>${esc(f.text)}<small class="muted tiny"> · ${esc(f.source)}</small></p>`).join('')}<h3>Нужно добавить</h3><ul>${(k.missing??[]).map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>`).join(''))}</div>`}
 function capabilities(){return `<div class="card-grid">${state.capabilities.map(c=>`<article class="capability-card"><div class="capability-icon">${({business:'◎',experience:'◇',telegram:'↗',research:'⌕',browser:'◉',email:'✉',calendar:'▦',social:'✧'})[c.id]??'✧'}</div><h2>${esc(c.name)}</h2><p>${esc(c.id)}${c.version?` · v${esc(c.version)}`:''}</p>${badge(c.status)}</article>`).join('')}</div><div class="section-divider"></div>${panel('Предложения новых способностей',state.proposals.length?state.proposals.map(p=>`<article class="lesson"><div class="panel-head"><h3>${esc(p.name)}</h3>${badge(p.status)}</div><p>${esc(p.purpose)}</p><small class="muted">Проверка пользы: ${esc(p.acceptance)}<br>Права: ${esc(JSON.parse(p.permissions_json).join(', ')||'не указаны')}</small><div class="actions">${p.status==='proposed'?button('Принять в разработку','cap-accept',p.id)+button('Отклонить','cap-reject',p.id):''}${button('Подготовить навык','skill-stage',p.id)}</div></article>`).join(''):empty('Новые способности появляются из задач','Опишите, чего не хватает партнёру и как определить, что новая возможность полезна.'),button('+ Предложение','cap-new','','primary'))}${panel('Версии собственных навыков',state.skills.length?state.skills.map(s=>`<div class="lesson"><h3>${esc(s.name)} · v${s.version}</h3>${badge(s.status)}<details><summary>Содержание</summary><pre class="code">${esc(s.content)}</pre></details><div class="actions">${s.status==='draft'?button('Утвердить инструкции','skill-approve',s.id)+button('Отклонить','skill-reject',s.id):''}${s.status==='approved'?button('Отключить','skill-retire',s.id):''}</div></div>`).join(''):empty('Новых версий пока нет','Утверждение добавляет инструкции к контексту. Установка исполняемого кода и выдача прав выполняются отдельно.'))}`}
 function runs(){const m=state.metrics;return `<div class="stats">${[['Запусков',m.runs],['Известные расходы',`$${Number(m.known_cost_usd).toFixed(3)}`],['Неизвестная стоимость',m.unknown_cost_runs??0],['Отправлено с правками',`${m.edited_sent}/${m.total_sent}`]].map(([l,n])=>`<div class="stat"><span class="label">${l}</span><strong>${esc(n)}</strong></div>`).join('')}</div><div class="section-note">Показаны расходы модели. Время владельца и инфраструктура пока не включены. Неизвестные расходы не считаются нулевыми.</div>${panel('Запуски партнёра',state.runs.length?`<div class="table-wrap"><table class="data-table"><thead><tr><th>Дата</th><th>Модель</th><th>Результат</th><th>Расход</th><th></th></tr></thead><tbody>${state.runs.map(r=>`<tr><td>${date(r.created_at)}</td><td>${esc(r.model)}<small>${esc(r.runtime)}</small></td><td>${badge(r.status)}<small>${esc(r.error??'')}</small></td><td>${r.estimated_cost_usd===null?'Неизвестно':`$${r.estimated_cost_usd.toFixed(4)}`}</td><td>${button('Открыть','run-detail',r.id)}</td></tr>`).join('')}</tbody></table></div>`:empty('Запусков пока нет','После подключения модели здесь появятся контекст каждого решения, вызовы инструментов и результат.'))}`}
@@ -131,6 +202,7 @@ function modal(title,content,onSubmit){
 const convOptions=()=>[['','Общая работа партнёра'],...state.conversations.map(c=>[c.id,c.name])];
 const convPayload=()=>({conversation_id:selected});
 async function act(action,itemId,extra){
+  if(action.startsWith('discovery-')){await discoveryAction(action,itemId);return;}
   if(action.startsWith('eng-')){
     const e=(detail?.engagements??[]).find(e=>!['CLOSED','STOPPED'].includes(e.status));
     const ep={engagement_id:e?.id};

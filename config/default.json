@@ -52,5 +52,18 @@
   "partnerId": "partner-001",
   "engagement": {
     "enabled": false
+  },
+  "discovery": {
+    "enabled": false,
+    "purpose": {
+      "id": "offer-relevance",
+      "version": "1",
+      "text": "Notice current self-expressed needs relevant to the configured offer for operator review only."
+    },
+    "windowDays": 28,
+    "ttlDays": 28,
+    "maxMessages": 40,
+    "maxCharacters": 30000,
+    "batchSeconds": 60
   }
 }

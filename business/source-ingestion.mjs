@@ -26,7 +26,7 @@ export function validateSourceCheckpoint(state, p) {
     && (state.phase==='current' ? typeof state.confirmed_at==='string' && Number.isFinite(Date.parse(state.confirmed_at))
       : state.confirmed_at===null), 'SOURCE_TRANSPORT_CORRUPT_CHECKPOINT');
 }
-function sourceTransportBoundary(service, sourceId) {
+export function sourceTransportBoundary(service, sourceId) {
   const bindings = service.config.opportunity.telegramSources ?? [];
   const configured = Array.isArray(bindings) ? bindings.filter(p => p.sourceId === sourceId) : [];
   const state = sourceCheckpoint(service, sourceId);

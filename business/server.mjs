@@ -7,6 +7,7 @@ import Ajv from 'ajv';
 import { loadConfig, ROOT, DATA, readJson, runtimeReadiness } from './config.mjs';
 import { Store } from './store.mjs';
 import { BusinessService } from './service.mjs';
+import { discoveryList, discoveryDetail, sweepDiscovery } from './discovery.mjs';
 import { HermesAdapter } from './runtime.mjs';
 import { Scheduler } from './scheduler.mjs';
 import { TelegramChannel } from './channels/telegram.mjs';
@@ -63,6 +64,10 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
         return send(404,{error:'not found'});
       }
       ensure(tokenEquals(req.headers['x-partner-token'],operatorToken), 'Перезагрузите страницу для обновления сессии', 403);
+      // Expiry applies to operator reads/exports even when automatic work is disabled.
+      await service.exclusive(()=>store.transaction(()=>sweepDiscovery(service)));
+      if (req.method === 'GET' && url.pathname === '/api/discovery') return send(200,discoveryList(service));
+      if (req.method === 'GET' && url.pathname.startsWith('/api/discovery/')) return send(200,discoveryDetail(service,decodeURIComponent(url.pathname.split('/').at(-1))));
       if (req.method === 'GET' && url.pathname === '/api/state') return send(200,{...service.snapshot(),
         runtime:runtimeReadiness(config), scheduler:scheduler.status(), telegram:telegram.readiness(),
         capabilities:readJson(path.join(ROOT,'partner/capabilities.json')),

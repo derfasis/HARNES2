@@ -3,6 +3,7 @@ import path from 'node:path';
 import { ROOT } from './config.mjs';
 import { TABLES, hash } from './store.mjs';
 import { now } from './errors.mjs';
+import { sweepDiscovery } from './discovery.mjs';
 
 export function exportPartner(store) {
   const assets = [];
@@ -18,6 +19,7 @@ export function exportPartner(store) {
   };
   walk(path.join(ROOT,'partner'));
   return store.transaction(() => {
+    for(const partner of store.all('SELECT id FROM partners'))sweepDiscovery({store,config:{partnerId:partner.id}});
     const tables = Object.fromEntries(TABLES.map(table => [table, store.all(`SELECT * FROM ${table}`)]));
     return { format: 'digital-ai-partner', schema_version: 1, exported_at: now(),
       migrations: store.all('SELECT * FROM schema_migrations ORDER BY version'),

@@ -20,7 +20,9 @@
     "import": "node --env-file-if-exists=.env scripts/import.mjs",
     "mcp": ".venv\\Scripts\\python.exe adapters/mcp/server.py",
     "test:engagement": "node --test tests/engagement.test.mjs tests/engagement-ui.test.mjs",
-    "test:engagement:isolated": "node scripts/test-engagement-isolated.mjs"
+    "test:engagement:isolated": "node scripts/test-engagement-isolated.mjs",
+    "evaluate:discovery": "node scripts/discovery-evaluate.mjs",
+    "test:discovery": "node --test tests/discovery*.test.mjs"
   },
   "dependencies": {
     "ajv": "8.17.1",

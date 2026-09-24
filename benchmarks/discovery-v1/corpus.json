@@ -1,0 +1,1230 @@
+{
+  "contract_version": "discovery-evaluation-v1",
+  "provenance": "synthetic_hand_authored",
+  "offer": {
+    "id": "educational-wellness-partnership",
+    "version": "synthetic-v1",
+    "text": "An informational discussion of a wellness partnership; no income or health guarantees.",
+    "criteria": [
+      "Self-expressed interest in understanding the partnership format"
+    ],
+    "exclusions": [
+      "No assumed interest from occupation",
+      "No diagnosis or promised income",
+      "Quoted third-party intent is not personal intent"
+    ]
+  },
+  "episodes": [
+    {
+      "id": "ordinary-noise",
+      "purpose": "Notice a current need relevant to the informational partnership offer.",
+      "source_id": "synthetic:ordinary-noise",
+      "subject_id": "author",
+      "events": [
+        {
+          "source_event_id": "1",
+          "message_id": "m1",
+          "author_id": "author",
+          "version": 1,
+          "operation": "upsert",
+          "text": "Ноги после тренировки как желе :)",
+          "created_at": "2026-09-01T01:00:00.000Z",
+          "updated_at": "2026-09-01T01:00:00.000Z",
+          "observed_at": "2026-09-01T01:00:00.000Z",
+          "reply_to_id": null,
+          "thread_id": null
+        },
+        {
+          "source_event_id": "2",
+          "message_id": "m2",
+          "author_id": "author",
+          "version": 1,
+          "operation": "upsert",
+          "text": "Кто пойдёт за пиццей?",
+          "created_at": "2026-09-01T02:00:00.000Z",
+          "updated_at": "2026-09-01T02:00:00.000Z",
+          "observed_at": "2026-09-01T02:00:00.000Z",
+          "reply_to_id": null,
+          "thread_id": null
+        },
+        {
+          "source_event_id": "3",
+          "message_id": "m3",
+          "author_id": "author",
+          "version": 1,
+          "operation": "upsert",
+          "text": "Я только за кофе.",
+          "created_at": "2026-09-01T03:00:00.000Z",
+          "updated_at": "2026-09-01T03:00:00.000Z",
+          "observed_at": "2026-09-01T03:00:00.000Z",
+          "reply_to_id": null,
+          "thread_id": null
+        }
+      ],
+      "checkpoints": [
+        {
+          "id": "ordinary-noise-1",
+          "after_event_id": "1",
+          "anchor_message_id": "m1",
+          "judgment": {
+            "label": "negative",
+            "rationale": "noise",
+            "acceptable_decisions": [
+              "IGNORE",
+              "WAIT"
+            ],
+            "acceptable_assessments": [
+              "noise"
+            ],
+            "sufficient_evidence": []
+          }
+        },
+        {
+          "id": "ordinary-noise-2",
+          "after_event_id": "2",
+          "anchor_message_id": "m2",
+          "judgment": {
+            "label": "negative",
+            "rationale": "noise",
+            "acceptable_decisions": [
+              "IGNORE",
+              "WAIT"
+            ],
+            "acceptable_assessments": [
+              "noise"
+            ],
+            "sufficient_evidence": []
+          }
+        },
+        {
+          "id": "ordinary-noise-3",
+          "after_event_id": "3",
+          "anchor_message_id": "m3",
+          "judgment": {
+            "label": "negative",
+            "rationale": "noise",
+            "acceptable_decisions": [
+              "IGNORE",
+              "WAIT"
+            ],
+            "acceptable_assessments": [
+              "noise"
+            ],
+            "sufficient_evidence": []
+          }
+        }
+      ],
+      "later_validation": []
+    },
+    {
+      "id": "professional-profile",
+      "purpose": "Notice a current need relevant to the informational partnership offer.",
+      "source_id": "synthetic:professional-profile",
+      "subject_id": "author",
+      "events": [
+        {
+          "source_event_id": "4",
+          "message_id": "m4",
+          "author_id": "author",
+          "version": 1,
+          "operation": "upsert",
+          "text": "Я тренер, веду несколько групп.",
+          "created_at": "2026-09-01T04:00:00.000Z",
+          "updated_at": "2026-09-01T04:00:00.000Z",
+          "observed_at": "2026-09-01T04:00:00.000Z",
+          "reply_to_id": null,
+          "thread_id": null
+        },
+        {
+          "source_event_id": "5",
+          "message_id": "m5",
+          "author_id": "author",
+          "version": 1,
+          "operation": "upsert",
+          "text": "Работаю в этом клубе второй год.",
+          "created_at": "2026-09-01T05:00:00.000Z",
+          "updated_at": "2026-09-01T05:00:00.000Z",
+          "observed_at": "2026-09-01T05:00:00.000Z",
+          "reply_to_id": null,
+          "thread_id": null
+        }
+      ],
+      "checkpoints": [
+        {
+          "id": "professional-profile-1",
+          "after_event_id": "4",
+          "anchor_message_id": "m4",
+          "judgment": {
+            "label": "negative",
+            "rationale": "Occupation alone does not establish a need.",
+            "acceptable_decisions": [
+              "IGNORE",
+              "WAIT"
+            ],
+            "acceptable_assessments": [
+              "noise"
+            ],
+            "sufficient_evidence": []
+          }
+        },
+        {
+          "id": "professional-profile-2",
+          "after_event_id": "5",
+          "anchor_message_id": "m5",
+          "judgment": {
+            "label": "negative",
+            "rationale": "noise",
+            "acceptable_decisions": [
+              "IGNORE",
+              "WAIT"
+            ],
+            "acceptable_assessments": [
+              "noise"
+            ],
+            "sufficient_evidence": []
+          }
+        }
+      ],
+      "later_validation": []
+    },
+    {
+      "id": "weak-hint",
+      "purpose": "Notice a current need relevant to the informational partnership offer.",
+      "source_id": "synthetic:weak-hint",
+      "subject_id": "author",
+      "events": [
+        {
+          "source_event_id": "6",
+          "message_id": "m6",
+          "author_id": "author",
+          "version": 1,
+          "operation": "upsert",
+          "text": "В последнее время думаю о переменах.",
+          "created_at": "2026-09-01T06:00:00.000Z",
+          "updated_at": "2026-09-01T06:00:00.000Z",
+          "observed_at": "2026-09-01T06:00:00.000Z",
+          "reply_to_id": null,
+          "thread_id": null
+        },
+        {
+          "source_event_id": "7",
+          "message_id": "m7",
+          "author_id": "author",
+          "version": 1,
+          "operation": "upsert",
+          "text": "Возможно, хочу другой график. Пока не решил.",
+          "created_at": "2026-09-01T07:00:00.000Z",
+          "updated_at": "2026-09-01T07:00:00.000Z",
+          "observed_at": "2026-09-01T07:00:00.000Z",
+          "reply_to_id": null,
+          "thread_id": null
+        }
+      ],
+      "checkpoints": [
+        {
+          "id": "weak-hint-1",
+          "after_event_id": "6",
+          "anchor_message_id": "m6",
+          "judgment": {
+            "label": "insufficient_evidence",
+            "rationale": "insufficient_evidence",
+            "acceptable_decisions": [
+              "WAIT"
+            ],
+            "acceptable_assessments": [
+              "insufficient_evidence"
+            ],
+            "sufficient_evidence": []
+          }
+        },
+        {
+          "id": "weak-hint-2",
+          "after_event_id": "7",
+          "anchor_message_id": "m7",
+          "judgment": {
+            "label": "uncertain",
+            "rationale": "uncertain",
+            "acceptable_decisions": [
+              "WAIT"
+            ],
+            "acceptable_assessments": [
+              "uncertain"
+            ],
+            "sufficient_evidence": []
+          }
+        }
+      ],
+      "later_validation": []
+    },
+    {
+      "id": "accumulating-situation",
+      "purpose": "Notice a current need relevant to the informational partnership offer.",
+      "source_id": "synthetic:accumulating-situation",
+      "subject_id": "author",
+      "events": [
+        {
+          "source_event_id": "8",
+          "message_id": "m8",
+          "author_id": "author",
+          "version": 1,
+          "operation": "upsert",
+          "text": "Веду тренировки и иногда помогаю новичкам.",
+          "created_at": "2026-09-01T08:00:00.000Z",
+          "updated_at": "2026-09-01T08:00:00.000Z",
+          "observed_at": "2026-09-01T08:00:00.000Z",
+          "reply_to_id": null,
+          "thread_id": null
+        },
+        {
+          "source_event_id": "9",
+          "message_id": "m9",
+          "author_id": "author",
+          "version": 1,
+          "operation": "upsert",
+          "text": "Клиенты всё чаще спрашивают меня о wellness-продуктах. Хочу понять, можно ли изучить это направление рядом с тренировками без медицинских советов и обещаний результата.",
+          "created_at": "2026-09-01T09:00:00.000Z",
+          "updated_at": "2026-09-01T09:00:00.000Z",
+          "observed_at": "2026-09-01T09:00:00.000Z",
+          "reply_to_id": null,
+          "thread_id": null
+        },
+        {
+          "source_event_id": "10",
+          "message_id": "m10",
+          "author_id": "author",
+          "version": 1,
+          "operation": "upsert",
+          "text": "Есть ли в этой области прозрачные форматы сотрудничества, где сначала можно изучить обязанности и ограничения?",
+          "created_at": "2026-09-01T10:00:00.000Z",
+          "updated_at": "2026-09-01T10:00:00.000Z",
+          "observed_at": "2026-09-01T10:00:00.000Z",
+          "reply_to_id": null,
+          "thread_id": null
+        },
+        {
+          "source_event_id": "11",
+          "message_id": "m11",
+          "author_id": "author",
+          "version": 1,
+          "operation": "upsert",
+          "text": "Можете объяснить обязанности и ограничения партнёрства без обещаний дохода?",
+          "created_at": "2026-09-01T11:00:00.000Z",
+          "updated_at": "2026-09-01T11:00:00.000Z",
+          "observed_at": "2026-09-01T11:00:00.000Z",
+          "reply_to_id": null,
+          "thread_id": null
+        }
+      ],
+      "checkpoints": [
+        {
+          "id": "accumulating-situation-1",
+          "after_event_id": "8",
+          "anchor_message_id": "m8",
+          "judgment": {
+            "label": "negative",
+            "rationale": "noise",
+            "acceptable_decisions": [
+              "IGNORE",
+              "WAIT"
+            ],
+            "acceptable_assessments": [
+              "noise"
+            ],
+            "sufficient_evidence": []
+          }
+        },
+        {
+          "id": "accumulating-situation-2",
+          "after_event_id": "9",
+          "anchor_message_id": "m9",
+          "judgment": {
+            "label": "uncertain",
+            "rationale": "uncertain",
+            "acceptable_decisions": [
+              "WAIT"
+            ],
+            "acceptable_assessments": [
+              "uncertain"
+            ],
+            "sufficient_evidence": []
+          }
+        },
+        {
+          "id": "accumulating-situation-3",
+          "after_event_id": "10",
+          "anchor_message_id": "m10",
+          "judgment": {
+            "label": "positive",
+            "rationale": "The current anaphoric question becomes relevant with the earlier self-expressed wellness-learning need; profession alone is insufficient. Both observations are needed.",
+            "acceptable_decisions": [
+              "REVIEW"
+            ],
+            "acceptable_assessments": [
+              "opportunity"
+            ],
+            "sufficient_evidence": [
+              [
+                {
+                  "source_event_id": "9",
+                  "span": "Клиенты всё чаще спрашивают меня о wellness-продуктах. Хочу понять, можно ли изучить это направление рядом с тренировками без медицинских советов и обещаний результата.",
+                  "kind": "need",
+                  "attribution": "author_statement"
+                },
+                {
+                  "source_event_id": "10",
+                  "span": "Есть ли в этой области прозрачные форматы сотрудничества, где сначала можно изучить обязанности и ограничения?",
+                  "kind": "question",
+                  "attribution": "author_statement"
+                }
+              ]
+            ]
+          }
+        },
+        {
+          "id": "accumulating-situation-4",
+          "after_event_id": "11",
+          "anchor_message_id": "m11",
+          "judgment": {
+            "label": "positive",
+            "rationale": "opportunity",
+            "acceptable_decisions": [
+              "REVIEW"
+            ],
+            "acceptable_assessments": [
+              "opportunity"
+            ],
+            "sufficient_evidence": [
+              [
+                {
+                  "source_event_id": "11",
+                  "span": "Можете объяснить обязанности и ограничения партнёрства без обещаний дохода?",
+                  "kind": "question",
+                  "attribution": "author_statement"
+                }
+              ]
+            ]
+          }
+        }
+      ],
+      "later_validation": []
+    },
+    {
+      "id": "explicit-relevant-need",
+      "purpose": "Notice a current need relevant to the informational partnership offer.",
+      "source_id": "synthetic:explicit-relevant-need",
+      "subject_id": "author",
+      "events": [
+        {
+          "source_event_id": "12",
+          "message_id": "m12",
+          "author_id": "author",
+          "version": 1,
+          "operation": "upsert",
+          "text": "Где можно спокойно изучить условия wellness-партнёрства и задать вопросы?",
+          "created_at": "2026-09-01T12:00:00.000Z",
+          "updated_at": "2026-09-01T12:00:00.000Z",
+          "observed_at": "2026-09-01T12:00:00.000Z",
+          "reply_to_id": null,
+          "thread_id": null
+        }
+      ],
+      "checkpoints": [
+        {
+          "id": "explicit-relevant-need-1",
+          "after_event_id": "12",
+          "anchor_message_id": "m12",
+          "judgment": {
+            "label": "positive",
+            "rationale": "opportunity",
+            "acceptable_decisions": [
+              "REVIEW"
+            ],
+            "acceptable_assessments": [
+              "opportunity"
+            ],
+            "sufficient_evidence": [
+              [
+                {
+                  "source_event_id": "12",
+                  "span": "Где можно спокойно изучить условия wellness-партнёрства и задать вопросы?",
+                  "kind": "question",
+                  "attribution": "author_statement"
+                }
+              ]
+            ]
+          }
+        }
+      ],
+      "later_validation": []
+    },
+    {
+      "id": "unrelated-need",
+      "purpose": "Notice a current need relevant to the informational partnership offer.",
+      "source_id": "synthetic:unrelated-need",
+      "subject_id": "author",
+      "events": [
+        {
+          "source_event_id": "13",
+          "message_id": "m13",
+          "author_id": "author",
+          "version": 1,
+          "operation": "upsert",
+          "text": "Мне нужен хороший сантехник, течёт кран.",
+          "created_at": "2026-09-01T13:00:00.000Z",
+          "updated_at": "2026-09-01T13:00:00.000Z",
+          "observed_at": "2026-09-01T13:00:00.000Z",
+          "reply_to_id": null,
+          "thread_id": null
+        },
+        {
+          "source_event_id": "14",
+          "message_id": "m14",
+          "author_id": "author",
+          "version": 1,
+          "operation": "upsert",
+          "text": "Нашёл мастера, спасибо.",
+          "created_at": "2026-09-01T14:00:00.000Z",
+          "updated_at": "2026-09-01T14:00:00.000Z",
+          "observed_at": "2026-09-01T14:00:00.000Z",
+          "reply_to_id": null,
+          "thread_id": null
+        }
+      ],
+      "checkpoints": [
+        {
+          "id": "unrelated-need-1",
+          "after_event_id": "13",
+          "anchor_message_id": "m13",
+          "judgment": {
+            "label": "negative",
+            "rationale": "Real need, no honest offer relevance.",
+            "acceptable_decisions": [
+              "IGNORE",
+              "WAIT"
+            ],
+            "acceptable_assessments": [
+              "need"
+            ],
+            "sufficient_evidence": []
+          }
+        },
+        {
+          "id": "unrelated-need-2",
+          "after_event_id": "14",
+          "anchor_message_id": "m14",
+          "judgment": {
+            "label": "negative",
+            "rationale": "resolved",
+            "acceptable_decisions": [
+              "STOP"
+            ],
+            "acceptable_assessments": [
+              "resolved"
+            ],
+            "sufficient_evidence": []
+          }
+        }
+      ],
+      "later_validation": []
+    },
+    {
+      "id": "quoted-intent",
+      "purpose": "Notice a current need relevant to the informational partnership offer.",
+      "source_id": "synthetic:quoted-intent",
+      "subject_id": "author",
+      "events": [
+        {
+          "source_event_id": "15",
+          "message_id": "m15",
+          "author_id": "author",
+          "version": 1,
+          "operation": "upsert",
+          "text": "Клиент спросил: «Как стать wellness-партнёром?» Я пока просто передаю вопрос.",
+          "created_at": "2026-09-01T15:00:00.000Z",
+          "updated_at": "2026-09-01T15:00:00.000Z",
+          "observed_at": "2026-09-01T15:00:00.000Z",
+          "reply_to_id": null,
+          "thread_id": null
+        },
+        {
+          "source_event_id": "16",
+          "message_id": "m16",
+          "author_id": "author",
+          "version": 1,
+          "operation": "upsert",
+          "text": "Лично мне этот формат не нужен.",
+          "created_at": "2026-09-01T16:00:00.000Z",
+          "updated_at": "2026-09-01T16:00:00.000Z",
+          "observed_at": "2026-09-01T16:00:00.000Z",
+          "reply_to_id": null,
+          "thread_id": null
+        }
+      ],
+      "checkpoints": [
+        {
+          "id": "quoted-intent-1",
+          "after_event_id": "15",
+          "anchor_message_id": "m15",
+          "judgment": {
+            "label": "negative",
+            "rationale": "Quoted intent belongs to another person.",
+            "acceptable_decisions": [
+              "IGNORE",
+              "WAIT"
+            ],
+            "acceptable_assessments": [
+              "noise"
+            ],
+            "sufficient_evidence": []
+          }
+        },
+        {
+          "id": "quoted-intent-2",
+          "after_event_id": "16",
+          "anchor_message_id": "m16",
+          "judgment": {
+            "label": "negative",
+            "rationale": "refusal",
+            "acceptable_decisions": [
+              "STOP"
+            ],
+            "acceptable_assessments": [
+              "refusal"
+            ],
+            "sufficient_evidence": []
+          }
+        }
+      ],
+      "later_validation": []
+    },
+    {
+      "id": "contradiction",
+      "purpose": "Notice a current need relevant to the informational partnership offer.",
+      "source_id": "synthetic:contradiction",
+      "subject_id": "author",
+      "events": [
+        {
+          "source_event_id": "17",
+          "message_id": "m17",
+          "author_id": "author",
+          "version": 1,
+          "operation": "upsert",
+          "text": "Как устроено партнёрство? Думаю изучить условия.",
+          "created_at": "2026-09-01T17:00:00.000Z",
+          "updated_at": "2026-09-01T17:00:00.000Z",
+          "observed_at": "2026-09-01T17:00:00.000Z",
+          "reply_to_id": null,
+          "thread_id": null
+        },
+        {
+          "source_event_id": "18",
+          "message_id": "m18",
+          "author_id": "author",
+          "version": 1,
+          "operation": "upsert",
+          "text": "Уточню: это был пример для учебной дискуссии, я не ищу партнёрство.",
+          "created_at": "2026-09-01T18:00:00.000Z",
+          "updated_at": "2026-09-01T18:00:00.000Z",
+          "observed_at": "2026-09-01T18:00:00.000Z",
+          "reply_to_id": null,
+          "thread_id": null
+        }
+      ],
+      "checkpoints": [
+        {
+          "id": "contradiction-1",
+          "after_event_id": "17",
+          "anchor_message_id": "m17",
+          "judgment": {
+            "label": "positive",
+            "rationale": "opportunity",
+            "acceptable_decisions": [
+              "REVIEW"
+            ],
+            "acceptable_assessments": [
+              "opportunity"
+            ],
+            "sufficient_evidence": [
+              [
+                {
+                  "source_event_id": "17",
+                  "span": "Как устроено партнёрство? Думаю изучить условия.",
+                  "kind": "question",
+                  "attribution": "author_statement"
+                }
+              ]
+            ]
+          }
+        },
+        {
+          "id": "contradiction-2",
+          "after_event_id": "18",
+          "anchor_message_id": "m18",
+          "judgment": {
+            "label": "negative",
+            "rationale": "contradicted",
+            "acceptable_decisions": [
+              "IGNORE",
+              "WAIT"
+            ],
+            "acceptable_assessments": [
+              "contradicted"
+            ],
+            "sufficient_evidence": []
+          }
+        }
+      ],
+      "later_validation": [
+        {
+          "after_event_id": "18",
+          "checkpoint_id": "contradiction-1",
+          "interpretation": "original_hypothesis_refuted",
+          "rationale": "Later clarification refutes personal intent; no causal success claim."
+        }
+      ]
+    },
+    {
+      "id": "explicit-refusal",
+      "purpose": "Notice a current need relevant to the informational partnership offer.",
+      "source_id": "synthetic:explicit-refusal",
+      "subject_id": "author",
+      "events": [
+        {
+          "source_event_id": "19",
+          "message_id": "m19",
+          "author_id": "author",
+          "version": 1,
+          "operation": "upsert",
+          "text": "Расскажите об условиях партнёрства.",
+          "created_at": "2026-09-01T19:00:00.000Z",
+          "updated_at": "2026-09-01T19:00:00.000Z",
+          "observed_at": "2026-09-01T19:00:00.000Z",
+          "reply_to_id": null,
+          "thread_id": null
+        },
+        {
+          "source_event_id": "20",
+          "message_id": "m20",
+          "author_id": "author",
+          "version": 1,
+          "operation": "upsert",
+          "text": "Больше не интересуюсь, пожалуйста, не пишите с предложениями.",
+          "created_at": "2026-09-01T20:00:00.000Z",
+          "updated_at": "2026-09-01T20:00:00.000Z",
+          "observed_at": "2026-09-01T20:00:00.000Z",
+          "reply_to_id": null,
+          "thread_id": null
+        }
+      ],
+      "checkpoints": [
+        {
+          "id": "explicit-refusal-1",
+          "after_event_id": "19",
+          "anchor_message_id": "m19",
+          "judgment": {
+            "label": "positive",
+            "rationale": "opportunity",
+            "acceptable_decisions": [
+              "REVIEW"
+            ],
+            "acceptable_assessments": [
+              "opportunity"
+            ],
+            "sufficient_evidence": [
+              [
+                {
+                  "source_event_id": "19",
+                  "span": "Расскажите об условиях партнёрства.",
+                  "kind": "question",
+                  "attribution": "author_statement"
+                }
+              ]
+            ]
+          }
+        },
+        {
+          "id": "explicit-refusal-2",
+          "after_event_id": "20",
+          "anchor_message_id": "m20",
+          "judgment": {
+            "label": "negative",
+            "rationale": "refusal",
+            "acceptable_decisions": [
+              "STOP"
+            ],
+            "acceptable_assessments": [
+              "refusal"
+            ],
+            "sufficient_evidence": []
+          }
+        }
+      ],
+      "later_validation": []
+    },
+    {
+      "id": "edited-evidence",
+      "purpose": "Notice a current need relevant to the informational partnership offer.",
+      "source_id": "synthetic:edited-evidence",
+      "subject_id": "author",
+      "events": [
+        {
+          "source_event_id": "21",
+          "message_id": "m21",
+          "author_id": "author",
+          "version": 1,
+          "operation": "upsert",
+          "text": "Хочу узнать условия партнёрства.",
+          "created_at": "2026-09-01T21:00:00.000Z",
+          "updated_at": "2026-09-01T21:00:00.000Z",
+          "observed_at": "2026-09-01T21:00:00.000Z",
+          "reply_to_id": null,
+          "thread_id": null
+        },
+        {
+          "source_event_id": "22",
+          "message_id": "m21",
+          "author_id": "author",
+          "version": 2,
+          "operation": "upsert",
+          "text": "Исправление: друг хочет узнать условия, а я нет.",
+          "created_at": "2026-09-01T21:00:00.000Z",
+          "updated_at": "2026-09-01T22:00:00.000Z",
+          "observed_at": "2026-09-01T22:00:00.000Z",
+          "reply_to_id": null,
+          "thread_id": null
+        }
+      ],
+      "checkpoints": [
+        {
+          "id": "edited-evidence-1",
+          "after_event_id": "21",
+          "anchor_message_id": "m21",
+          "judgment": {
+            "label": "positive",
+            "rationale": "opportunity",
+            "acceptable_decisions": [
+              "REVIEW"
+            ],
+            "acceptable_assessments": [
+              "opportunity"
+            ],
+            "sufficient_evidence": [
+              [
+                {
+                  "source_event_id": "21",
+                  "span": "Хочу узнать условия партнёрства.",
+                  "kind": "question",
+                  "attribution": "author_statement"
+                }
+              ]
+            ]
+          }
+        },
+        {
+          "id": "edited-evidence-2",
+          "after_event_id": "22",
+          "anchor_message_id": "m21",
+          "judgment": {
+            "label": "negative",
+            "rationale": "contradicted",
+            "acceptable_decisions": [
+              "IGNORE",
+              "WAIT"
+            ],
+            "acceptable_assessments": [
+              "contradicted"
+            ],
+            "sufficient_evidence": []
+          }
+        }
+      ],
+      "later_validation": []
+    },
+    {
+      "id": "deleted-evidence",
+      "purpose": "Notice a current need relevant to the informational partnership offer.",
+      "source_id": "synthetic:deleted-evidence",
+      "subject_id": "author",
+      "events": [
+        {
+          "source_event_id": "23",
+          "message_id": "m23",
+          "author_id": "author",
+          "version": 1,
+          "operation": "upsert",
+          "text": "Где узнать условия wellness-партнёрства?",
+          "created_at": "2026-09-01T23:00:00.000Z",
+          "updated_at": "2026-09-01T23:00:00.000Z",
+          "observed_at": "2026-09-01T23:00:00.000Z",
+          "reply_to_id": null,
+          "thread_id": null
+        },
+        {
+          "source_event_id": "24",
+          "message_id": "m23",
+          "author_id": "author",
+          "version": 2,
+          "operation": "delete",
+          "text": null,
+          "created_at": "2026-09-01T23:00:00.000Z",
+          "updated_at": "2026-09-02T00:00:00.000Z",
+          "observed_at": "2026-09-02T00:00:00.000Z",
+          "reply_to_id": null,
+          "thread_id": null
+        }
+      ],
+      "checkpoints": [
+        {
+          "id": "deleted-evidence-1",
+          "after_event_id": "23",
+          "anchor_message_id": "m23",
+          "judgment": {
+            "label": "positive",
+            "rationale": "opportunity",
+            "acceptable_decisions": [
+              "REVIEW"
+            ],
+            "acceptable_assessments": [
+              "opportunity"
+            ],
+            "sufficient_evidence": [
+              [
+                {
+                  "source_event_id": "23",
+                  "span": "Где узнать условия wellness-партнёрства?",
+                  "kind": "question",
+                  "attribution": "author_statement"
+                }
+              ]
+            ]
+          }
+        },
+        {
+          "id": "deleted-evidence-2",
+          "after_event_id": "24",
+          "anchor_message_id": "m23",
+          "judgment": {
+            "label": "insufficient_evidence",
+            "rationale": "insufficient_evidence",
+            "acceptable_decisions": [
+              "WAIT"
+            ],
+            "acceptable_assessments": [
+              "insufficient_evidence"
+            ],
+            "sufficient_evidence": []
+          }
+        }
+      ],
+      "later_validation": []
+    },
+    {
+      "id": "opaque-boundaries",
+      "purpose": "Notice a current need relevant to the informational partnership offer.",
+      "source_id": "synthetic:opaque-boundaries",
+      "subject_id": "author",
+      "events": [
+        {
+          "source_event_id": "25",
+          "message_id": "m25",
+          "author_id": "author",
+          "version": 1,
+          "operation": "unsupported",
+          "text": null,
+          "created_at": "2026-09-02T01:00:00.000Z",
+          "updated_at": "2026-09-02T01:00:00.000Z",
+          "observed_at": "2026-09-02T01:00:00.000Z",
+          "reply_to_id": null,
+          "thread_id": null
+        },
+        {
+          "source_event_id": "26",
+          "message_id": "m26",
+          "author_id": "author",
+          "version": 1,
+          "operation": "upsert",
+          "text": "Вот об этом изображении и спрашиваю.",
+          "created_at": "2026-09-02T02:00:00.000Z",
+          "updated_at": "2026-09-02T02:00:00.000Z",
+          "observed_at": "2026-09-02T02:00:00.000Z",
+          "reply_to_id": "m25",
+          "thread_id": null
+        },
+        {
+          "source_event_id": "27",
+          "message_id": "m27",
+          "author_id": "author",
+          "version": 1,
+          "operation": "upsert",
+          "text": "Другой вопрос: где можно изучить условия wellness-партнёрства?",
+          "created_at": "2026-09-02T03:00:00.000Z",
+          "updated_at": "2026-09-02T03:00:00.000Z",
+          "observed_at": "2026-09-02T03:00:00.000Z",
+          "reply_to_id": null,
+          "thread_id": null
+        }
+      ],
+      "checkpoints": [
+        {
+          "id": "opaque-boundaries-1",
+          "after_event_id": "26",
+          "anchor_message_id": "m26",
+          "judgment": {
+            "label": "insufficient_evidence",
+            "rationale": "insufficient_evidence",
+            "acceptable_decisions": [
+              "WAIT"
+            ],
+            "acceptable_assessments": [
+              "insufficient_evidence"
+            ],
+            "sufficient_evidence": []
+          }
+        },
+        {
+          "id": "opaque-boundaries-2",
+          "after_event_id": "27",
+          "anchor_message_id": "m27",
+          "judgment": {
+            "label": "positive",
+            "rationale": "Old unrelated opaque attachment is optional context, not a lifetime veto.",
+            "acceptable_decisions": [
+              "REVIEW"
+            ],
+            "acceptable_assessments": [
+              "opportunity"
+            ],
+            "sufficient_evidence": [
+              [
+                {
+                  "source_event_id": "27",
+                  "span": "Другой вопрос: где можно изучить условия wellness-партнёрства?",
+                  "kind": "question",
+                  "attribution": "author_statement"
+                }
+              ]
+            ]
+          }
+        }
+      ],
+      "later_validation": []
+    },
+    {
+      "id": "later-new-need",
+      "purpose": "Notice a current need relevant to the informational partnership offer.",
+      "source_id": "synthetic:later-new-need",
+      "subject_id": "author",
+      "events": [
+        {
+          "source_event_id": "28",
+          "message_id": "m28",
+          "author_id": "author",
+          "version": 1,
+          "operation": "upsert",
+          "text": "Сегодня отлично потренировался.",
+          "created_at": "2026-09-02T04:00:00.000Z",
+          "updated_at": "2026-09-02T04:00:00.000Z",
+          "observed_at": "2026-09-02T04:00:00.000Z",
+          "reply_to_id": null,
+          "thread_id": null
+        },
+        {
+          "source_event_id": "29",
+          "message_id": "m29",
+          "author_id": "author",
+          "version": 1,
+          "operation": "upsert",
+          "text": "Сейчас впервые заинтересовался wellness-партнёрством. Где посмотреть условия?",
+          "created_at": "2026-09-02T05:00:00.000Z",
+          "updated_at": "2026-09-02T05:00:00.000Z",
+          "observed_at": "2026-09-02T05:00:00.000Z",
+          "reply_to_id": null,
+          "thread_id": null
+        }
+      ],
+      "checkpoints": [
+        {
+          "id": "later-new-need-1",
+          "after_event_id": "28",
+          "anchor_message_id": "m28",
+          "judgment": {
+            "label": "negative",
+            "rationale": "noise",
+            "acceptable_decisions": [
+              "IGNORE",
+              "WAIT"
+            ],
+            "acceptable_assessments": [
+              "noise"
+            ],
+            "sufficient_evidence": []
+          }
+        },
+        {
+          "id": "later-new-need-2",
+          "after_event_id": "29",
+          "anchor_message_id": "m29",
+          "judgment": {
+            "label": "positive",
+            "rationale": "opportunity",
+            "acceptable_decisions": [
+              "REVIEW"
+            ],
+            "acceptable_assessments": [
+              "opportunity"
+            ],
+            "sufficient_evidence": [
+              [
+                {
+                  "source_event_id": "29",
+                  "span": "Сейчас впервые заинтересовался wellness-партнёрством. Где посмотреть условия?",
+                  "kind": "question",
+                  "attribution": "author_statement"
+                }
+              ]
+            ]
+          }
+        }
+      ],
+      "later_validation": [
+        {
+          "after_event_id": "29",
+          "checkpoint_id": "later-new-need-1",
+          "interpretation": "later_need_only",
+          "rationale": "Future interest was not present at the earlier noise checkpoint; not a false negative."
+        }
+      ]
+    },
+    {
+      "id": "missing-parent",
+      "purpose": "Notice a current need relevant to the informational partnership offer.",
+      "source_id": "synthetic:missing-parent",
+      "subject_id": "author",
+      "events": [
+        {
+          "source_event_id": "30",
+          "message_id": "m30",
+          "author_id": "author",
+          "version": 1,
+          "operation": "upsert",
+          "text": "Да, хочу разобраться в этом.",
+          "created_at": "2026-09-02T06:00:00.000Z",
+          "updated_at": "2026-09-02T06:00:00.000Z",
+          "observed_at": "2026-09-02T06:00:00.000Z",
+          "reply_to_id": "unavailable-parent",
+          "thread_id": null
+        }
+      ],
+      "checkpoints": [
+        {
+          "id": "missing-parent-1",
+          "after_event_id": "30",
+          "anchor_message_id": "m30",
+          "judgment": {
+            "label": "insufficient_evidence",
+            "rationale": "insufficient_evidence",
+            "acceptable_decisions": [
+              "WAIT"
+            ],
+            "acceptable_assessments": [
+              "insufficient_evidence"
+            ],
+            "sufficient_evidence": []
+          }
+        }
+      ],
+      "later_validation": []
+    },
+    {
+      "id": "third-party-answer",
+      "purpose": "Notice a current need relevant to the informational partnership offer.",
+      "source_id": "synthetic:third-party-answer",
+      "subject_id": "author",
+      "events": [
+        {
+          "source_event_id": "31",
+          "message_id": "m31",
+          "author_id": "author",
+          "version": 1,
+          "operation": "upsert",
+          "text": "Как устроено wellness-партнёрство?",
+          "created_at": "2026-09-02T07:00:00.000Z",
+          "updated_at": "2026-09-02T07:00:00.000Z",
+          "observed_at": "2026-09-02T07:00:00.000Z",
+          "reply_to_id": null,
+          "thread_id": null
+        },
+        {
+          "source_event_id": "32",
+          "message_id": "m32",
+          "author_id": "other",
+          "version": 1,
+          "operation": "upsert",
+          "text": "Обычно начинают с ознакомительной встречи.",
+          "created_at": "2026-09-02T08:00:00.000Z",
+          "updated_at": "2026-09-02T08:00:00.000Z",
+          "observed_at": "2026-09-02T08:00:00.000Z",
+          "reply_to_id": "m31",
+          "thread_id": null
+        },
+        {
+          "source_event_id": "33",
+          "message_id": "m33",
+          "author_id": "author",
+          "version": 1,
+          "operation": "upsert",
+          "text": "Спасибо, вопрос закрыт.",
+          "created_at": "2026-09-02T09:00:00.000Z",
+          "updated_at": "2026-09-02T09:00:00.000Z",
+          "observed_at": "2026-09-02T09:00:00.000Z",
+          "reply_to_id": null,
+          "thread_id": null
+        }
+      ],
+      "checkpoints": [
+        {
+          "id": "third-party-answer-1",
+          "after_event_id": "31",
+          "anchor_message_id": "m31",
+          "judgment": {
+            "label": "positive",
+            "rationale": "opportunity",
+            "acceptable_decisions": [
+              "REVIEW"
+            ],
+            "acceptable_assessments": [
+              "opportunity"
+            ],
+            "sufficient_evidence": [
+              [
+                {
+                  "source_event_id": "31",
+                  "span": "Как устроено wellness-партнёрство?",
+                  "kind": "question",
+                  "attribution": "author_statement"
+                }
+              ]
+            ]
+          }
+        },
+        {
+          "id": "third-party-answer-2",
+          "after_event_id": "33",
+          "anchor_message_id": "m33",
+          "judgment": {
+            "label": "negative",
+            "rationale": "resolved",
+            "acceptable_decisions": [
+              "STOP"
+            ],
+            "acceptable_assessments": [
+              "resolved"
+            ],
+            "sufficient_evidence": []
+          }
+        }
+      ],
+      "later_validation": []
+    }
+  ]
+}

@@ -1,0 +1,286 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "contract_version": {
+      "const": "discovery-v1"
+    },
+    "situation_id": {
+      "$ref": "#/$defs/text"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "decision": {
+      "enum": [
+        "WAIT",
+        "IGNORE",
+        "REVIEW",
+        "STOP"
+      ]
+    },
+    "assessment": {
+      "enum": [
+        "noise",
+        "insufficient_evidence",
+        "uncertain",
+        "need",
+        "opportunity",
+        "contradicted",
+        "refusal",
+        "resolved"
+      ]
+    },
+    "human_need": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/text"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "text": {
+            "$ref": "#/$defs/text"
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/evidenceReference"
+            },
+            "maxItems": 30
+          }
+        },
+        "required": [
+          "text",
+          "evidence"
+        ]
+      },
+      "maxItems": 30
+    },
+    "hypothesis": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "text": {
+              "$ref": "#/$defs/text"
+            },
+            "status": {
+              "enum": [
+                "working",
+                "supported",
+                "weakened",
+                "rejected"
+              ]
+            },
+            "evidence": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/evidenceReference"
+              },
+              "maxItems": 30
+            },
+            "counterevidence": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/evidenceReference"
+              },
+              "maxItems": 30
+            }
+          },
+          "required": [
+            "text",
+            "status",
+            "evidence",
+            "counterevidence"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "unknowns": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/text"
+      },
+      "maxItems": 30
+    },
+    "offer_fit": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "enum": [
+            "none",
+            "possible",
+            "supported"
+          ]
+        },
+        "reason": {
+          "$ref": "#/$defs/text"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/evidenceReference"
+          },
+          "maxItems": 30
+        },
+        "offer_version": {
+          "$ref": "#/$defs/text"
+        }
+      },
+      "required": [
+        "status",
+        "reason",
+        "evidence",
+        "offer_version"
+      ]
+    },
+    "why_now": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "reason": {
+              "$ref": "#/$defs/text"
+            },
+            "evidence": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/evidenceReference"
+              },
+              "maxItems": 30
+            }
+          },
+          "required": [
+            "reason",
+            "evidence"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "opening": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "text": {
+              "$ref": "#/$defs/text"
+            },
+            "reason": {
+              "$ref": "#/$defs/text"
+            },
+            "evidence": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/evidenceReference"
+              },
+              "maxItems": 30
+            }
+          },
+          "required": [
+            "text",
+            "reason",
+            "evidence"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contact_permission": {
+          "const": false
+        },
+        "allowed_effects": {
+          "const": []
+        }
+      },
+      "required": [
+        "contact_permission",
+        "allowed_effects"
+      ]
+    }
+  },
+  "required": [
+    "contract_version",
+    "situation_id",
+    "revision",
+    "decision",
+    "assessment",
+    "human_need",
+    "claims",
+    "hypothesis",
+    "unknowns",
+    "offer_fit",
+    "why_now",
+    "opening",
+    "authority"
+  ],
+  "$defs": {
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 6000
+    },
+    "evidenceReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "source_event_id": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*$"
+        },
+        "span": {
+          "$ref": "#/$defs/text"
+        },
+        "kind": {
+          "enum": [
+            "need",
+            "question",
+            "intent",
+            "background",
+            "refusal",
+            "resolution",
+            "contradiction"
+          ]
+        },
+        "attribution": {
+          "enum": [
+            "author_statement",
+            "quoted_other",
+            "context"
+          ]
+        }
+      },
+      "required": [
+        "source_event_id",
+        "span",
+        "kind",
+        "attribution"
+      ]
+    }
+  }
+}

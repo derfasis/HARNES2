@@ -1,6 +1,8 @@
 import { contextFor } from './context.mjs';
 import { runtimeReadiness, usageAccounting } from './config.mjs';
 import { processSourceOpportunity } from './opportunity-pipeline.mjs';
+import { processDiscovery } from './discovery-pipeline.mjs';
+import { sweepDiscovery } from './discovery.mjs';
 import { pollTelegramSource } from './sources/telegram-readonly.mjs';
 import { id } from './store.mjs';
 import { now } from './errors.mjs';
@@ -14,6 +16,7 @@ export class Scheduler {
     this.busy = true;
     try {
       const cfg = this.service.config;
+      await this.service.exclusive(() => this.service.store.transaction(() => sweepDiscovery(this.service)));
       if (cfg.opportunity?.automatic) {
         // Empty by default. Only a trusted bootstrap can supply narrowed read-only
         // transport capabilities. Reuse this tick, never the private-chat adapter.
@@ -22,7 +25,7 @@ export class Scheduler {
           try { await pollTelegramSource(this.service, sourceId, transport); }
           catch { sourceReadFailed=true; }
         }
-        const result = await processSourceOpportunity(this.service, this.runtime);
+        const result = cfg.discovery?.enabled ? await processDiscovery(this.service, this.runtime) : await processSourceOpportunity(this.service, this.runtime);
         this.lastReason = sourceReadFailed?'source_read_failed':result.disposition; return;
       }
       await this.service.exclusive(() => this.service.store.transaction(() => this.service.engagement.sweep()));
