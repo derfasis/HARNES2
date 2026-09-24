@@ -67,13 +67,13 @@ function counts(h) {
     failed: h.markers('discovery.observation.failed').length,
   };
 }
-function noExternalEffects(h, inboundMessages = 0) {
+function noExternalEffects(h, inboundMessages = 0, expectedPermissions = 0) {
   for (const table of ['drafts', 'approvals', 'delivery_attempts', 'outcome_events']) {
     assert.equal(h.store.get(`SELECT COUNT(*) AS n FROM ${table}`).n, 0, table);
   }
   assert.equal(h.store.get("SELECT COUNT(*) AS n FROM messages WHERE direction='out'").n, 0);
   assert.equal(h.store.get("SELECT COUNT(*) AS n FROM messages WHERE direction='in'").n, inboundMessages);
-  assert.equal(h.store.get("SELECT COUNT(*) AS n FROM contact_permissions").n, 0);
+  assert.equal(h.store.get("SELECT COUNT(*) AS n FROM contact_permissions").n, expectedPermissions);
   assert.deepEqual(h.store.all('PRAGMA foreign_key_check'), []);
 }
 
@@ -866,7 +866,15 @@ test('transfer creates engagement attention without external effects', async t =
   const detail = h.detail(h.situations()[0].id);
   await h.command('discovery.review', { task_id: first.review_task_id, expected_revision: detail.revision, expected_evidence_fingerprint: detail.evidence_fingerprint, decision: 'approve' });
   const person = await h.command('person.create', { name: 'Existing recipient', source: 'synthetic operator' });
+  h.settings.opportunity.authorBindings = [{
+    source_id: source().source_id,
+    author_id: source().author_id,
+    conversation_id: person.conversation_id,
+  }];
   await h.command('message.record', { conversation_id: person.conversation_id, text: 'Explicit inbound question', source: 'synthetic' });
+  await h.command('permission.grant', { conversation_id: person.conversation_id, purpose: 'reply',
+    granted_by: 'synthetic recipient', evidence: 'synthetic explicit reply grant',
+    valid_from: '2020-01-01T00:00:00.000Z', expires_at: '2099-01-01T00:00:00.000Z' });
   const inboundId = h.store.get("SELECT id FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 1", person.conversation_id).id;
   const approved = h.detail(h.situations()[0].id);
   const result = await h.command('discovery.transfer', { situation_id: approved.id, conversation_id: person.conversation_id, inbound_message_id: inboundId, basis: 'Operator explicitly linked the existing conversation.' });
@@ -876,8 +884,8 @@ test('transfer creates engagement attention without external effects', async t =
   const attention = h.store.get("SELECT t.id,et.trigger_json FROM tasks t JOIN engagement_tasks et ON et.task_id=t.id WHERE t.conversation_id=? AND t.kind='engagement_evaluate' AND t.status='pending'", person.conversation_id);
   assert.ok(attention);
   assert.equal(JSON.parse(attention.trigger_json).message_id, inboundId);
-  assert.equal(h.store.get('SELECT COUNT(*) AS n FROM contact_permissions').n, 0);
-  noExternalEffects(h, 1);
+  assert.equal(h.store.get('SELECT COUNT(*) AS n FROM contact_permissions').n, 1);
+  noExternalEffects(h, 1, 1);
 });
 
 test('v3 bundle from a clean database imports into v4 with empty discovery state', async t => {
