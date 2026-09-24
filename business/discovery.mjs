@@ -537,6 +537,7 @@ function transfer(service, p) {
   const inbound = service.store.get("SELECT * FROM messages WHERE id=? AND conversation_id=? AND direction='in'",
     requiredText(p.inbound_message_id, 'inbound_message_id', 150), conversation.id);
   check(inbound, 'DISCOVERY_INBOUND_REQUIRED');
+  service.engagement.resolvePermission(conversation.id, 'reply');
   const basis = requiredText(p.basis, 'transfer basis', 4000);
   check(!service.engagement.managed(conversation.id), 'DISCOVERY_ENGAGEMENT_EXISTS');
   const opened = service.engagement.open({ conversation_id: conversation.id, topic: 'Вхідне звернення після Discovery',
