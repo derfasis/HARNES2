@@ -1,12 +1,13 @@
 # ADR: Durable Discovery Situation v1
 
-- **Статус:** implementation frozen; findings независимого review addressed; focused integrity gate 51/51 green; ready for Dev follow-up; not ready for main merge
+- **Статус:** integration gate green; ready for final merge-readiness review; main not merged
 - **Worktree:** `D:/HARNES2-worktrees/durable-discovery-v1-local`
 - **Базовая линия:** `0cde893` (`fix: retain analyzed opportunities during source catch-up`)
-- **Ветка эксперимента:** `codex/durable-discovery-v1-local`
-- **Дата проверки:** 2026-09-23
-- **Коммиты/push/merge:** не выполнялись
-- **Режим проверки:** только синтаксическая сборка и focused offline suite; модель, Hermes runtime, Telegram и live traffic не запускались
+- **Review branch:** `codex/durable-discovery-v1-review-r23`
+- **Reviewed HEAD:** `8ebbcd16af8b504bfa2f1abc3e52e209182f5083`
+- **Дата проверки:** 2026-09-24
+- **Коммиты/push/merge:** review commit pushed; main not merged
+- **Режим проверки:** full offline Node regression, Python credential/failover, focused Discovery, build и diff check; model, Hermes runtime, Telegram и live traffic не запускались
 
 ## 1. Purpose
 
@@ -378,11 +379,19 @@ Focused suite `tests/discovery-integrity.test.mjs` доказала:
 9 Python files
 ```
 
+Integration gate:
+
+```text
+full Node regression: 491/491
+Python credential/failover: 8/8
+Durable Discovery focused: 51/51
+git diff --check: clean
+```
+
 ## 16. Что этот slice намеренно НЕ доказывает
 
 Не проверены:
 
-- полный старый regression suite;
 - реальное поведение модели;
 - Hermes runtime;
 - Telegram/live traffic;
@@ -398,19 +407,19 @@ Focused suite `tests/discovery-integrity.test.mjs` доказала:
 - crash после каждого отдельного commit boundary;
 - долговременная эксплуатация и retention.
 
-51/51 — это доказательство offline integrity, а не доказательство того, что Discovery хорошо находит реальные возможности. В частности, gate не доказывает v2→v4 или v4 round-trip imports, automatic recovery на каждом startup entrypoint, global Router/Engagement regression, multi-process safety, model/runtime/live behavior, Astra/main approval или business usefulness.
+51/51 focused, 491/491 full Node и 8/8 Python — это доказательство offline integrity, а не доказательство того, что Discovery хорошо находит реальные возможности. В частности, gate не доказывает v2→v4 или v4 round-trip imports, automatic recovery на каждом startup entrypoint, global Router/Engagement regression, multi-process safety, model/runtime/live behavior, Astra/main approval или business usefulness.
 
 ## 17. Rollout и текущий статус
 
-Slice остаётся экспериментальным:
+Review branch сохранён отдельно:
 
-- отдельный worktree от `0cde893`;
-- нет commit, push или merge;
+- `codex/durable-discovery-v1-review-r23`, reviewed HEAD `8ebbcd16af8b504bfa2f1abc3e52e209182f5083`;
+- commit и push выполнены; `main` не merged;
 - `discovery.enabled` по умолчанию `false`;
 - production Router v1, Persistent Engagement и Hermes semantics не переписываются;
-- live execution не выполнялась.
+- model/runtime/Telegram/live execution не выполнялась.
 
-Следующий шаг после review этого ADR — не новая функция, а отдельное решение владельца о том, принимать ли этот experimental boundary в основной branch, сначала расширять offline coverage или проводить отдельный Astra/main review.
+Следующий шаг — final merge-readiness review этого ADR и review branch; новые production features до отдельного решения не добавляются.
 
 ## 18. Decision record
 
@@ -418,4 +427,4 @@ Slice остаётся экспериментальным:
 
 **Причина:** он закрывает реальный пробел накопления нескольких source observations, не создавая второго агента, CRM, permission engine или send path.
 
-**Следующее действие:** review этого документа и experimental diff. Новые production features не добавляются до отдельного решения.
+**Следующее действие:** final merge-readiness review ADR и GitHub compare `0cde893...codex/durable-discovery-v1-review-r23`. Новые production features не добавляются до отдельного решения; `main` не merged.
