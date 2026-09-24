@@ -716,6 +716,7 @@ test('GAP A2 transfer requires exact binding, real inbound, and typed reply gran
   const scenarios = [
     'missing_author_binding',
     'wrong_conversation_binding',
+    'ambiguous_author_binding',
     'missing_typed_grant',
     'follow_up_only_grant',
     'missing_inbound',
@@ -731,6 +732,13 @@ test('GAP A2 transfer requires exact binding, real inbound, and typed reply gran
     if (scenario === 'wrong_conversation_binding') {
       const other = await createTarget(h, raw);
       h.settings.opportunity.authorBindings[0].conversation_id = other.conversation_id;
+    }
+    if (scenario === 'ambiguous_author_binding') {
+      const other = await createTarget(h, raw);
+      h.settings.opportunity.authorBindings = [
+        { source_id: raw.source_id, author_id: raw.author_id, conversation_id: target.conversation_id },
+        { source_id: raw.source_id, author_id: raw.author_id, conversation_id: other.conversation_id },
+      ];
     }
     if (scenario === 'missing_typed_grant') {
       // No grant exists.

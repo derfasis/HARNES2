@@ -530,9 +530,10 @@ function requireTransferAuthorBinding(service, situationRow, conversationId) {
     && Object.keys(binding).length === 3
     && typeof binding.source_id === 'string' && typeof binding.author_id === 'string'
     && typeof binding.conversation_id === 'string');
-  const matches = valid ? bindings.filter(binding => binding.source_id === evidence.source.source_id
-    && binding.author_id === evidence.source.author_id && binding.conversation_id === conversationId) : [];
-  check(valid && matches.length === 1, 'DISCOVERY_AUTHOR_BINDING_REQUIRED');
+  const authorMatches = valid ? bindings.filter(binding => binding.source_id === evidence.source.source_id
+    && binding.author_id === evidence.source.author_id) : [];
+  check(valid && authorMatches.length === 1
+    && authorMatches[0].conversation_id === conversationId, 'DISCOVERY_AUTHOR_BINDING_REQUIRED');
 }
 
 function transfer(service, p) {
