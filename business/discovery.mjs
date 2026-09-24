@@ -226,10 +226,15 @@ export function staleMaterialEvidence(service) {
   return service.store.transaction(() => staleMaterialEvidenceRows(service));
 }
 
-export function invalidateRevokedDiscoverySources(service) {
+const DISCOVERY_MAINTENANCE_MAX = 1000;
+
+export function invalidateRevokedDiscoverySources(service, limit = DISCOVERY_MAINTENANCE_MAX) {
+  check(Number.isInteger(limit) && limit >= 1 && limit <= DISCOVERY_MAINTENANCE_MAX,
+    'DISCOVERY_MAINTENANCE_LIMIT');
   return service.store.transaction(() => {
+    let budget = limit;
     const active = service.store.all(`SELECT * FROM discovery_situations WHERE partner_id=?
-      AND status IN ('OBSERVING','CANDIDATE') ORDER BY updated_at,id LIMIT ?`, service.config.partnerId, DISCOVERY_MAX_ACTIVE_SITUATIONS);
+      AND status IN ('OBSERVING','CANDIDATE') ORDER BY updated_at,id LIMIT ?`, service.config.partnerId, limit);
     const pending = service.store.all(`SELECT DISTINCT COALESCE(json_extract(s.payload_json,'$.source_id'),'') AS source_ref,
         CAST(p.payload_json->>'$.source_event_id' AS INTEGER) AS source_event_id
       FROM events p
@@ -237,21 +242,28 @@ export function invalidateRevokedDiscoverySources(service) {
         AND s.id=CAST(p.payload_json->>'$.source_event_id' AS INTEGER)
       WHERE p.partner_id=? AND p.kind=?
         AND NOT EXISTS (SELECT 1 FROM events a WHERE a.partner_id=p.partner_id AND a.kind=?
-          AND a.payload_json->>'$.source_event_id'=p.payload_json->>'$.source_event_id')`,
-    service.config.partnerId, DISCOVERY_PENDING, DISCOVERY_APPLIED);
+          AND a.payload_json->>'$.source_event_id'=p.payload_json->>'$.source_event_id')
+      ORDER BY p.id LIMIT ?`,
+    service.config.partnerId, DISCOVERY_PENDING, DISCOVERY_APPLIED, limit);
     const sourceRefs = new Set([...active.map(row => row.source_ref), ...pending.map(row => row.source_ref)]);
     const revoked = new Set([...sourceRefs].filter(sourceRef => sourceAccessReadiness(service, sourceRef).reason === 'SOURCE_NOT_ALLOWED'));
     let count = 0;
     for (const row of active) {
+      if (!budget) break;
       if (revoked.has(row.source_ref)) {
         markStale(service, row, 'SOURCE_REVOKED');
         count++;
+        budget--;
       }
     }
     for (const row of pending) {
-      if (revoked.has(row.source_ref))
+      if (!budget) break;
+      if (revoked.has(row.source_ref)) {
         record(service, DISCOVERY_APPLIED, { source_event_id: String(row.source_event_id),
           stage: 'source_projection', projection_status: 'source_revoked' });
+        count++;
+        budget--;
+      }
     }
     return count;
   });
@@ -668,9 +680,11 @@ export function ensureDiscoveryApplied(service, sourceEventId) {
 
 export function reconcileDiscoveryPending(service, limit = 50) {
   check(Number.isInteger(limit) && limit >= 1 && limit <= 100, 'DISCOVERY_RECONCILE_LIMIT');
-  invalidateRevokedDiscoverySources(service);
-  if (service.config.discovery?.enabled !== true) return { processed: 0, failed: 0, deferred: 0 };
-  const sourceLimit = Math.min(1000, Math.max(limit * 4, limit));
+  const reserveNormalSlot = service.config.discovery?.enabled === true && limit > 1 ? 1 : 0;
+  const maintained = invalidateRevokedDiscoverySources(service, limit - reserveNormalSlot);
+  const budget = Math.max(0, limit - maintained);
+  if (service.config.discovery?.enabled !== true || budget === 0) return { processed: 0, failed: 0, deferred: 0 };
+  const sourceLimit = Math.min(1000, Math.max(budget * 4, budget));
   const sourceRefRows = (after, take, before = null) => {
     const predicates = [], params = [service.config.partnerId, DISCOVERY_PENDING, DISCOVERY_APPLIED];
     if (after !== null) { predicates.push('source_ref > ?'); params.push(after); }
@@ -721,12 +735,13 @@ export function reconcileDiscoveryPending(service, limit = 50) {
     if (!access.current && access.reason !== 'SOURCE_NOT_ALLOWED') { deferred += rows.length; continue; }
     if (rows.length) queues.push({ rows, index: 0 });
   }
-  let processed = 0, failed = 0;
-  while (processed + failed < limit) {
+  let processed = 0, failed = 0, attempts = 0;
+  while (attempts < budget) {
     let progressed = false;
     for (const queue of queues) {
-      if (processed + failed >= limit || queue.index >= queue.rows.length) continue;
+      if (attempts >= budget || queue.index >= queue.rows.length) continue;
       const row = queue.rows[queue.index++];
+      attempts++;
       try {
         const result = ensureDiscoveryApplied(service, String(row.source_event_id));
         if (result.status === 'deferred') deferred++;
