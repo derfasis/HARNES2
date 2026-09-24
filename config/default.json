@@ -52,5 +52,12 @@
   "partnerId": "partner-001",
   "engagement": {
     "enabled": false
+  },
+  "discovery": {
+    "enabled": false,
+    "maxEvidence": 20,
+    "ttlSeconds": 604800,
+    "maxOpenSituations": 100,
+    "purpose": "Assess the bounded public source situation for operator review only."
   }
 }

@@ -1,7 +1,9 @@
 // No Telegram client, credentials, network, send API or model is imported here.
 // This is a bounded adapter-facing channel difference contract, NOT raw MTProto.
 import { ensure, now } from '../errors.mjs';
-import { automaticBoundary, digest, ingestSource, finishSource, sourceRows, sourceCheckpoint, SOURCE_CHECKPOINT_CHANNEL, validateSourceCheckpoint } from '../source-ingestion.mjs';
+import { automaticBoundary, digest, ingestSource, finishSource, sourceRows, sourceCheckpoint, sourceAllowlist, SOURCE_CHECKPOINT_CHANNEL, validateSourceCheckpoint } from '../source-ingestion.mjs';
+import { markDiscoveryPending } from '../discovery.mjs';
+import { validateTelegramSources } from '../config.mjs';
 
 const UPDATE = 'source.telegram.update';
 const TOMBSTONE = 'source.telegram.tombstone';
@@ -26,14 +28,13 @@ function fields(value, keys) {
 }
 function policy(service, sourceId) {
   automaticBoundary(service);
-  const all = service.config.opportunity.telegramSources ?? [];
-  check(Array.isArray(all), 'INVALID_TELEGRAM_SOURCE_POLICY');
+  const all = validateTelegramSources(service.config);
   const matches = all.filter(s => s.sourceId === sourceId);
   check(matches.length === 1, 'TELEGRAM_SOURCE_NOT_CONFIGURED');
   const p = matches[0];
   fields(p, ['sourceId','accountId','channelId','sourceKind','processingBasis','maxLagSeconds']);
   check(numericId(p.accountId) && numericId(p.channelId) && p.sourceId === `telegram:channel:${p.channelId}`
-    && service.config.opportunity.allowedSourceRefs.includes(p.sourceId), 'TELEGRAM_SOURCE_SCOPE');
+    && sourceAllowlist(service).includes(p.sourceId), 'TELEGRAM_SOURCE_SCOPE');
   check(['sanitized_fixture','live_snapshot'].includes(p.sourceKind), 'INVALID_TELEGRAM_SOURCE_KIND');
   check(typeof p.processingBasis === 'string' && p.processingBasis.trim().length > 0
     && p.processingBasis.length <= 1000, 'PROCESSING_AUTHORIZATION_REQUIRED');
@@ -155,6 +156,7 @@ function saveMessage(service,p,m,pts,ptsCount,recovery=null) {
   check(!old || old.author_id===normalized.author_id, 'TELEGRAM_AUTHOR_IDENTITY_CHANGED');
   if(recovery && old && digest(old)===digest({...normalized,version:old.version}))return;
   const saved=ingestSource(service,normalized);
+  if (saved.disposition === 'registered') markDiscoveryPending(service,saved.source_event_id);
   proof(service,p,saved.source_event_id,{kind:'native_event',...recovery,pts,pts_count:ptsCount,content_fingerprint:digest(m)});
   return saved;
 }
@@ -184,6 +186,7 @@ function saveUpdate(service,p,u,recovery=null) {
       if (previous && previous.operation !== 'delete') {
         const {unsupported,...material}=previous;
         const saved=ingestSource(service,{...material,version:Math.max(u.pts,previous.version+1),operation:'delete',text:null});
+        if (saved.disposition === 'registered') markDiscoveryPending(service,saved.source_event_id);
         proof(service,p,saved.source_event_id,{kind:'native_event',...recovery,pts:u.pts,pts_count:u.pts_count,operation:'delete'});
       }
     }
@@ -321,6 +324,7 @@ function reconcile(service,p,s,page) {
     if(old && !identical)check(oldProof?.kind==='reconciled_snapshot' && page.to_pts>oldProof.watermark_pts
       && m.edit_date!=null,'TELEGRAM_SNAPSHOT_CONFLICT');
     const saved=identical ? {source_event_id:old.event_id} : ingestSource(service,normalized);
+    if (!identical) markDiscoveryPending(service,saved.source_event_id);
     // Preserve native provenance for an identical native-backed version.
     if(!identical || oldProof?.kind==='reconciled_snapshot')proof(service,p,saved.source_event_id,
       {kind:'reconciled_snapshot',message_id:normalized.message_id,from_pts:page.from_pts,

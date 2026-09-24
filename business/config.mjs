@@ -8,6 +8,44 @@ export const readJson = file => JSON.parse(fs.readFileSync(file, 'utf8').replace
 const merge = (a, b) => Object.fromEntries([...new Set([...Object.keys(a), ...Object.keys(b)])].map(key => [key,
   b[key] && typeof b[key] === 'object' && !Array.isArray(b[key]) && a[key] && typeof a[key] === 'object'
     ? merge(a[key], b[key]) : b[key] === undefined ? a[key] : b[key]]));
+export function validateAllowedSourceRefs(config) {
+  const refs = config.opportunity?.allowedSourceRefs;
+  if (!Array.isArray(refs) || refs.some(ref => typeof ref !== 'string')) {
+    const error = new Error('Invalid opportunity.allowedSourceRefs');
+    error.code = 'INVALID_SOURCE_ALLOWLIST';
+    throw error;
+  }
+  return refs;
+}
+export function validateTelegramSources(config) {
+  const sources = config.opportunity?.telegramSources;
+  if (!Array.isArray(sources)) {
+    const error = new Error('Invalid opportunity.telegramSources');
+    error.code = 'INVALID_TELEGRAM_SOURCES';
+    throw error;
+  }
+  const refs = validateAllowedSourceRefs(config), seen = new Set();
+  for (const source of sources) {
+    const keys = ['accountId', 'channelId', 'maxLagSeconds', 'processingBasis', 'sourceId', 'sourceKind'];
+    const valid = source && typeof source === 'object' && !Array.isArray(source)
+      && Object.keys(source).length === keys.length && Object.keys(source).every(key => keys.includes(key))
+      && typeof source.sourceId === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,149}$/.test(source.sourceId)
+      && typeof source.accountId === 'string' && /^[1-9][0-9]{0,18}$/.test(source.accountId)
+      && typeof source.channelId === 'string' && /^[1-9][0-9]{0,18}$/.test(source.channelId)
+      && source.sourceId === `telegram:channel:${source.channelId}`
+      && ['sanitized_fixture', 'live_snapshot'].includes(source.sourceKind)
+      && typeof source.processingBasis === 'string' && source.processingBasis.trim().length > 0 && source.processingBasis.length <= 1000
+      && Number.isInteger(source.maxLagSeconds) && source.maxLagSeconds >= 1 && source.maxLagSeconds <= 3600
+      && refs.includes(source.sourceId) && !seen.has(source.sourceId);
+    if (!valid) {
+      const error = new Error('Invalid opportunity.telegramSources');
+      error.code = 'INVALID_TELEGRAM_SOURCES';
+      throw error;
+    }
+    seen.add(source.sourceId);
+  }
+  return sources;
+}
 export function loadConfig() {
   const file = path.join(ROOT, 'config/local.json');
   const cfg = merge(readJson(path.join(ROOT, 'config/default.json')), fs.existsSync(file) ? readJson(file) : {});
@@ -33,7 +71,10 @@ export function loadConfig() {
     if (url.username || url.password || url.search || url.hash || !(url.protocol === 'https:' || (url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)))) throw new Error('Model URL must use HTTPS, or local HTTP, without credentials/query.');
   }
   if (typeof cfg.engagement?.enabled !== 'boolean') throw new Error('Invalid engagement.enabled');
+  if (typeof cfg.discovery?.enabled !== 'boolean') throw new Error('Invalid discovery.enabled');
   if (typeof cfg.opportunity?.automatic !== 'boolean') throw new Error('Invalid opportunity.automatic');
+  validateAllowedSourceRefs(cfg);
+  validateTelegramSources(cfg);
   if (cfg.opportunity.automatic && (cfg.runtime.enabled !== false || cfg.telegram.enabled !== false || cfg.telegram.liveSending !== false))
     throw new Error('Automatic opportunity prerequisite requires runtime and Telegram disabled.');
   return cfg;

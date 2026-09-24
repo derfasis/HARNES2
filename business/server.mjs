@@ -4,9 +4,10 @@ import path from 'node:path';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import Ajv from 'ajv';
-import { loadConfig, ROOT, DATA, readJson, runtimeReadiness } from './config.mjs';
+import { loadConfig, validateAllowedSourceRefs, validateTelegramSources, ROOT, DATA, readJson, runtimeReadiness } from './config.mjs';
 import { Store } from './store.mjs';
 import { BusinessService } from './service.mjs';
+import { invalidateRevokedDiscoverySources } from './discovery.mjs';
 import { HermesAdapter } from './runtime.mjs';
 import { Scheduler } from './scheduler.mjs';
 import { TelegramChannel } from './channels/telegram.mjs';
@@ -27,6 +28,8 @@ async function readBody(req) {
 }
 export async function start({ config = loadConfig(), directory = DATA } = {}) {
   ensure(config.server.host === '127.0.0.1', 'Only loopback dashboard binding is supported', 409);
+  validateAllowedSourceRefs(config);
+  validateTelegramSources(config);
   const store = new Store(directory), service = new BusinessService(store,config);
   ensure(service.partner(), 'partnerId не совпадает с профилем', 500);
   const operatorToken = randomBytes(32).toString('hex'), mcpToken = randomBytes(32).toString('hex'), runTokens = new Map();
@@ -69,6 +72,7 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
         knowledge:fs.readdirSync(path.join(ROOT,'partner/knowledge')).filter(f=>f.endsWith('.json')).map(f=>readJson(path.join(ROOT,'partner/knowledge',f))),
         configuration:{opportunity_automatic:config.opportunity.automatic===true,runtime_enabled:config.runtime.enabled,provider:config.runtime.provider,model:config.runtime.model,base_url:config.runtime.baseUrl, max_runs_per_day:config.runtime.maxRunsPerDay,daily_budget_usd:config.runtime.dailyBudgetUsd,timezone:config.scheduler.timezone},
         release:{version:'0.1.0-engagement-v1',tests:'see_docs_PERSISTENT_ENGAGEMENT_VALIDATION',model_validation:'controlled_disposable_smoke_pass'} });
+      if (req.method === 'GET' && url.pathname.startsWith('/api/discovery/')) return send(200,service.discoveryDetail(decodeURIComponent(url.pathname.split('/').at(-1))));
       if (req.method === 'GET' && url.pathname.startsWith('/api/opportunity-captures/')) return send(200,service.opportunityCapture(decodeURIComponent(url.pathname.split('/').at(-1))));
       if (req.method === 'GET' && url.pathname === '/api/opportunities') return send(200,service.opportunityReviews({
         status:url.searchParams.get('status') ?? 'pending', limit:Number(url.searchParams.get('limit') ?? 50), offset:Number(url.searchParams.get('offset') ?? 0) }));
@@ -109,6 +113,7 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
   catch (error) {store.close();throw error;}
   // Recovery occurs only after acquiring this server port; a duplicate launch cannot interrupt the live instance.
   store.recover();
+  invalidateRevokedDiscoverySources(service);
   fs.mkdirSync(path.join(directory,'runtime'),{recursive:true});
   fs.writeFileSync(path.join(directory,'runtime/mcp-connection.json'),JSON.stringify({url:`http://127.0.0.1:${config.server.port}`,token:mcpToken}),{mode:0o600});
   fs.writeFileSync(path.join(directory,'runtime/service.json'),JSON.stringify({pid:process.pid,port:config.server.port,started_at:new Date().toISOString()}));

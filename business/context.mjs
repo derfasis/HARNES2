@@ -14,7 +14,7 @@ export function searchExperience(service, query = '', conversationId = null, lim
   return service.store.all(`SELECT ${projection} FROM lessons_fts JOIN lessons l ON l.rowid=lessons_fts.rowid WHERE l.partner_id=? AND l.status='active'${scope} AND lessons_fts MATCH ? ORDER BY rank LIMIT ?`, ...params, match, limit);
 }
 export function contextFor(service, conversationId = null, task = null) {
-  ensure(task?.kind !== 'opportunity_review', 'Opportunity review is not agent context', 409, 'candidate_not_executable');
+  ensure(!['opportunity_review', 'discovery_review'].includes(task?.kind), 'Review card is not agent context', 409, 'candidate_not_executable');
   const profile = readJson(path.join(ROOT, 'partner/profile.json'));
   const identity = fs.readFileSync(path.join(ROOT, 'partner/identity.md'), 'utf8');
   const behavioralExamples = fs.readFileSync(path.join(ROOT, 'partner/behavioral_examples.md'), 'utf8');
@@ -42,10 +42,10 @@ export function contextFor(service, conversationId = null, task = null) {
     }
     context.messages = messages.map(m => ({ ...m, text: m.text.slice(0,service.config.context.maxMessageCharacters), truncated: m.text.length > service.config.context.maxMessageCharacters }));
     context.facts = service.store.all("SELECT id,text,source_message_id,source_ref,status FROM facts WHERE person_id=? AND status='confirmed' ORDER BY created_at DESC LIMIT 100", person.id);
-    context.tasks = service.store.all("SELECT id,kind,title,instructions,due_at,status,evidence FROM tasks WHERE conversation_id=? AND kind<>'opportunity_review' AND status IN ('pending','proposed','running') ORDER BY due_at LIMIT 30", conv.id);
+    context.tasks = service.store.all("SELECT id,kind,title,instructions,due_at,status,evidence FROM tasks WHERE conversation_id=? AND kind NOT IN ('opportunity_review','discovery_review') AND status IN ('pending','proposed','running') ORDER BY due_at LIMIT 30", conv.id);
     context.lessons = searchExperience(service, `${task?.instructions ?? ''} ${messages.at(-1)?.text ?? ''}`, conv.id, service.config.context.maxLessons);
   } else {
-    context.work = service.store.all("SELECT t.id,t.conversation_id,t.kind,t.title,t.due_at,t.status FROM tasks t WHERE t.partner_id=? AND t.kind<>'opportunity_review' AND t.status IN ('pending','proposed','running','interrupted') ORDER BY t.due_at LIMIT 100", service.config.partnerId);
+    context.work = service.store.all("SELECT t.id,t.conversation_id,t.kind,t.title,t.due_at,t.status FROM tasks t WHERE t.partner_id=? AND t.kind NOT IN ('opportunity_review','discovery_review') AND t.status IN ('pending','proposed','running','interrupted') ORDER BY t.due_at LIMIT 100", service.config.partnerId);
     context.contacts = service.store.all('SELECT c.id AS conversation_id,p.name,p.source,p.suppressed,c.ownership,c.stage FROM conversations c JOIN persons p ON p.id=c.person_id WHERE p.partner_id=? ORDER BY c.created_at DESC LIMIT 100', service.config.partnerId);
     context.lessons = searchExperience(service, task?.instructions ?? '', null, service.config.context.maxLessons);
   }
