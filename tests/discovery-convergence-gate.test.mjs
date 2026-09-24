@@ -12,6 +12,7 @@ import {
   reconcileDiscoveryPending,
 } from '../business/discovery.mjs';
 import { BusinessService } from '../business/service.mjs';
+import { Scheduler } from '../business/scheduler.mjs';
 import {
   digest,
   sourceCheckpoint,
@@ -244,37 +245,41 @@ test('E1 edit or delete makes an approved decision durably stale', async (t) => 
   }
 });
 
-test('E2 source revocation remains terminal across restart and re-allow', async (t) => {
-  const h = harness(t);
-  const request = id();
-  const fixture = await approvedCandidate(h, source(), request);
-  const taskStatus = h.store.get('SELECT status FROM tasks WHERE id=?', fixture.review.review_task_id).status;
-  h.settings.opportunity.allowedSourceRefs = [];
-  h.restart();
-  invalidateRevokedDiscoverySources(h.service);
-  h.settings.opportunity.allowedSourceRefs = [SOURCE_ID];
-  h.restart();
+test('E2 source revocation remains terminal across enabled and disabled startup', async (t) => {
+  for (const disabledAtStartup of [false, true]) {
+    const h = harness(t);
+    const request = id();
+    const fixture = await approvedCandidate(h, source(), request);
+    const taskStatus = h.store.get('SELECT status FROM tasks WHERE id=?', fixture.review.review_task_id).status;
+    h.settings.opportunity.allowedSourceRefs = [];
+    h.settings.discovery.enabled = !disabledAtStartup;
+    h.restart();
+    assert.ok(invalidateRevokedDiscoverySources(h.service) >= 1);
+    h.settings.opportunity.allowedSourceRefs = [SOURCE_ID];
+    h.settings.discovery.enabled = true;
+    h.restart();
 
-  const current = h.store.get('SELECT * FROM discovery_situations WHERE id=?', fixture.review.situation_id);
-  assert.equal(current.status, 'STALE');
-  const stale = h.store.get(
-    "SELECT payload_json FROM events WHERE kind='discovery.situation.stale' AND json_extract(payload_json,'$.situation_id')=? ORDER BY id DESC LIMIT 1",
-    current.id,
-  );
-  assert.equal(JSON.parse(stale.payload_json).reason, 'SOURCE_REVOKED');
-  assert.equal(h.detail(current.id).freshness.fresh, false);
-  assert.equal(h.store.get('SELECT status FROM tasks WHERE id=?', fixture.review.review_task_id).status, taskStatus);
-  assert.equal(eventCount(h, 'discovery.review.approved'), 1);
+    const current = h.store.get('SELECT * FROM discovery_situations WHERE id=?', fixture.review.situation_id);
+    assert.equal(current.status, 'STALE');
+    const stale = h.store.get(
+      "SELECT payload_json FROM events WHERE kind='discovery.situation.stale' AND json_extract(payload_json,'$.situation_id')=? ORDER BY id DESC LIMIT 1",
+      current.id,
+    );
+    assert.equal(JSON.parse(stale.payload_json).reason, 'SOURCE_REVOKED');
+    assert.equal(h.detail(current.id).freshness.fresh, false);
+    assert.equal(h.store.get('SELECT status FROM tasks WHERE id=?', fixture.review.review_task_id).status, taskStatus);
+    assert.equal(eventCount(h, 'discovery.review.approved'), 1);
 
-  const replay = await h.command('discovery.review', fixture.payload, { kind: 'operator' }, request);
-  assert.deepEqual(replay, fixture.approved);
-  assert.equal(h.store.get('SELECT revision FROM discovery_situations WHERE id=?', current.id).revision, current.revision);
-  assert.equal(eventCount(h, 'discovery.review.approved'), 1);
-  await assert.rejects(
-    h.command('discovery.review', fixture.payload, { kind: 'operator' }, id()),
-    { code: 'DISCOVERY_REVIEW_NOT_AVAILABLE' },
-  );
-  noContactEffects(h);
+    const replay = await h.command('discovery.review', fixture.payload, { kind: 'operator' }, request);
+    assert.deepEqual(replay, fixture.approved);
+    assert.equal(h.store.get('SELECT revision FROM discovery_situations WHERE id=?', current.id).revision, current.revision);
+    assert.equal(eventCount(h, 'discovery.review.approved'), 1);
+    await assert.rejects(
+      h.command('discovery.review', fixture.payload, { kind: 'operator' }, id()),
+      { code: 'DISCOVERY_REVIEW_NOT_AVAILABLE' },
+    );
+    noContactEffects(h);
+  }
 });
 
 test('E3 bootstrap context never becomes a Discovery trigger', async (t) => {
@@ -552,7 +557,7 @@ test('R4 replaying one source event produces one durable effect', async (t) => {
   noContactEffects(h);
 });
 
-test('U3 a corrupt pending Discovery review is not executable', async (t) => {
+test('U3 a corrupt pending Discovery review is excluded from context and Scheduler', async (t) => {
   const h = harness(t);
   const review = await candidate(h);
   h.store.run("UPDATE tasks SET status='pending' WHERE id=?", review.review_task_id);
@@ -568,7 +573,44 @@ test('U3 a corrupt pending Discovery review is not executable', async (t) => {
       { code: 'candidate_not_executable' },
     );
   }
+
+  const { mock } = await import('node:test');
+  const originalExists = fs.existsSync;
+  const exists = mock.method(fs, 'existsSync', (file) => {
+    const normalized = String(file).replaceAll('\\\\', '/');
+    return normalized.endsWith('.venv/Scripts/python.exe') || normalized.endsWith('.venv/bin/python')
+      ? true
+      : originalExists(file);
+  });
+  const priorKey = process.env.PARTNER_MODEL_API_KEY;
+  process.env.PARTNER_MODEL_API_KEY = 'synthetic-offline-scheduler';
+  Object.assign(h.settings.scheduler, { enabled: true, dailyPlanning: false });
+  Object.assign(h.settings.opportunity, { automatic: false });
+  Object.assign(h.settings.runtime, {
+    enabled: true,
+    model: 'offline-fixture',
+    baseUrl: 'https://offline.invalid',
+    dailyBudgetUsd: null,
+  });
+  t.after(() => {
+    exists.mock.restore();
+    if (priorKey === undefined) delete process.env.PARTNER_MODEL_API_KEY;
+    else process.env.PARTNER_MODEL_API_KEY = priorKey;
+  });
+
+  let runtimeCalls = 0;
+  const scheduler = new Scheduler(h.service, {
+    async run() {
+      runtimeCalls += 1;
+      throw new Error('A discovery review must never reach the runtime');
+    },
+    cancel() {},
+    close() {},
+  }, null, []);
+  await scheduler.tick();
+  assert.equal(runtimeCalls, 0);
   assert.equal(h.store.get('SELECT COUNT(*) AS n FROM runs').n, 0);
+  assert.equal(h.store.get('SELECT status FROM tasks WHERE id=?', review.review_task_id).status, 'pending');
   noContactEffects(h);
 });
 
@@ -615,14 +657,14 @@ test('GAP R2 limit=1 bounds every durable maintenance effect', async (t) => {
   noContactEffects(h);
 });
 
-async function createTarget(h, raw, { channel = 'manual', accountId = null } = {}) {
+async function createTarget(h, raw, { channel = 'manual', accountId = null, externalId = '12345' } = {}) {
   const person = await h.command('person.create', {
     name: `Synthetic target ${channel}`,
     source: 'Offline Discovery transfer fixture',
     permission: 'Legacy text is not typed consent',
     ...(channel === 'telegram' ? {
       channel,
-      external_id: '12345',
+      external_id: externalId,
       account_id: accountId,
     } : {}),
   });
@@ -787,5 +829,27 @@ test('GAP A3 typed reply grant must match person channel and account', async (t)
   const wrongChannel = await transferOutcome(channelHarness, channelFixture, channelTarget);
   if (!wrongChannel.rejected) failures.push('wrong_channel_grant');
 
-  assert.deepEqual(failures, [], 'A3 accepted a typed grant with a different channel or account');
+  const personRaw = source({ message_id: 'message:a3-wrong-person-conversation' });
+  const personHarness = harness(t);
+  const personFixture = await approvedCandidate(personHarness, personRaw);
+  const personTarget = await createTarget(personHarness, personRaw, {
+    channel: 'telegram',
+    accountId: 'account-A',
+    externalId: '12345',
+  });
+  const otherPersonTarget = await createTarget(personHarness, personRaw, {
+    channel: 'telegram',
+    accountId: 'account-A',
+    externalId: '12346',
+  });
+  personHarness.settings.opportunity.authorBindings = [{
+    source_id: personRaw.source_id,
+    author_id: personRaw.author_id,
+    conversation_id: personTarget.conversation_id,
+  }];
+  await grant(personHarness, otherPersonTarget.conversation_id);
+  const wrongPerson = await transferOutcome(personHarness, personFixture, personTarget);
+  if (!wrongPerson.rejected) failures.push('wrong_person_conversation_grant');
+
+  assert.deepEqual(failures, [], 'A3 accepted a typed grant with a different person, conversation, channel, or account');
 });
