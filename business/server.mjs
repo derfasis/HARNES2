@@ -26,6 +26,26 @@ async function readBody(req) {
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
   catch { throw new AppError('Некорректный JSON'); }
 }
+const REASON_STATES_QUERY = new Set(['limit','cursor']);
+const CURSOR_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+// Only the two agreed query options exist. An unknown or repeated option is refused rather than
+// ignored, so a dashboard can never believe it filtered something the server simply dropped.
+function discoveryReasonStatesQuery(url, service) {
+  const options = {};
+  for (const name of new Set(url.searchParams.keys())) {
+    const values = url.searchParams.getAll(name);
+    ensure(REASON_STATES_QUERY.has(name) && values.length === 1, 'Неизвестный параметр запроса', 400);
+    if (name === 'limit') {
+      ensure(/^[0-9]{1,3}$/.test(values[0]), 'Некорректный limit', 400);
+      options.limit = Number(values[0]);
+      ensure(options.limit >= 1 && options.limit <= 100, 'Некорректный limit', 400);
+    } else {
+      ensure(CURSOR_ID.test(values[0]), 'Некорректный cursor', 400);
+      options.cursor = values[0];
+    }
+  }
+  return service.discoveryReasonStates(options, { kind: 'operator' });
+}
 export async function start({ config = loadConfig(), directory = DATA } = {}) {
   ensure(config.server.host === '127.0.0.1', 'Only loopback dashboard binding is supported', 409);
   validateAllowedSourceRefs(config);
@@ -72,7 +92,12 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
         knowledge:fs.readdirSync(path.join(ROOT,'partner/knowledge')).filter(f=>f.endsWith('.json')).map(f=>readJson(path.join(ROOT,'partner/knowledge',f))),
         configuration:{opportunity_automatic:config.opportunity.automatic===true,runtime_enabled:config.runtime.enabled,provider:config.runtime.provider,model:config.runtime.model,base_url:config.runtime.baseUrl, max_runs_per_day:config.runtime.maxRunsPerDay,daily_budget_usd:config.runtime.dailyBudgetUsd,timezone:config.scheduler.timezone},
         release:{version:'0.1.0-engagement-v1',tests:'see_docs_PERSISTENT_ENGAGEMENT_VALIDATION',model_validation:'controlled_disposable_smoke_pass'} });
-      if (req.method === 'GET' && url.pathname.startsWith('/api/discovery/')) return send(200,service.discoveryDetail(decodeURIComponent(url.pathname.split('/').at(-1))));
+      if (url.pathname.startsWith('/api/discovery/')) {
+        // Drain the body before refusing, so the client sees 405 instead of a reset connection.
+        if (req.method !== 'GET') { for await (const _ of req) { /* discard */ } return send(405,{error:'Метод не поддерживается',code:'method_not_allowed'}); }
+        if (url.pathname === '/api/discovery/reason-states') return send(200,discoveryReasonStatesQuery(url,service));
+        return send(200,service.discoveryDetail(decodeURIComponent(url.pathname.split('/').at(-1))));
+      }
       if (req.method === 'GET' && url.pathname.startsWith('/api/opportunity-captures/')) return send(200,service.opportunityCapture(decodeURIComponent(url.pathname.split('/').at(-1))));
       if (req.method === 'GET' && url.pathname === '/api/opportunities') return send(200,service.opportunityReviews({
         status:url.searchParams.get('status') ?? 'pending', limit:Number(url.searchParams.get('limit') ?? 50), offset:Number(url.searchParams.get('offset') ?? 0) }));
