@@ -26,6 +26,20 @@ const DISCOVERY_MAX_ACTIVE_SITUATIONS = 1000;
 const DISCOVERY_MAX_EVIDENCE_ROWS = 100000;
 const CONTEXT_NONE = 'none:';
 const CONTEXT_THREAD_PREFIX = 'thread:';
+const ISO_INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(Z|[+-]\d{2}:\d{2})$/;
+// A durable wait deadline must name a real calendar instant. Node would otherwise
+// silently roll 2026-02-30 over into March, so the wall components are round-tripped.
+function parseIsoInstant(value) {
+  const parts = typeof value === 'string' ? ISO_INSTANT.exec(value) : null;
+  if (!parts) return null;
+  const [, year, month, day, hour, minute, second] = parts;
+  const wall = new Date(Date.UTC(+year, +month - 1, +day, +hour, +minute, +second));
+  if (Number.isNaN(wall.getTime()) || wall.getUTCFullYear() !== +year || wall.getUTCMonth() !== +month - 1
+    || wall.getUTCDate() !== +day || wall.getUTCHours() !== +hour || wall.getUTCMinutes() !== +minute
+    || wall.getUTCSeconds() !== +second) return null;
+  const at = new Date(value);
+  return Number.isNaN(at.getTime()) ? null : at;
+}
 
 function contextKeyForThread(threadId) {
   return threadId === null || threadId === undefined ? CONTEXT_NONE : `${CONTEXT_THREAD_PREFIX}${threadId}`;
@@ -382,6 +396,30 @@ function cancelReviews(service, situationId) {
   service.config.partnerId, situationId);
 }
 
+function latestAssessment(service, situationId) {
+  const row = service.store.get("SELECT id,payload_json FROM events WHERE partner_id=? AND kind='discovery.assessment' AND json_extract(payload_json,'$.situation_id')=? ORDER BY id DESC LIMIT 1",
+    service.config.partnerId, situationId);
+  return row ? { id: String(row.id), ...parse(row.payload_json) } : null;
+}
+
+function lastReasonTransition(service, situationId) {
+  const row = service.store.get("SELECT id,payload_json FROM events WHERE partner_id=? AND kind='discovery.reason.transitioned' AND json_extract(payload_json,'$.situation_id')=? ORDER BY id DESC LIMIT 1",
+    service.config.partnerId, situationId);
+  return row ? { id: String(row.id), ...parse(row.payload_json) } : null;
+}
+
+function reasonGate(service, row) {
+  const transition = lastReasonTransition(service, row.id);
+  if (!transition || transition.evidence_fingerprint !== evidenceFingerprint(service, row.id)) return;
+  if (transition.decision === 'IGNORE') check(false, 'DISCOVERY_REASON_IGNORED');
+  if (transition.decision === 'WAIT') {
+    const wait = transition.wait;
+    const blocked = wait?.kind === 'evidence_change'
+      || (wait?.kind === 'deadline' && Date.parse(wait.at) > Date.now());
+    check(!blocked, 'DISCOVERY_REASON_WAITING');
+  }
+}
+
 function markStale(service, row, reason, { cancelReview = true } = {}) {
   service.store.run("UPDATE discovery_situations SET status='STALE',revision=revision+1,updated_at=? WHERE id=?", now(), row.id);
   if (cancelReview) cancelReviews(service, row.id);
@@ -559,6 +597,7 @@ function assessment(service, p) {
   check(state.fresh, `DISCOVERY_STALE:${state.reasons.join(',')}`);
   check(p.expected_revision === row.revision, 'DISCOVERY_REVISION_CONFLICT');
   check(p.expected_evidence_fingerprint === evidenceFingerprint(service, row.id), 'DISCOVERY_EVIDENCE_FINGERPRINT_CONFLICT');
+  reasonGate(service, row);
   check(['OBSERVE', 'DISMISS', 'CANDIDATE'].includes(p.decision), 'DISCOVERY_DECISION_INVALID');
   const evidenceIds = textList(p.evidence_event_ids, 100, 150);
   check(evidenceIds.length > 0, 'DISCOVERY_ASSESSMENT_EVIDENCE_REQUIRED');
@@ -596,6 +635,57 @@ function assessment(service, p) {
   return { situation_id: row.id, assessment_id: assessmentId, opening_proposal_id: openingId,
     review_task_id: review?.task_id ?? null, status: updated.status, revision: updated.revision,
     executable: false, contact_permission: false, allowed_effects: [] };
+}
+
+function reasonTransition(service, p, actor) {
+  operator(actor);
+  const limits = config(service);
+  invalidateChangedOffers(service, limits.offerFingerprint, limits.purpose);
+  fields(p, ['situation_id', 'assessment_id', 'expected_revision', 'expected_evidence_fingerprint',
+    'decision', 'reason', 'wait']);
+  const row = situation(service, p.situation_id);
+  const fingerprint = evidenceFingerprint(service, row.id);
+  const state = fresh(service, row);
+  check(state.fresh, `DISCOVERY_STALE:${state.reasons.join(',')}`);
+  check(p.expected_revision === row.revision, 'DISCOVERY_REVISION_CONFLICT');
+  check(p.expected_evidence_fingerprint === fingerprint, 'DISCOVERY_EVIDENCE_FINGERPRINT_CONFLICT');
+  const assessment = latestAssessment(service, row.id);
+  check(assessment && assessment.id === String(p.assessment_id), 'DISCOVERY_REASON_ASSESSMENT_STALE');
+  check(assessment.evidence_fingerprint === fingerprint, 'DISCOVERY_REASON_FINGERPRINT_CONFLICT');
+  check(assessment.result_revision === row.revision, 'DISCOVERY_REASON_ASSESSMENT_STALE');
+  check(['WAIT', 'IGNORE', 'STOP'].includes(p.decision), 'DISCOVERY_REASON_DECISION_INVALID');
+  const reasonText = requiredText(p.reason, 'reason', 4000);
+  let wait = null;
+  if (p.decision === 'WAIT') {
+    check(p.wait && typeof p.wait === 'object' && !Array.isArray(p.wait), 'DISCOVERY_WAIT_REQUIRED');
+    const kind = p.wait.kind;
+    check(kind === 'deadline' || kind === 'evidence_change', 'DISCOVERY_WAIT_INVALID');
+    if (kind === 'evidence_change') {
+      check(Object.keys(p.wait).length === 1, 'DISCOVERY_WAIT_INVALID');
+      wait = { kind };
+    } else {
+      // Durable wait deadlines are stored and compared across restarts and hosts,
+      // so only an explicit ISO-8601 instant is accepted and it is stored canonically.
+      const at = Object.keys(p.wait).length === 2 ? parseIsoInstant(p.wait.at) : null;
+      check(at && at.getTime() > Date.now(), 'DISCOVERY_WAIT_INVALID');
+      wait = { kind, at: at.toISOString() };
+    }
+  } else {
+    check(p.wait === undefined, 'DISCOVERY_WAIT_NOT_ALLOWED');
+  }
+  cancelReviews(service, row.id);
+  const basisRevision = row.revision;
+  const updated = touch(service, row, p.decision === 'STOP' ? 'DISMISSED' : 'OBSERVING');
+  record(service, 'discovery.reason.transitioned', {
+    situation_id: row.id, assessment_id: assessment.id,
+    assessment_fingerprint: assessment.assessment_fingerprint, basis_revision: basisRevision,
+    result_revision: updated.revision, evidence_fingerprint: fingerprint, decision: p.decision,
+    reason: reasonText, wait,
+  });
+  return { situation_id: row.id, assessment_id: assessment.id, decision: p.decision, wait,
+    status: p.decision === 'STOP' ? 'STOPPED' : updated.status, revision: updated.revision,
+    storage_status: updated.status, executable: false, contact_permission: false,
+    allowed_effects: [] };
 }
 
 function review(service, p, actor) {
@@ -690,6 +780,9 @@ function detail(service, situationId) {
     service.config.partnerId, row.id);
   const assessments = service.store.all("SELECT id,created_at,payload_json FROM events WHERE partner_id=? AND kind='discovery.assessment' AND json_extract(payload_json,'$.situation_id')=? ORDER BY id",
     service.config.partnerId, row.id).map(event => ({ id: String(event.id), ...parse(event.payload_json) }));
+  const lastTransition = lastReasonTransition(service, row.id);
+  const logicalStatus = row.status === 'DISMISSED' && lastTransition?.decision === 'STOP'
+    ? 'STOPPED' : row.status;
   for (const assessment of assessments) {
     const reasons = [...state.reasons];
     if (staleEvent) reasons.push(parse(staleEvent.payload_json).reason);
@@ -713,7 +806,8 @@ function detail(service, situationId) {
     service.config.partnerId, row.id).map(event => ({ id: String(event.id), ...parse(event.payload_json) }));
   const reviewTasks = service.store.all("SELECT id,status,created_at FROM tasks WHERE partner_id=? AND kind='discovery_review' AND evidence IN (SELECT id FROM events WHERE partner_id=? AND kind='discovery.assessment' AND json_extract(payload_json,'$.situation_id')=?) ORDER BY created_at",
     service.config.partnerId, service.config.partnerId, row.id);
-  return { ...row, evidence, assessments, opening_proposals: openingProposals, review_tasks: reviewTasks,
+  return { ...row, status: logicalStatus, storage_status: row.status, evidence, assessments,
+    opening_proposals: openingProposals, review_tasks: reviewTasks,
     evidence_fingerprint: fingerprint, freshness: state,
     executable: false, contact_permission: false, allowed_effects: [] };
 }
@@ -887,6 +981,7 @@ export function discoveryCommand(service, action, payload, actor) {
   if (action === 'discovery.observe') return observe(service, payload, actor);
   operator(actor);
   if (action === 'discovery.assess') return assessment(service, payload);
+  if (action === 'discovery.reason') return reasonTransition(service, payload, actor);
   if (action === 'discovery.review') return review(service, payload, actor);
   return transfer(service, payload);
 }
