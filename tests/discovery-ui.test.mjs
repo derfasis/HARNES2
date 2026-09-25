@@ -39,7 +39,10 @@ function ui({ list, detail, listStatus = 200, detailStatus = 200, detailOrder = 
     globalThis.selectSituation=selectSituation;
     globalThis.nextDiscoveryPage=nextDiscoveryPage;
     globalThis.discoveryTab=discoveryTab;
+    globalThis.act=act;
+    globalThis.render=()=>{};
     globalThis.discoveryDetailPanel=discoveryDetailPanel;
+    globalThis.currentSelection=()=>discoverySelection;
     globalThis.calls=[];
     globalThis.staleDetail=null;
     globalThis.listStatus=${listStatus};
@@ -199,4 +202,18 @@ test('3E the Discovery tab exposes no action that could write anything', async (
   }
   assert.equal(/data-do="[^"]*discovery(?!-select|-next)[^"]*"/.test(html), false);
   assert.equal(html.includes('/api/commands'), false);
+});
+
+test('3E the wired click actions read only and never fall through to a command', async () => {
+  const ctx = ui({ list: { items: [reasonRow()], next_cursor: 'cursor-2' }, detail: situation() });
+  await ctx.loadDiscovery();
+  await ctx.act('discovery-select', 'sit-1');
+  assert.equal(ctx.currentSelection(), 'sit-1');
+  assert.deepEqual(ctx.calls.map((call) => call.route), ['/api/discovery/reason-states', '/api/discovery/sit-1']);
+  await ctx.act('discovery-next');
+  assert.equal(ctx.calls[2].route, '/api/discovery/reason-states?cursor=cursor-2');
+  assert.equal(ctx.calls.some((call) => call.method === 'POST'), false);
+  assert.equal(ctx.calls.some((call) => call.route === '/api/commands'), false);
+  // A viewer action must not reach the shared refresh tail either, which would claim "Сохранено".
+  assert.equal(ctx.commands, undefined);
 });

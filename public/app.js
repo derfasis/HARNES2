@@ -191,6 +191,9 @@ function modal(title,content,onSubmit){
 const convOptions=()=>[['','Общая работа партнёра'],...state.conversations.map(c=>[c.id,c.name])];
 const convPayload=()=>({conversation_id:selected});
 async function act(action,itemId,extra){
+  // Discovery is a viewer: both branches only read, and neither reaches command().
+  if(action==='discovery-select'){await selectSituation(itemId);render();return;}
+  if(action==='discovery-next'){await nextDiscoveryPage();render();return;}
   if(action.startsWith('eng-')){
     const e=(detail?.engagements??[]).find(e=>!['CLOSED','STOPPED'].includes(e.status));
     const ep={engagement_id:e?.id};
