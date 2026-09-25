@@ -45,12 +45,20 @@ function overview(){
 // nothing but the two GET endpoints. There is deliberately no command path here.
 let discoveryList=null,discoveryError=null,discoveryDetail=null,discoverySelection=null,discoveryDetailError='',discoveryCursorStack=[];
 let discoveryQueue=null;
+// The queue pages on its own cursor: a hundred actionable situations must not hide the rest.
+async function loadDiscoveryQueue(cursor) {
+  discoveryQueue=await api(cursor?`/api/discovery/decisions?cursor=${encodeURIComponent(cursor)}`:'/api/discovery/decisions');
+}
+async function nextDiscoveryQueue() {
+  const cursor=discoveryQueue?.next_cursor; if(!cursor) return;
+  await loadDiscoveryQueue(cursor); render();
+}
 async function loadDiscovery() {
   discoveryCursorStack=[];
   try {
     discoveryList=await api('/api/discovery/reason-states');
     // The situations an operator can still act on. The reason-state list alone cannot reach them.
-    discoveryQueue=await api('/api/discovery/decisions');
+    await loadDiscoveryQueue();
     discoveryError=null;
   } catch(error) { discoveryList=null; discoveryQueue=null; discoveryError=error.message; }
   // The open situation is re-read too, so a card that went stale, revoked, or unavailable is never
@@ -90,7 +98,7 @@ function discoveryTab(){
   const queueRows=queue.map(item=>`<button class="person-card ${item.situation_id===discoverySelection?'active':''}" data-do="discovery-select" data-id="${esc(item.situation_id)}">
     <strong>${esc(item.situation_id)}</strong><small>${item.review_available?'Ждёт ревью':''}${item.review_available&&item.reason_available?' · ':''}${item.reason_available?'Можно принять решение':''}</small>
     <small>${esc(freshnessLine(item.freshness))}</small></button>`).join('');
-  return `${queue.length?panel('Discovery: требуют решения',`<div class="person-list">${queueRows}</div>`):''}
+  return `${queue.length||discoveryQueue?.next_cursor?panel('Discovery: требуют решения',`<div class="person-list">${queueRows}</div>${discoveryQueue?.next_cursor?button('Далее','discovery-queue-next'):''}`):''}
     ${panel('Discovery: состояния решений',rows?`<div class="person-list">${rows}</div>`:empty('Нет заблокированных ситуаций','Здесь появляются ситуации, ожидающие решения. Ничего менять из этого экрана нельзя.'),discoveryList?.next_cursor?button('Далее','discovery-next'):'')}
     ${discoveryDetailPanel()}`;
 }
@@ -281,6 +289,7 @@ async function act(action,itemId,extra){
       await selectSituation(d.situation_id);await loadDiscovery();render();
     }return;
   }
+  if(action==='discovery-queue-next'){await nextDiscoveryQueue();return;}
   if(action==='discovery-reason-open'){reasonForm(extra);return;}
   if(action==='discovery-reason-cancel'){if(modal.open)modal.close();return;}
   if(action.startsWith('eng-')){

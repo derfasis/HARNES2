@@ -65,7 +65,14 @@ function ui({ list, detail } = {}) {
     globalThis.api=async(route,body)=>{
       globalThis.calls.push({ route, body, method: body===undefined?'GET':'POST' });
       if(route==='/api/discovery/reason-states') return globalThis.discoveryList;
-      if(route==='/api/discovery/decisions') return globalThis.discoveryQueue??{ items: [], next_cursor: null };
+      if(route.startsWith('/api/discovery/decisions')){
+        globalThis.queueCalls=(globalThis.queueCalls??0)+1;
+        return route.includes('cursor=') ? { items: [{ situation_id:'sit-2', status:'OBSERVING', revision:1,
+          evidence_fingerprint:'fp-2', freshness:{fresh:true,reasons:[]}, assessment_id:'7',
+          reason_available:true, review_available:false, review_task_id:null, executable:false,
+          contact_permission:false, allowed_effects:[] }], next_cursor:null }
+          : (globalThis.discoveryQueue??{ items: [], next_cursor: null });
+      }
       if(route.startsWith('/api/discovery/')){
         const id=decodeURIComponent(route.split('/').at(-1));
         if(globalThis.failNext && globalThis.failNext.route===route){ const e=new Error(globalThis.failNext.message); e.code=globalThis.failNext.code; throw e; }
@@ -363,4 +370,19 @@ test('4E a legacy assessment reports a null fingerprint instead of a missing one
   assert.equal(legacy.evidence_fingerprint, null, 'no fingerprint is invented for a legacy assessment');
   assert.equal(legacy.result_revision, app.service.discoveryDetail(situationId).revision);
   app.close();
+});
+
+test('4E the decision queue pages on its own cursor, so actionable items past the first page stay reachable', async () => {
+  const ctx = ui({ list: { items: [], next_cursor: null } });
+  ctx.discoveryQueue = { items: [{ situation_id: 'sit-1', status: 'OBSERVING', revision: 1,
+    evidence_fingerprint: 'fp-1', freshness: { fresh: true, reasons: [] }, assessment_id: '5',
+    reason_available: true, review_available: false, review_task_id: null, executable: false,
+    contact_permission: false, allowed_effects: [] }], next_cursor: 'q-2' };
+  await ctx.loadDiscovery();
+  assert.match(ctx.discoveryTab(), /data-do="discovery-queue-next"/, 'the queue must offer its own paging');
+  await ctx.act('discovery-queue-next');
+  const paged = ctx.calls.at(-1);
+  assert.equal(paged.route, '/api/discovery/decisions?cursor=q-2');
+  assert.equal(paged.method, 'GET');
+  assert.match(ctx.discoveryTab(), /sit-2/, 'the next page of actionable situations is shown');
 });

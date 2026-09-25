@@ -156,3 +156,25 @@ test('3B list validates query strictly and refuses every non-GET method', async 
   assert.equal((await api('/api/discovery/anything', { ...options, method: 'DELETE' })).status, 405);
   assert.equal((await api(`/api/discovery/${randomUUID()}`, { ...options, method: 'POST', body: {} })).status, 405);
 });
+
+test('3B both Discovery reads validate their query identically, duplicates included', async t => {
+  const { app, api } = await fixture(t);
+  await blockedSituation(app, 'WAIT', { wait: { kind: 'evidence_change' } });
+  const token = (await api('/api/session')).body.token;
+  const options = { token };
+  const situationId = app.store.get('SELECT situation_id FROM discovery_evidence ORDER BY rowid LIMIT 1').situation_id;
+  const cursor = app.service.discoveryReasonStates({ limit: 1 }, { kind: 'operator' }).next_cursor ?? situationId;
+
+  assert.equal((await api('/api/discovery/decisions?limit=10', options)).status, 200);
+  for (const route of ['/api/discovery/reason-states', '/api/discovery/decisions']) {
+    assert.equal((await api(`${route}?limit=10`, options)).status, 200, route);
+    assert.equal((await api(`${route}?cursor=${cursor}`, options)).status, 200, route);
+    assert.equal((await api(`${route}?limit=0`, options)).status, 400, route);
+    assert.equal((await api(`${route}?limit=101`, options)).status, 400, route);
+    assert.equal((await api(`${route}?cursor=zzz`, options)).status, 400, route);
+    assert.equal((await api(`${route}?unknown=1`, options)).status, 400, route);
+    // A duplicated option is refused rather than silently collapsed to one value.
+    assert.equal((await api(`${route}?limit=1&limit=2`, options)).status, 400, route);
+    assert.equal((await api(`${route}?limit=1&limit=1`, options)).status, 400, route);
+  }
+});
