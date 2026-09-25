@@ -238,6 +238,8 @@ test('E6 a closed or stopped engagement stays closed and does not resurrect on n
   await closed.command('message.record', { conversation_id: closed.cid, text: 'Нове вхідне повідомлення', source: 'synthetic' });
   assert.equal(closed.service.engagement.current(closed.cid), undefined, 'a closed case must not reopen');
   assert.equal(closed.store.get('SELECT COUNT(*) AS n FROM engagements').n, 1);
+  assert.equal(closed.store.get("SELECT COUNT(*) AS n FROM engagement_tasks et JOIN tasks t ON t.id=et.task_id WHERE t.status='pending' AND t.conversation_id=?", closed.cid).n, 0,
+    'a closed case must not queue evaluation work');
 });
 
 // O1 — opportunity review is bound to the exact fingerprint and revision.
@@ -248,7 +250,7 @@ test('O1 opportunity review needs the exact fingerprint and revision', async t =
   const review = { task_id: consumed.task_id, fingerprint: detail.fingerprint, expected_revision: 0 };
 
   // Each refusal is wrapped on its own, and each may add exactly one denial event — nothing else.
-  const denialsBefore = () => h.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='opportunity.review.denied'").n;
+  const denialsBefore = () => denialCount(h.store);
   for (const payload of [{ ...review, fingerprint: 'wrong' }, { ...review, expected_revision: 42 },
     { ...review, unexpected: true }]) {
     const before = snapshot(h.store), denials = denialsBefore();
@@ -261,20 +263,29 @@ test('O1 opportunity review needs the exact fingerprint and revision', async t =
   // A refusal is designed to leave one durable trace: a denial event that survives the rollback.
   // It must carry only the action, the task, the error code and the request id — never the
   // untrusted payload, never a grant, never a status change.
-  const denials = h.store.all("SELECT payload_json FROM events WHERE kind='opportunity.review.denied' ORDER BY id");
-  for (const denial of denials) {
-    const payload = JSON.parse(denial.payload_json);
-    assert.deepEqual(Object.keys(payload).sort(), ['action', 'code', 'request_id', 'task_id']);
-    assert.equal(payload.task_id, consumed.task_id);
-    assert.equal(payload.contact_permission, undefined);
-    assert.equal(payload.granted, undefined);
-  }
+  assertDenialContract(h.store, consumed.task_id, 3);
   assert.equal(h.store.get('SELECT status FROM tasks WHERE id=?', consumed.task_id).status, 'proposed');
   assert.equal(h.store.get("SELECT COUNT(*) AS n FROM contact_permissions").n, 0);
   assert.equal(h.store.get("SELECT COUNT(*) AS n FROM drafts").n, 0);
 });
 
 const section = (value, table) => value.split('|').find((part) => part.startsWith(`${table}[`));
+const denialCount = (store) => store.get("SELECT COUNT(*) AS n FROM events WHERE kind='opportunity.review.denied'").n;
+
+// The denial trail is durable by design and bounded by contract. One helper, used everywhere a
+// refusal of a review is measured, so the two paths cannot drift apart.
+const assertDenialContract = (store, taskId, expectedCount) => {
+  const rows = store.all("SELECT payload_json FROM events WHERE kind='opportunity.review.denied' ORDER BY id");
+  assert.equal(rows.length, expectedCount, 'exactly one denial is recorded per refusal');
+  for (const row of rows) {
+    const payload = JSON.parse(row.payload_json);
+    assert.deepEqual(Object.keys(payload).sort(), ['action', 'code', 'request_id', 'task_id']);
+    assert.equal(payload.task_id, taskId);
+    assert.equal(payload.contact_permission, undefined, 'a denial carries no permission');
+    assert.equal(payload.granted, undefined, 'a denial grants nothing');
+    assert.equal(payload.status, undefined, 'a denial carries no status mutation');
+  }
+};
 
 // O2 — approving a card is a review act, never a send.
 test('O2 approving a card never sends and never grants contact', async t => {
@@ -314,9 +325,11 @@ test('O3 a decided card cannot be re-decided, and replay stays idempotent', asyn
     fingerprint: current.fingerprint, expected_revision: current.review.revision }, OPERATOR, id()),
   { status: 409 });
   const after = snapshot(h.store);
-  // A re-decide is a refusal, so the denial trail is the only permitted difference.
+  // A re-decide is a refusal, so the denial trail is the only permitted difference, and the new
+  // denial obeys exactly the same bounded contract as in O1.
   assert.deepEqual(tables(h.store).filter((table) => section(before, table) !== section(after, table)),
     ['events']);
+  assertDenialContract(h.store, consumed.task_id, 1);
   assert.equal(h.service.opportunityDetail(consumed.task_id).review.revision, current.review.revision,
     'the settled revision does not move');
   // An approved review leaves the model output frozen and the card reviewable, not executed.

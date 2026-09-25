@@ -34,7 +34,9 @@ through:
 - A refused Engagement command writes nothing at all.
 - A refused **Opportunity review** writes exactly one thing: an `opportunity.review.denied` event.
   Each refused review is measured on its own, and each may add exactly one denial and change
-  nothing else.
+  nothing else. Both the first refusal in `O1` and the re-decide in `O3` are validated by the same
+  helper, so the bounded contract — exactly `action`, `task_id`, `code`, `request_id`, no
+  permission, no grant, no status mutation — cannot drift apart between the two paths.
 
 ## Contract: the denial trail is a durable write, by design
 
@@ -75,7 +77,8 @@ comparing the whole result of a replay against the first result and by taking th
 the first success, so a replay that quietly wrote again would show. And the resurrection question
 is answered on the path that actually resurrects: engagement is enabled, the case is closed or
 stopped, the process restarts, a genuine new inbound arrives — and no engagement reopens, no
-second row appears, and no evaluation task is queued. The closed case is closed while AI-owned, so
+second row appears, and no evaluation task is queued. Both the stopped and the closed path assert
+the empty queue, not just the stopped one. The closed case is closed while AI-owned, so
 the refusal is not masked by a `HUMAN_OWNED` conversation.
 
 Purpose isolation is checked on its own store, where the only grant is a `follow_up`: a `reply`
