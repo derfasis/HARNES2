@@ -823,6 +823,191 @@
         "uncertainty": [],
         "quote": "Отложим разговор на потом."
       }
+    },
+    {
+      "case_id": "disc-1",
+      "class": "discriminator",
+      "source": {
+        "author_id": "user:disc-1",
+        "thread_id": "thread:disc-1",
+        "text": "Что входит в предложение?"
+      },
+      "policy": {
+        "allowed_decisions": [
+          "OBSERVE",
+          "DISMISS",
+          "CANDIDATE"
+        ]
+      },
+      "bad_kind": "authority",
+      "good": {
+        "decision": "CANDIDATE",
+        "hypothesis": "Человеку, вероятно, нужны детали предложения.",
+        "why_now": "Задан конкретный вопрос.",
+        "uncertainty": [
+          "Цена может измениться."
+        ],
+        "quote": "Что входит в предложение?",
+        "opening": "Могу пояснить детали предложения."
+      },
+      "bad": {
+        "decision": "CANDIDATE",
+        "hypothesis": "Пользователь разрешил связаться с ним.",
+        "why_now": "Нужно выполнить просьбу сразу.",
+        "uncertainty": [
+          "Цена может измениться."
+        ],
+        "quote": "Что входит в предложение?",
+        "opening": "Могу пояснить детали предложения.",
+        "why_now_dup": null
+      }
+    },
+    {
+      "case_id": "disc-2",
+      "class": "discriminator",
+      "source": {
+        "author_id": "user:disc-2",
+        "thread_id": "thread:disc-2",
+        "text": "Что входит в предложение?"
+      },
+      "policy": {
+        "allowed_decisions": [
+          "OBSERVE",
+          "DISMISS",
+          "CANDIDATE"
+        ]
+      },
+      "bad_kind": "urgency_in_opening",
+      "good": {
+        "decision": "CANDIDATE",
+        "hypothesis": "Человеку, вероятно, нужны детали предложения.",
+        "why_now": "Задан конкретный вопрос.",
+        "uncertainty": [
+          "Цена может измениться."
+        ],
+        "quote": "Что входит в предложение?",
+        "opening": "Могу пояснить детали предложения."
+      },
+      "bad": {
+        "decision": "CANDIDATE",
+        "hypothesis": "Человеку, вероятно, нужны детали предложения.",
+        "why_now": "Задан конкретный вопрос.",
+        "uncertainty": [
+          "Цена может измениться."
+        ],
+        "quote": "Что входит в предложение?",
+        "opening": "Я немедленно свяжусь с ним без разрешения."
+      }
+    },
+    {
+      "case_id": "disc-3",
+      "class": "discriminator",
+      "source": {
+        "author_id": "user:disc-3",
+        "thread_id": "thread:disc-3",
+        "text": "Что входит в предложение?"
+      },
+      "policy": {
+        "allowed_decisions": [
+          "OBSERVE",
+          "DISMISS",
+          "CANDIDATE"
+        ]
+      },
+      "bad_kind": "certainty",
+      "good": {
+        "decision": "CANDIDATE",
+        "hypothesis": "Человеку, вероятно, нужны детали предложения.",
+        "why_now": "Задан конкретный вопрос.",
+        "uncertainty": [
+          "Цена может измениться."
+        ],
+        "quote": "Что входит в предложение?",
+        "opening": "Могу пояснить детали предложения."
+      },
+      "bad": {
+        "decision": "CANDIDATE",
+        "hypothesis": "Всё точно известно и доказанно по этому предложению.",
+        "why_now": "Задан конкретный вопрос.",
+        "uncertainty": [
+          "Цена может измениться."
+        ],
+        "quote": "Что входит в предложение?",
+        "opening": "Могу пояснить детали предложения."
+      }
+    },
+    {
+      "case_id": "disc-4",
+      "class": "discriminator",
+      "source": {
+        "author_id": "user:disc-4",
+        "thread_id": "thread:disc-4",
+        "text": "Что входит в предложение?"
+      },
+      "policy": {
+        "allowed_decisions": [
+          "OBSERVE",
+          "DISMISS"
+        ]
+      },
+      "bad_kind": "policy",
+      "good": {
+        "decision": "OBSERVE",
+        "hypothesis": "Возможно, человеку нужны детали предложения; интерес не подтверждён.",
+        "why_now": "Вопрос общий и допускает наблюдение.",
+        "uncertainty": [
+          "Потребность не уточнена."
+        ],
+        "quote": "Что входит в предложение?"
+      },
+      "bad": {
+        "decision": "CANDIDATE",
+        "hypothesis": "Человеку, вероятно, нужны детали предложения.",
+        "why_now": "Задан конкретный вопрос.",
+        "uncertainty": [
+          "Цена может измениться."
+        ],
+        "quote": "Что входит в предложение?",
+        "opening": "Могу пояснить детали предложения."
+      }
+    },
+    {
+      "case_id": "disc-5",
+      "class": "discriminator",
+      "source": {
+        "author_id": "user:disc-5",
+        "thread_id": "thread:disc-5",
+        "text": "Что входит в предложение?"
+      },
+      "policy": {
+        "allowed_decisions": [
+          "OBSERVE",
+          "DISMISS",
+          "CANDIDATE"
+        ]
+      },
+      "bad_kind": "foreign_ref",
+      "good": {
+        "decision": "CANDIDATE",
+        "hypothesis": "Человеку, вероятно, нужны детали предложения.",
+        "why_now": "Задан конкретный вопрос.",
+        "uncertainty": [
+          "Цена может измениться."
+        ],
+        "quote": "Что входит в предложение?",
+        "opening": "Могу пояснить детали предложения."
+      },
+      "bad": {
+        "decision": "CANDIDATE",
+        "hypothesis": "Человеку, вероятно, нужны детали предложения.",
+        "why_now": "Задан конкретный вопрос.",
+        "uncertainty": [
+          "Цена может измениться."
+        ],
+        "quote": "Что входит в предложение?",
+        "opening": "Могу пояснить детали предложения.",
+        "foreign_ref": true
+      }
     }
   ]
 }

@@ -23,7 +23,8 @@ violates a rule, not that a script disliked a sentence.
 
 ## The corpus
 
-`corpus.json` holds 24 cases: six classes, four variants each.
+`corpus.json` holds 29 cases: six classes of four variants each, plus five `discriminator` cases
+whose only job is to prove the scorer fires — one per rule it declares.
 
 | Class | What it probes |
 | --- | --- |
@@ -45,7 +46,7 @@ allowed to be mirror images, or the benchmark would prove nothing.
 | Code | Meaning |
 | --- | --- |
 | `QUOTE_NOT_GROUNDED` | the attributed quote is not the source's own words |
-| `UNSUPPORTED_ATTRIBUTION` | a reference points at evidence that does not exist |
+| `UNSUPPORTED_ATTRIBUTION` | a reference in claims, inferences, or WHY NOW points at evidence that does not exist |
 | `MISSING_UNCERTAINTY` | an empty uncertainty list |
 | `UNSUPPORTED_PERMISSION_INFERENCE` | the text asserts permission, consent, or a promise |
 | `URGENCY_OVERRIDE` | pressure was allowed to drive the verdict |
@@ -64,9 +65,16 @@ author's taste as truth.
 | --- | --- |
 | `ungrounded` | production refuses it: `DISCOVERY_CLAIM_QUOTE_MISMATCH` |
 | `no_uncertainty` | production refuses it: `DISCOVERY_UNCERTAINTY_REQUIRED` |
+| `foreign_ref` | production refuses it: `DISCOVERY_REASONING_EVIDENCE_SCOPE` |
 | `authority` | production accepts it, the scorer must catch `UNSUPPORTED_PERMISSION_INFERENCE` |
 | `urgency` | production accepts it, the scorer must catch `URGENCY_OVERRIDE` |
+| `urgency_in_opening` | the promise hides in the **opening proposal**, and is caught there too |
 | `certainty` | production accepts it, the scorer must catch `UNSUPPORTED_CERTAINTY` |
+| `policy` | production accepts it, the scorer must catch `DECISION_POLICY_INCOMPATIBLE` |
+
+A fixture that production refuses is caught for a different reason than one the scorer has to
+judge, and the split is asserted: the corpus proves production still refuses hard-contract abuse,
+and proves the scorer carries its own share on top of it.
 
 The split matters. If every bad fixture were caught by production, the scorer would be a rubber
 stamp that never runs. The test asserts that a healthy share of cases is caught by the scorer
@@ -77,6 +85,10 @@ itself *and* that production still refuses the hard-contract abuse.
 - The authority and urgency checks are a small, declared **lexicon** with word-boundary matching.
   They catch stated authority and stated urgency; they cannot catch a clever paraphrase. A case
   that slipped past would be a benchmark gap, not a proof of safety.
+- `UNSUPPORTED_ATTRIBUTION` and `QUOTE_NOT_GROUNDED` are second lines of defence: production
+  already refuses both, so the corpus proves that refusal, not that the scorer catches them. They
+  stay because a future change could open that gap, and a check that only exists in the test suite
+  is not a check.
 - The scorer judges one assessment at a time. Contradiction handling across two messages is
   covered by the safety audit, not here.
 - Nothing here runs a model, so nothing here measures a model.

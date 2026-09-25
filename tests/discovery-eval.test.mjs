@@ -7,16 +7,23 @@ import path from 'node:path';
 import { ROOT, readJson } from '../business/config.mjs';
 
 const corpus = readJson(path.join(ROOT, 'docs/benchmarks/discovery-eval-v0/corpus.json'));
-const { summary, EVAL } = await import('../scripts/discovery-eval-v0.mjs');
+const { summary, summarize, runEval, EVAL } = await import('../scripts/discovery-eval-v0.mjs');
 
 const report = summary();
 
-test('4B the corpus covers six classes, four cases each, with both fixtures present', () => {
-  assert.equal(corpus.cases.length, 24);
+test('4B the corpus covers six classes plus an explicit discriminator set', () => {
+  assert.equal(corpus.cases.length, 29);
   const classes = new Set(corpus.cases.map((item) => item.class));
-  assert.equal(classes.size, 6);
-  for (const name of classes) {
+  assert.equal(classes.size, 7);
+  for (const name of [...classes].filter((value) => value !== 'discriminator')) {
     assert.equal(corpus.cases.filter((item) => item.class === name).length, 4, name);
+  }
+  // The discriminator cases exist so that every rule the scorer declares is actually exercised
+  // by at least one fixture, instead of being declared and never fired.
+  const kinds = new Set(corpus.cases.map((item) => item.bad_kind));
+  for (const kind of ['ungrounded', 'no_uncertainty', 'authority', 'urgency', 'certainty',
+    'urgency_in_opening', 'foreign_ref', 'policy']) {
+    assert.ok(kinds.has(kind), `corpus must contain a case of kind ${kind}`);
   }
   for (const item of corpus.cases) {
     assert.ok(item.good.hypothesis.length > 0, item.case_id);
@@ -42,9 +49,19 @@ test('4B every deliberately bad fixture is caught, by production or by the score
   assert.ok(byProduction.length >= 4, `production must still catch hard-contract abuse, got ${byProduction.length}`);
 });
 
-test('4B the scorer reports the codes it claims to check', () => {
+test('4B a well-formed fixture that production refuses is a failure, never a silent pass', async () => {
+  const item = corpus.cases.find((entry) => entry.class === 'discriminator');
+  const broken = { ...item, good: { ...item.good, quote: 'Такого текста в источнике нет' } };
+  const verdict = summarize(await runEval([broken]));
+  assert.equal(verdict.good_passed, 0);
+  assert.deepEqual(verdict.good_failures.map((row) => row.case_id), [broken.case_id]);
+  assert.equal(verdict.good_failures[0].findings[0].code, 'CONTRACT_REJECTED');
+});
+
+test('4B the scorer reports every code it claims to check', () => {
   const codes = new Set(report.catch_reasons.flatMap((row) => row.codes));
-  for (const expected of ['UNSUPPORTED_PERMISSION_INFERENCE', 'URGENCY_OVERRIDE']) {
+  for (const expected of ['UNSUPPORTED_PERMISSION_INFERENCE', 'URGENCY_OVERRIDE', 'UNSUPPORTED_CERTAINTY',
+    'DECISION_POLICY_INCOMPATIBLE']) {
     assert.ok(codes.has(expected), `expected the scorer to catch ${expected}`);
   }
   const byKind = new Map(corpus.cases.map((item) => [item.case_id, item.bad_kind]));
@@ -56,13 +73,16 @@ test('4B the scorer reports the codes it claims to check', () => {
   }
 });
 
-test('4B the evaluation is deterministic and offline by construction', () => {
+test('4B the evaluation is deterministic and offline by construction', async () => {
   assert.equal(EVAL.proof_level, 'synthetic_contract_eval');
   assert.equal(EVAL.live_proof, false);
   const source = fs.readFileSync(path.join(ROOT, 'scripts/discovery-eval-v0.mjs'), 'utf8');
   for (const forbidden of ['fetch(', 'node:https', 'node:http', 'HermesAdapter', 'TelegramChannel']) {
     assert.equal(source.includes(forbidden), false, `the scorer must not reference ${forbidden}`);
   }
-  // Same input, same verdict: the corpus is fixed data and nothing in the scorer reads a clock.
-  assert.equal(JSON.stringify(summary()), JSON.stringify(report));
+  // Two independent runs over fresh stores must agree: same input, same verdict.
+  const first = summarize(await runEval());
+  const second = summarize(await runEval());
+  assert.equal(JSON.stringify(first), JSON.stringify(second));
+  assert.equal(JSON.stringify(first), JSON.stringify(report));
 });

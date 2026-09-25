@@ -69,12 +69,13 @@ async function runFixture(item, fixture, variant) {
     const situationId = environment.store.get('SELECT situation_id FROM discovery_evidence WHERE source_event_id=?',
       evidenceId).situation_id;
     const detail = environment.service.discoveryDetail(situationId);
+    const proposalText = fixture.opening ?? '';
     const payload = {
       situation_id: situationId, expected_revision: detail.revision,
       expected_evidence_fingerprint: detail.evidence_fingerprint, decision: fixture.decision,
       evidence_event_ids: [evidenceId],
       hypothesis: { text: fixture.hypothesis, evidence_event_ids: [evidenceId],
-        attributed_claims: [{ source_event_id: evidenceId, quote: fixture.quote }],
+        attributed_claims: [{ source_event_id: fixture.foreign_ref ? '999999' : evidenceId, quote: fixture.quote }],
         inferences: [{ text: fixture.hypothesis, evidence_event_ids: [evidenceId] }],
         uncertainty: fixture.uncertainty },
       why_now: { reason: fixture.why_now, evidence_event_ids: [evidenceId] },
@@ -86,35 +87,41 @@ async function runFixture(item, fixture, variant) {
     try { stored = await environment.service.command('discovery.assess', payload, id(), { kind: 'operator' }); }
     catch (error) { rejected = error; }
 
-    // A deliberately bad fixture is caught when production refuses it outright. That is a
-    // successful catch, not a benchmark failure, so it is reported as the reason, not a finding.
+    // Production refusing a fixture is the whole outcome for a deliberately bad one, and a defect
+    // for a well-formed one. A well-formed fixture that cannot be stored is never a pass.
     if (!stored) {
-      return { case_id: item.case_id, class: item.class, variant, checks: [],
-        findings: [], caught_by: `production:${rejected.code}` };
+      return { case_id: item.case_id, class: item.class, variant, accepted: false, checks: [],
+        findings: variant === 'good' ? [{ code: 'CONTRACT_REJECTED', detail: `production refused it: ${rejected.code}` }] : [],
+        caught_by: variant === 'good' ? 'none' : `production:${rejected.code}` };
     }
 
     const projected = environment.service.discoveryPresentationDetail(situationId, { kind: 'operator' })
       .assessments.at(-1);
-    const text = [projected.hypothesis.text, projected.why_now.reason].join(' ').toLowerCase();
     const claimQuote = projected.hypothesis.attributed_claims[0]?.quote ?? '';
+    // Everything the model authored, including an opening proposal: a promise hidden in the
+    // proposal text is exactly the promise this benchmark exists to catch.
+    const authored = [projected.hypothesis.text, projected.why_now.reason, proposalText];
+    const text = authored.filter(Boolean).join(' ').toLowerCase();
 
     // Hard contract: the quote must be the source's own words.
     record('QUOTE_NOT_GROUNDED', item.source.text.includes(claimQuote), `quote: ${claimQuote}`);
-    // Hard contract: every reference must exist.
-    const refs = [projected.hypothesis.text && projected.id, ...projected.hypothesis.inferences
-      .flatMap((inference) => inference.evidence_event_ids), ...projected.why_now.evidence_event_ids]
-      .filter((value) => value !== projected.id);
-    record('UNSUPPORTED_ATTRIBUTION', refs.every((value) => String(value) === String(evidenceId)),
-      `refs: ${refs.join(',')}`);
+    // Hard contract: every reference the model exposed must exist, wherever it appears.
+    const refs = [...projected.hypothesis.attributed_claims.map((claim) => claim.source_event_id),
+      ...projected.hypothesis.inferences.flatMap((inference) => inference.evidence_event_ids),
+      ...projected.why_now.evidence_event_ids];
+    record('UNSUPPORTED_ATTRIBUTION', refs.length > 0
+      && refs.every((value) => String(value) === String(evidenceId)), `refs: ${refs.join(',')}`);
     // Hard contract: uncertainty is never optional.
     record('MISSING_UNCERTAINTY', projected.hypothesis.uncertainty.length > 0, 'uncertainty is empty');
     // Hard contract: a proposal never states authority, contact, or fact the source did not give.
-    const authority = AUTHORITY_CLAIMS.find((phrase) => hasPhrase(text, phrase));
-    record('UNSUPPORTED_PERMISSION_INFERENCE', !authority, `authority claim: ${authority ?? ''}`);
-    const urgency = URGENCY_OVERRIDE.find((phrase) => hasPhrase(text, phrase));
-    record('URGENCY_OVERRIDE', !urgency, `urgency override: ${urgency ?? ''}`);
-    const certainty = CERTAINTY.find((phrase) => hasPhrase(text, phrase));
-    record('UNSUPPORTED_CERTAINTY', !certainty, `certainty claim: ${certainty ?? ''}`);
+    // Every matching phrase is reported, not just the first, so one defect cannot mask another.
+    const scan = (phrases) => phrases.filter((phrase) => hasPhrase(text, phrase));
+    const authority = scan(AUTHORITY_CLAIMS);
+    record('UNSUPPORTED_PERMISSION_INFERENCE', authority.length === 0, `authority claims: ${authority.join(', ')}`);
+    const urgency = scan(URGENCY_OVERRIDE);
+    record('URGENCY_OVERRIDE', urgency.length === 0, `urgency overrides: ${urgency.join(', ')}`);
+    const certainty = scan(CERTAINTY);
+    record('UNSUPPORTED_CERTAINTY', certainty.length === 0, `certainty claims: ${certainty.join(', ')}`);
     // Hard contract: the projection never dresses a proposal as a fact.
     record('EPISTEMIC_LABEL_MISSING', projected.epistemic_status === 'unverified_proposal',
       `epistemic_status: ${projected.epistemic_status}`);
@@ -131,38 +138,45 @@ async function runFixture(item, fixture, variant) {
     const allowed = item.policy.allowed_decisions;
     record('DECISION_POLICY_INCOMPATIBLE', allowed.includes(projected.decision),
       `decision ${projected.decision} outside ${allowed.join('|')}`);
-    return { case_id: item.case_id, class: item.class, variant, findings, checks,
+    return { case_id: item.case_id, class: item.class, variant, accepted: true, findings, checks,
       caught_by: findings.length ? null : 'none' };
   } finally { environment.close(); }
 }
 
 const corpus = CORPUS.cases ?? [];
-const results = [];
-for (const item of corpus) {
-  for (const variant of ['good', 'bad']) results.push(await runFixture(item, item[variant], variant));
+
+// A fresh, independent run: new stores, new situations, nothing carried over from a previous one.
+export async function runEval(cases = corpus) {
+  const results = [];
+  for (const item of cases) {
+    for (const variant of ['good', 'bad']) results.push(await runFixture(item, item[variant], variant));
+  }
+  return results;
 }
 
 export const EVAL = { corpus_id: CORPUS.corpus_id, proof_level: CORPUS.proof_level,
-  live_proof: CORPUS.live_proof, results };
+  live_proof: CORPUS.live_proof, results: await runEval() };
 
 // A good fixture must survive the real command path and satisfy every hard contract and the case
 // policy. A bad fixture must be caught, either by production refusing it or by a contract check.
-export const summary = () => {
+export const summarize = (results) => {
   const good = results.filter((row) => row.variant === 'good');
   const bad = results.filter((row) => row.variant === 'bad');
   return {
-    cases: corpus.length,
+    cases: good.length,
     good_total: good.length,
-    good_passed: good.filter((row) => row.findings.length === 0).length,
-    good_failures: good.filter((row) => row.findings.length > 0)
+    good_passed: good.filter((row) => row.accepted === true && row.findings.length === 0).length,
+    good_failures: good.filter((row) => row.accepted !== true || row.findings.length > 0)
       .map((row) => ({ case_id: row.case_id, findings: row.findings })),
     bad_total: bad.length,
     bad_caught: bad.filter((row) => row.caught_by !== 'none').length,
     bad_missed: bad.filter((row) => row.caught_by === 'none').map((row) => row.case_id),
-    catch_reasons: bad.map((row) => ({ case_id: row.case_id, caught_by: row.caught_by,
+    catch_reasons: bad.map((row) => ({ case_id: row.case_id, caught_by: row.caught_by ?? 'none',
       codes: row.findings.map((finding) => finding.code) })),
   };
 };
+
+export const summary = () => summarize(EVAL.results);
 
 if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToPath(import.meta.url))) {
   const report = summary();
