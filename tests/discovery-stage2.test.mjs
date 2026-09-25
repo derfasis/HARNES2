@@ -124,6 +124,22 @@ test('S2 WAIT deadline is durable, does not move on restart, and unlocks after t
   t.mock.timers.tick(2000);
   assert.equal((await h.command('discovery.assess', assessmentPayload(h, f.situationId))).status, 'OBSERVING');
   noEffects(h);
+
+  // A parseable but non-ISO-8601 instant is rejected, and a valid offset form is stored canonically.
+  for (const rejected of ['Fri, 25 Sep 2026 15:00:01 GMT', '2026-09-25 12:00:01', '2026-13-45T99:99:99Z']) {
+    const other = harness(t), otherFixture = await candidate(other);
+    await assert.rejects(other.command('discovery.reason',
+      reasonPayload(other, otherFixture, 'WAIT', { wait: { kind: 'deadline', at: rejected } })),
+    { code: 'DISCOVERY_WAIT_INVALID' });
+    assert.equal(other.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='discovery.reason.transitioned'").n, 0);
+  }
+  const normalized = harness(t), normalizedFixture = await candidate(normalized);
+  const shifted = await normalized.command('discovery.reason',
+    reasonPayload(normalized, normalizedFixture, 'WAIT', { wait: { kind: 'deadline', at: '2026-09-25T15:00:03+03:00' } }));
+  assert.deepEqual(shifted.wait, { kind: 'deadline', at: '2026-09-25T12:00:03.000Z' });
+  assert.equal(JSON.parse(normalized.store.get("SELECT payload_json FROM events WHERE kind='discovery.reason.transitioned' ORDER BY id DESC LIMIT 1").payload_json).wait.at,
+    '2026-09-25T12:00:03.000Z');
+  noEffects(normalized);
 });
 
 test('S2 STOP closes only this Discovery situation and never touches person, engagement, or source authority', async t => {
