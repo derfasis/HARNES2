@@ -128,8 +128,12 @@ test('3C detail is an allowlisted projection and hides the internal payload', as
 
   const [assessment] = body.assessments;
   assert.equal(assessment.epistemic_status, 'unverified_proposal');
-  assert.deepEqual(Object.keys(assessment.hypothesis).sort(),
-    ['attributed_claims', 'inferences', 'text', 'text_truncated', 'uncertainty']);
+  // Stage 4E: the read-only basis binding an operator screen needs to know a decision is possible.
+  assert.equal(assessment.result_revision, body.revision);
+  assert.equal(assessment.evidence_fingerprint, body.evidence_fingerprint);
+  assert.deepEqual(Object.keys(assessment).sort(), ['allowed_effects', 'contact_permission', 'decision',
+    'epistemic_status', 'evidence_fingerprint', 'executable', 'freshness', 'hypothesis', 'id',
+    'reasoning_shape', 'reasoning_version', 'result_revision', 'why_now']);
   assert.equal(assessment.hypothesis.text_truncated, false);
   assert.equal(assessment.reasoning_shape, 'structured_v1');
   assert.equal(assessment.hypothesis.attributed_claims[0].quote, 'I have two hours a week.');

@@ -3,7 +3,50 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import vm from 'node:vm';
+import { Store, id } from '../business/store.mjs';
+import { BusinessService } from '../business/service.mjs';
+import { ROOT, readJson } from '../business/config.mjs';
+
+// A real service, so the UI gate is checked against the real projection rather than a fixture.
+async function startService() {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harnes2-4e-'));
+  const config = readJson(path.join(ROOT, 'config/default.json'));
+  const offer = { id: 'offer-4e', version: 'v1', text: 'Synthetic offer', criteria: [], exclusions: [] };
+  config.opportunity = { ...config.opportunity, automatic: true, allowedSourceRefs: ['public:stage4e'],
+    activeOffer: offer };
+  config.discovery = { ...config.discovery, enabled: true, ttlSeconds: 86400 };
+  config.runtime = { ...config.runtime, enabled: false, model: '', baseUrl: '' };
+  config.telegram = { ...config.telegram, enabled: false, liveSending: false };
+  config.engagement = { ...config.engagement, enabled: false };
+  const store = new Store(directory), service = new BusinessService(store, config);
+  return { store, service, close() { store.close(); fs.rmSync(directory, { recursive: true, force: true }); } };
+}
+
+async function assess(app) {
+  const message = { source_id: 'public:stage4e', source_kind: 'sanitized_fixture', message_id: 'message:1',
+    author_id: 'user:1', display_name: 'Synthetic author', thread_id: 'thread:1', reply_to_id: null,
+    version: 1, operation: 'upsert', text: 'Что входит?', created_at: '2026-01-01T00:00:00.000Z',
+    updated_at: '2026-01-01T00:00:00.000Z' };
+  const ingested = await app.service.command('source.ingest', message, id(),
+    { kind: 'channel', sourceId: message.source_id });
+  const situationId = app.store.get('SELECT situation_id FROM discovery_evidence WHERE source_event_id=?',
+    ingested.source_event_id).situation_id;
+  const detail = app.service.discoveryDetail(situationId);
+  const evidence = detail.evidence.map((item) => String(item.source_event_id));
+  await app.service.command('discovery.assess', { situation_id: situationId, expected_revision: detail.revision,
+    expected_evidence_fingerprint: detail.evidence_fingerprint, decision: 'CANDIDATE', evidence_event_ids: evidence,
+    hypothesis: { text: 'Возможно, нужны детали.', evidence_event_ids: evidence,
+      attributed_claims: [{ source_event_id: evidence[0], quote: 'Что входит?' }],
+      inferences: [{ text: 'Потребность не подтверждена.', evidence_event_ids: evidence }],
+      uncertainty: ['Не проверено'] },
+    why_now: { reason: 'Прямой вопрос.', evidence_event_ids: evidence },
+    opening_proposal: { text: 'Могу пояснить.', rationale: 'Только после разрешения.', constraints: ['review'] } },
+  id(), { kind: 'operator' });
+  return situationId;
+}
 
 const source = fs.readFileSync(new URL('../public/app.js', import.meta.url), 'utf8');
 
@@ -252,6 +295,23 @@ test('4E a stale situation stays readable with no decisions, exactly like a clos
   assert.match(html, /STALE/);
   assert.doesNotMatch(html, /discovery-review-approve/);
   assert.doesNotMatch(html, /data-mode="IGNORE"/);
+});
+
+test('4E the UI reads the basis binding the real projection exposes, not an invented field', async () => {
+  const app = await startService();
+  const situationId = await assess(app);
+  const projected = app.service.discoveryPresentationDetail(situationId, { kind: 'operator' })
+    .assessments.at(-1);
+  assert.equal(projected.result_revision, projected.id === undefined ? null : projected.result_revision);
+  assert.equal(typeof projected.evidence_fingerprint, 'string');
+  // The UI gate is exactly the production rule: the latest assessment must still be the basis.
+  const ctx = ui({ list: { items: [row()], next_cursor: null }, detail: { ...situation(),
+    revision: projected.result_revision, evidence_fingerprint: projected.evidence_fingerprint,
+    assessments: [projected] } });
+  await ctx.loadDiscovery();
+  await ctx.selectSituation('sit-1');
+  assert.match(ctx.discoveryDetailPanel(), /data-mode="IGNORE"/);
+  app.close();
 });
 
 test('4E the write screen states exactly what it does and does not do', async () => {

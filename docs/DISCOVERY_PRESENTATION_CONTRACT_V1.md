@@ -111,8 +111,14 @@ Reading it must never be presented as any of the following:
 
 ## Non-goals
 
-No UI, no auth subsystem, no scheduler, no model, runtime, Telegram, or live transport, no new
-database table, and no change to any existing detail payload. If a real leak is found in the
-detail payload, narrowing it is its own minimal change with its own review.
+No UI, no auth subsystem, no scheduler, no model, runtime, Telegram, or live transport, and no new
+database table. Existing detail payload fields are never changed, removed, or reinterpreted.
+
+The single exception is additive and bounded: Stage 4E added `result_revision` and
+`evidence_fingerprint` to the assessment projection, because an operator screen must be able to tell
+whether the latest assessment still produced the situation's current revision before offering a
+decision. Both are read-only copies of values already durable in the assessment event. They change
+no authority, no fingerprint semantics, and no command. If a real leak is found in the detail
+payload, narrowing it is its own minimal change with its own review.
 
 proof_level=integration; live_proof=false.

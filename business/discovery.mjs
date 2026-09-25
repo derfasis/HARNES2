@@ -886,6 +886,9 @@ function presentationDetail(service, situationId, actor) {
       const legacy = assessment.reasoning_version === 0;
       return {
         id: assessment.id, created_at: assessment.created_at, decision: assessment.decision,
+        // Read-only basis binding. The revision this assessment produced and the fingerprint it
+        // reasoned over: an operator screen needs both to know whether a decision is still possible.
+        result_revision: assessment.result_revision, evidence_fingerprint: assessment.evidence_fingerprint,
         epistemic_status: assessment.epistemic_status, reasoning_version: assessment.reasoning_version,
         hypothesis: { ...hypothesis,
           attributed_claims: (typeof assessment.hypothesis === 'string' ? [] : assessment.hypothesis?.attributed_claims ?? [])
