@@ -219,7 +219,8 @@ test('3E the wired click actions read only and never fall through to a command',
   assert.deepEqual(ctx.calls.map((call) => call.route),
     ['/api/discovery/reason-states', '/api/discovery/decisions', '/api/discovery/sit-1']);
   await ctx.act('discovery-next');
-  assert.equal(ctx.calls[2].route, '/api/discovery/reason-states?cursor=cursor-2');
+  assert.equal(ctx.calls.at(-1).route, '/api/discovery/reason-states?cursor=cursor-2');
+  assert.equal(ctx.calls.at(-1).method, 'GET');
   assert.equal(ctx.calls.some((call) => call.method === 'POST'), false);
   assert.equal(ctx.calls.some((call) => call.route === '/api/commands'), false);
   // A viewer action must not reach the shared refresh tail either, which would claim "Сохранено".
