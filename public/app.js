@@ -86,6 +86,8 @@ function discoveryTab(){
 }
 function discoveryDetailPanel(){
   if(discoveryDetailError)return panel('Ситуация',empty('Ситуация больше недоступна',discoveryDetailError));
+  if(discoveryDetail&&!discoveryLive(discoveryDetail))
+    return panel(`Ситуация ${discoveryDetail.situation_id}`,`<p>Эта ситуация закрыта: ${esc(discoveryDetail.status)}. Решения недоступны.</p>`);
   const d=discoveryDetail;
   if(!d)return panel('Ситуация',empty('Выберите ситуацию','Показываем только то, что уже записано в системе. Ничего не отправляется отсюда.'));
   const evidence=d.evidence.map(item=>`<p><strong>Зафиксированное наблюдение — не подтверждённый факт</strong>: ${esc(item.text)}${truncatedMark(item.text_truncated)}<small>${esc(item.message_id)} · версия ${item.message_version} · ${esc(item.author_id??'—')}</small></p>`).join('');
@@ -98,11 +100,51 @@ function discoveryDetailPanel(){
     <small>${esc(freshnessLine(a.freshness))}</small></div></div>`).join('');
   const proposals=d.opening_proposals.map(p=>`<p><strong>Предложение — не черновик, не отправлено, не даёт разрешения на контакт</strong>: ${esc(p.text)}${truncatedMark(p.text_truncated)}<small>${esc(p.rationale)}${truncatedMark(p.rationale_truncated)}</small></p>`).join('');
   return panel(`Ситуация ${d.situation_id}`,`<p>Статус: ${esc(d.status)} · в хранении: ${esc(d.storage_status)} · ревизия ${d.revision}</p>
+    ${discoveryOperatorActions(d)}
     <p>${esc(freshnessLine(d.freshness))}</p><h3>Наблюдения</h3>${evidence||'<p>Пока нет.</p>'}
     <h3>Гипотезы</h3>${assessments||'<p>Пока нет.</p>'}<h3>Предложения</h3>${proposals||'<p>Пока нет.</p>'}
     <p><strong>Не отправлено</strong> · <strong>Не даёт разрешения на контакт</strong> · ничего из этого экрана выполнить нельзя</p>
     <p>Задачи ревью: ${d.review_tasks.map(t=>esc(t.status)).join(', ')||'нет'}</p>`);
 }
+
+// Stage 4E: the operator's existing write commands, exposed and nothing more. The UI never
+// decides, never repairs, and never retries a rejected decision on its own.
+const discoveryLive = d => !!d && !['STOPPED','DISMISSED','TRANSFERRED','STALE'].includes(d.status);
+const discoveryProposedReview = d => (d?.review_tasks ?? []).find(t => t.status === 'proposed');
+function discoveryOperatorActions(d) {
+  if (!discoveryLive(d)) return '';
+  const proposed = discoveryProposedReview(d), parts = [];
+  if (proposed) {
+    parts.push(button('Одобрить разбор','discovery-review-approve',proposed.id,'primary'));
+    parts.push(button('Отклонить','discovery-review-reject',proposed.id,'danger'));
+  }
+  parts.push(button('Решение: WAIT / IGNORE / STOP','discovery-reason-open',d.situation_id));
+  return `<div class="actions">${parts.join('')}</div>`;
+}
+const reasonForm = decision => {
+  const waitFields = decision === 'WAIT'
+    ? field('wait_kind','Условие','select','evidence_change',[['evidence_change','Новое evidence'],['deadline','Срок']])
+      + field('wait_at','Срок (ISO 8601)')
+    : '';
+  return modal(`Решение: ${decision}`, field('reason','Почему','textarea') + waitFields, async values => {
+    if (!values.reason || !String(values.reason).trim()) throw new Error('Причина обязательна');
+    if (decision === 'WAIT' && (!values.wait_kind || (values.wait_kind === 'deadline' && !values.wait_at)))
+      throw new Error('Для WAIT нужно условие: evidence_change или срок');
+    const d = discoveryDetail;
+    if (!discoveryLive(d)) throw new Error('Ситуация уже недоступна для решения');
+    const assessment = d.assessments?.at(-1);
+    if (!assessment) throw new Error('Нет оценки, на которую можно опереться');
+    const wait = decision === 'WAIT'
+      ? (values.wait_kind === 'deadline' ? { kind: 'deadline', at: values.wait_at } : { kind: 'evidence_change' })
+      : undefined;
+    await command('discovery.reason', { situation_id: d.situation_id, assessment_id: String(assessment.id),
+      expected_revision: d.revision, expected_evidence_fingerprint: d.evidence_fingerprint,
+      decision, reason: values.reason, ...(wait ? { wait } : {}) });
+    await selectSituation(d.situation_id);
+    await loadDiscovery();
+    render();
+  });
+};
 function engagementPanel(){
   const all=detail.engagements??[],e=all.find(e=>!['CLOSED','STOPPED'].includes(e.status));
   if(!e)return panel('Постійна справа',`<p>Увімкнення явне. Старі текстові дозволи не стають типізованою згодою. Після STOP потрібні окреме відновлення контакту, нова справа та новий дозвіл.</p>${all.map(x=>`<p>${esc(x.topic)}: ${esc(x.status)}</p>`).join('')}`,button('Відкрити справу','eng-open'));
@@ -194,9 +236,25 @@ function modal(title,content,onSubmit){
 const convOptions=()=>[['','Общая работа партнёра'],...state.conversations.map(c=>[c.id,c.name])];
 const convPayload=()=>({conversation_id:selected});
 async function act(action,itemId,extra){
-  // Discovery is a viewer: both branches only read, and neither reaches command().
   if(action==='discovery-select'){await selectSituation(itemId);render();return;}
   if(action==='discovery-next'){await nextDiscoveryPage();render();return;}
+  // Stage 4E: operator decisions call the existing commands with the exact current basis, and a
+  // rejection is reported rather than retried.
+  if(action==='discovery-review-approve'||action==='discovery-review-reject'){
+    const d=discoveryDetail;if(!discoveryLive(d))throw new Error('Ситуация уже недоступна');
+    const proposed=discoveryProposedReview(d);
+    if(!proposed||proposed.id!==itemId)throw new Error('Предложение на ревью больше не актуально');
+    try{
+      await command('discovery.review',{task_id:itemId,decision:action.endsWith('approve')?'approve':'reject',
+        expected_revision:d.revision,expected_evidence_fingerprint:d.evidence_fingerprint});
+    }finally{
+      // A rejected decision means the screen is out of date: go back to canonical state, then let
+      // the error reach the operator. Never retry, never paper over it.
+      await selectSituation(d.situation_id);await loadDiscovery();render();
+    }return;
+  }
+  if(action==='discovery-reason-open'){reasonForm(extra);return;}
+  if(action==='discovery-reason-cancel'){if(modal.open)modal.close();return;}
   if(action.startsWith('eng-')){
     const e=(detail?.engagements??[]).find(e=>!['CLOSED','STOPPED'].includes(e.status));
     const ep={engagement_id:e?.id};
