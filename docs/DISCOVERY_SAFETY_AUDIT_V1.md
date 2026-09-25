@@ -13,13 +13,14 @@ network, Telegram, or scheduler run.
 | --- | --- | --- | --- |
 | A1 | No CANDIDATE, review task, WAIT, IGNORE, STOP, or TRANSFER is reachable without a durable assessment behind it. | `A1 …` | PASS |
 | B | Each reason decision leaves exactly one immutable `discovery.reason.transitioned` on the current assessment, fingerprint, and revision pair; a replayed request creates none. | `B …` | PASS |
-| C | IGNORE and `WAIT/evidence_change` unlock only on new evidence; `WAIT/deadline` unlocks on the deadline or on new evidence. A restart is not an unlock. | `C …` | PASS |
+| C | IGNORE and `WAIT/evidence_change` unlock only on new evidence; `WAIT/deadline` unlocks on the deadline or on new evidence. A restart is not an unlock. | `C …`, `C2 …` | PASS |
 | D | STOP changes no person, conversation, message, fact, permission, engagement, draft, approval, delivery, outcome, lesson, or run state. | `D …` | PASS |
 | E | Neither presentation surface exposes an internal field name, checked by field name. | `E …` | PASS |
-| F | Both HTTP reads change no user table at all, existing rows included. | `F …` | PASS |
-| G | Transfer fails one missing prerequisite at a time, each failure leaving zero side effects. | `G …` | PASS |
+| F | Both HTTP reads change no user table at all, existing rows included, across every table in the schema. | `F …` | PASS |
+| G | Transfer fails one missing prerequisite at a time, each failure leaving the full snapshot unchanged. | `G …` | PASS |
 | H | Actor boundaries hold: `discovery.observe` is system-only, the rest operator-only. | `H …` | PASS |
 | I | Stale authority never returns through edit, delete, revoke, expiry, or restart. | `I …` | PASS |
+| I2 | A superseded assessment loses its authority even on unchanged evidence. | `I2 …` | PASS |
 
 ## How each invariant was checked
 
@@ -35,6 +36,10 @@ and `result_revision === basis_revision + 1` equal to the current situation revi
 **C.** Unlock conditions are read back from the reason-state surface rather than inferred from
 code, and a restart is exercised explicitly. A re-assessment on the same evidence is refused
 with `DISCOVERY_REASON_IGNORED` or `DISCOVERY_REASON_WAITING` until the named condition happens.
+All three wait shapes are covered separately: `evidence_change` blocks until new evidence,
+a future `deadline` blocks across a restart and is retired by new evidence even before the
+deadline, and `C2` shows a reached deadline reported as `READY` / `DEADLINE_REACHED` — after
+which the situation may be re-assessed, which produces a new review task rather than an approval.
 
 **D.** The full row content of every user table is captured before and after `STOP`. One task
 change is expected and allowed: `STOP` cancels its own proposed `discovery_review` task, which
@@ -48,14 +53,18 @@ real work rather than describing an already-empty projection. This is a field-na
 word search over operator-visible text.
 
 **F.** Both HTTP GETs are exercised against a running loopback server with `fetch` and
-`spawn` stubbed to fail loudly. Every user table is snapshotted by full row content before and
-after, so a read that modified an existing row would fail.
+`spawn` stubbed to fail loudly. The table list is discovered from `sqlite_master` at run time
+rather than hand-written, minus SQLite's FTS shadow tables, and the test fails if fewer than 30
+tables are covered. Every table is snapshotted by full row content before and after, so a read
+that modified an existing row would fail. An earlier hand-written subset that omitted real
+tables was rejected in review; this is the corrected form.
 
-**G.** Transfer is walked prerequisite by prerequisite: no approved review, wrong author
-binding, missing inbound message, and missing typed reply grant each fail alone, and the full
-snapshot is unchanged after every failure. With all prerequisites present the transfer enters the
-existing Engagement boundary and still reports `contact_permission_created: false`,
-`drafts_created: 0`, and `sends_started: false`.
+**G.** Transfer is walked prerequisite by prerequisite, and after **every** rejection the full
+schema snapshot is compared: no approved review, an author binding for the wrong person, a
+missing real inbound message, a missing typed reply grant, a suppressed person, a conversation
+the AI no longer owns, and a conversation bound to an unrelated person. With all prerequisites
+present the transfer enters the existing Engagement boundary and still reports
+`contact_permission_created: false`, `drafts_created: 0`, and `sends_started: false`.
 
 **H.** Every Discovery entry point is called as an `agent` and as a `system`. Observe is
 system-only in both directions; assess, reason, review, transfer, the reason-state read, and the
@@ -63,7 +72,10 @@ presentation detail all refuse anything that is not an operator. The internal `d
 is deliberately left without an actor, and the test says so rather than leaving it untested.
 
 **I.** Edit, delete, revoke, and expiry each make the decision path refuse, and no transition is
-written. After a restart the path is still refused and still writes nothing. The audit asserts
+written. After a restart the path is still refused and still writes nothing. `I2` covers the
+agreed supersession case: a newer assessment on the *same* evidence cancels the earlier review
+task, refuses a reason decision that names the old assessment, refuses approval of the cancelled
+task, and writes no transition — while the current assessment keeps its own authority. The audit asserts
 *usability*, not a status label: a situation whose TTL has passed is refused either way, and
 asserting that the row reads `STALE` would have been a claim about maintenance timing, not about
 authority.

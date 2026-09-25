@@ -87,13 +87,16 @@ function reasonPayload(h, situationId, decision, extra = {}) {
     decision, reason: `Audit ${decision}`, ...extra };
 }
 
-const PERSON_TABLES = ['persons', 'conversations', 'channel_identities', 'messages', 'facts',
-  'contact_permissions', 'engagements', 'drafts', 'approvals', 'delivery_attempts', 'outcome_events',
-  'lessons', 'runs', 'tasks', 'events', 'command_receipts', 'discovery_situations', 'discovery_evidence'];
+// Every application table in the database, discovered from the schema rather than hand-listed,
+// minus the shadow tables SQLite keeps for FTS indexes.
+const INTERNAL_TABLES = new Set(['sqlite_sequence', 'lessons_fts_data', 'lessons_fts_idx',
+  'lessons_fts_content', 'lessons_fts_docsize', 'lessons_fts_config']);
+const PERSON_TABLES = store => store.all("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+  .map((row) => row.name).filter((name) => !INTERNAL_TABLES.has(name));
 
 // Full row content of every user table, so a read or a decision that mutates an existing row is caught.
 function fullSnapshot(h) {
-  return PERSON_TABLES.map((table) => {
+  return PERSON_TABLES(h.store).map((table) => {
     const rows = h.store.all(`SELECT * FROM ${table} ORDER BY rowid`).map((row) => JSON.stringify(row));
     return `${table}[${rows.join(',')}]`;
   }).join('|');
@@ -180,6 +183,42 @@ test('C IGNORE and WAIT unlock only on the condition their decision names', asyn
   assert.equal(waited.surface().items[0].unlock, 'EVIDENCE_CHANGE');
   await assert.rejects(waited.command('discovery.assess', assessmentPayload(waited.detail(waitedId), 'CANDIDATE')),
     { code: 'DISCOVERY_REASON_WAITING' });
+
+  // A deadline wait unlocks on the deadline OR on new evidence, and a restart is not an unlock.
+  const deadline = harness(t);
+  const deadlineId = await candidate(deadline);
+  await deadline.command('discovery.reason', reasonPayload(deadline, deadlineId, 'WAIT',
+    { wait: { kind: 'deadline', at: '2099-01-01T00:00:00.000Z' } }));
+  const future = deadline.surface().items[0];
+  assert.equal(future.state, 'BLOCKED');
+  assert.equal(future.unlock, 'DEADLINE_OR_EVIDENCE_CHANGE');
+  assert.deepEqual(future.wait, { kind: 'deadline', at: '2099-01-01T00:00:00.000Z' });
+  deadline.restart();
+  assert.equal(deadline.surface().items[0].state, 'BLOCKED', 'a restart is not an unlock');
+  await assert.rejects(deadline.command('discovery.assess', assessmentPayload(deadline.detail(deadlineId), 'CANDIDATE')),
+    { code: 'DISCOVERY_REASON_WAITING' });
+  await deadline.ingest(source({ message_id: 'message:2', text: 'New evidence before the deadline.' }));
+  assert.equal(deadline.surface().items.length, 0, 'new evidence also retires a deadline wait');
+});
+
+test('C2 a reached deadline is READY, and only then does it unlock', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-01-01T00:00:00.000Z') });
+  const h = harness(t);
+  const situationId = await candidate(h);
+  await h.command('discovery.reason', reasonPayload(h, situationId, 'WAIT',
+    { wait: { kind: 'deadline', at: '2026-01-01T00:10:00.000Z' } }));
+  assert.equal(h.surface().items[0].state, 'BLOCKED');
+  h.restart();
+  assert.equal(h.surface().items[0].state, 'BLOCKED');
+  t.mock.timers.tick(11 * 60 * 1000);
+  const ready = h.surface().items[0];
+  assert.equal(ready.state, 'READY');
+  assert.equal(ready.reason, 'DEADLINE_REACHED');
+  assert.equal(ready.unlock, 'DEADLINE_OR_EVIDENCE_CHANGE');
+  const reassessed = await h.command('discovery.assess', assessmentPayload(h.detail(situationId), 'CANDIDATE'));
+  assert.equal(reassessed.status, 'OBSERVING');
+  assert.ok(reassessed.review_task_id, 'a reached deadline lets the situation be re-assessed, not approved');
+  assert.equal(h.surface().items.length, 0, 'a new assessment retires the transition that governed it');
 });
 
 // D — STOP closes one Discovery situation and nothing else exists on the other side.
@@ -259,19 +298,18 @@ test('F HTTP reads mutate nothing in any user table', async t => {
   await app.service.command('discovery.assess', assessmentPayload(detail, 'CANDIDATE'), randomUUID(), { kind: 'operator' });
   const token = (await request(settings.server.port, '/api/session')).body.token;
 
-  const before = PERSON_TABLES.map((table) => {
+  const tables = PERSON_TABLES(app.store);
+  assert.ok(tables.length >= 30, 'the snapshot must cover the whole schema, not a hand-picked subset');
+  const snapshot = () => tables.map((table) => {
     const rows = app.store.all(`SELECT * FROM ${table} ORDER BY rowid`).map((row) => JSON.stringify(row));
     return `${table}[${rows.join(',')}]`;
   }).join('|');
+  const before = snapshot();
   const listed = await request(settings.server.port, '/api/discovery/reason-states', token);
   const opened = await request(settings.server.port, `/api/discovery/${situationId}`, token);
   assert.equal(listed.status, 200);
   assert.equal(opened.status, 200);
-  const after = PERSON_TABLES.map((table) => {
-    const rows = app.store.all(`SELECT * FROM ${table} ORDER BY rowid`).map((row) => JSON.stringify(row));
-    return `${table}[${rows.join(',')}]`;
-  }).join('|');
-  assert.equal(after, before);
+  assert.equal(snapshot(), before);
 });
 
 // G — each missing transfer prerequisite fails alone, and a failed transfer has zero side effects.
@@ -304,14 +342,41 @@ test('G transfer fails one prerequisite at a time and never crosses the Engageme
 
   // G3 no real inbound message for this conversation.
   h.settings.opportunity.authorBindings = [{ source_id: SOURCE, author_id: 'user:1', conversation_id: person.conversation_id }];
+  snapshot = fullSnapshot(h);
   await assert.rejects(transfer({ inbound_message_id: 'message:does-not-exist' }), { code: 'DISCOVERY_INBOUND_REQUIRED' });
-  assert.equal(h.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='discovery.transferred'").n, 0);
+  assert.equal(fullSnapshot(h), snapshot);
 
   // G4 no typed reply grant yet.
+  snapshot = fullSnapshot(h);
   await assert.rejects(transfer(), { code: 'typed_permission_required' });
-  assert.equal(h.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='discovery.transferred'").n, 0);
+  assert.equal(fullSnapshot(h), snapshot);
 
-  // G5 with every prerequisite the transfer enters the existing Engagement boundary and nothing more.
+  // G5 a person who is suppressed cannot be reached even with every other prerequisite in place.
+  await h.command('permission.grant', { conversation_id: person.conversation_id, purpose: 'reply',
+    granted_by: 'synthetic recipient', evidence: 'synthetic explicit reply grant',
+    valid_from: '2020-01-01T00:00:00.000Z', expires_at: '2099-01-01T00:00:00.000Z' });
+  h.store.run('UPDATE persons SET suppressed=1 WHERE id=?', h.store.get('SELECT id FROM persons LIMIT 1').id);
+  snapshot = fullSnapshot(h);
+  await assert.rejects(transfer(), { code: /DISCOVERY_CONVERSATION_UNAVAILABLE/ });
+  assert.equal(fullSnapshot(h), snapshot);
+  h.store.run('UPDATE persons SET suppressed=0 WHERE id=?', h.store.get('SELECT id FROM persons LIMIT 1').id);
+
+  // G6 a conversation the AI no longer owns is refused for the same reason.
+  h.store.run("UPDATE conversations SET ownership='HUMAN_OWNED' WHERE id=?", person.conversation_id);
+  snapshot = fullSnapshot(h);
+  await assert.rejects(transfer(), { code: /DISCOVERY_CONVERSATION_UNAVAILABLE/ });
+  assert.equal(fullSnapshot(h), snapshot);
+  h.store.run("UPDATE conversations SET ownership='AI_OWNED' WHERE id=?", person.conversation_id);
+
+  // G7 a conversation bound to a different person than the one on the evidence is not a match.
+  const other = await h.command('person.create', { name: 'Unrelated recipient', source: 'synthetic operator' });
+  h.settings.opportunity.authorBindings = [{ source_id: SOURCE, author_id: 'user:1', conversation_id: other.conversation_id }];
+  snapshot = fullSnapshot(h);
+  await assert.rejects(transfer(), { code: 'DISCOVERY_AUTHOR_BINDING_REQUIRED' });
+  assert.equal(fullSnapshot(h), snapshot);
+  h.settings.opportunity.authorBindings = [{ source_id: SOURCE, author_id: 'user:1', conversation_id: person.conversation_id }];
+
+  // G8 with every prerequisite the transfer enters the existing Engagement boundary and nothing more.
   await h.command('permission.grant', { conversation_id: person.conversation_id, purpose: 'reply',
     granted_by: 'synthetic recipient', evidence: 'synthetic explicit reply grant',
     valid_from: '2020-01-01T00:00:00.000Z', expires_at: '2099-01-01T00:00:00.000Z' });
@@ -392,4 +457,35 @@ test('I stale authority stays stale across edit, delete, revoke, expiry, and res
   await assert.rejects(expired.command('discovery.reason', reasonPayload(expired, expiredId, 'IGNORE')),
     { code: /DISCOVERY_STALE/ });
   assert.equal(expired.transitions(expiredId).length, 0);
+});
+
+test('I2 a superseded assessment loses its authority on the same evidence', async t => {
+  const h = harness(t);
+  const situationId = await candidate(h);
+  const first = h.detail(situationId).assessments.at(-1);
+  const firstTask = h.store.get("SELECT id FROM tasks WHERE kind='discovery_review' AND status='proposed'").id;
+  // A newer assessment on the same evidence retires the earlier one without new evidence.
+  const second = await h.command('discovery.assess', assessmentPayload(h.detail(situationId), 'CANDIDATE'));
+  assert.ok(second.assessment_id !== String(first.id));
+  assert.equal(h.store.get('SELECT status FROM tasks WHERE id=?', firstTask).status, 'cancelled');
+
+  // A reason decision naming the superseded assessment is refused.
+  const detail = h.detail(situationId);
+  await assert.rejects(h.command('discovery.reason', { situation_id: situationId, assessment_id: String(first.id),
+    expected_revision: detail.revision, expected_evidence_fingerprint: detail.evidence_fingerprint,
+    decision: 'IGNORE', reason: 'Audit of a superseded assessment' }),
+  { code: 'DISCOVERY_REASON_ASSESSMENT_STALE' });
+  // And so is a review of the review task the superseded assessment created.
+  await assert.rejects(h.command('discovery.review', { task_id: firstTask, expected_revision: detail.revision,
+    expected_evidence_fingerprint: detail.evidence_fingerprint, decision: 'approve' }),
+  { code: /DISCOVERY_REVIEW_NOT_AVAILABLE/ });
+  assert.equal(h.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='discovery.review.approved'").n, 0);
+  assert.equal(h.transitions(situationId).length, 0);
+
+  // The current assessment keeps its own authority.
+  const current = h.detail(situationId);
+  await h.command('discovery.reason', { situation_id: situationId, assessment_id: String(current.assessments.at(-1).id),
+    expected_revision: current.revision, expected_evidence_fingerprint: current.evidence_fingerprint,
+    decision: 'IGNORE', reason: 'Audit of the current assessment' });
+  assert.equal(h.transitions(situationId).length, 1);
 });
