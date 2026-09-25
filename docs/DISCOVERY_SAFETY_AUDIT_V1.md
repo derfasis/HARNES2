@@ -21,6 +21,7 @@ network, Telegram, or scheduler run.
 | H | Actor boundaries hold: `discovery.observe` is system-only, the rest operator-only. | `H …` | PASS |
 | I | Stale authority never returns through edit, delete, revoke, expiry, or restart. | `I …` | PASS |
 | I2 | A superseded assessment loses its authority even on unchanged evidence. | `I2 …` | PASS |
+| I3 | An approval that is later superseded cannot be transferred, until the new assessment is approved. | `I3 …` | PASS |
 
 ## How each invariant was checked
 
@@ -62,8 +63,12 @@ tables was rejected in review; this is the corrected form.
 **G.** Transfer is walked prerequisite by prerequisite, and after **every** rejection the full
 schema snapshot is compared: no approved review, an author binding for the wrong person, a
 missing real inbound message, a missing typed reply grant, a suppressed person, a conversation
-the AI no longer owns, and a conversation bound to an unrelated person. With all prerequisites
-present the transfer enters the existing Engagement boundary and still reports
+the AI no longer owns, and a conversation bound to an unrelated person. The typed grant is then
+corrupted one scope field at a time — `person_id`, `conversation_id`, `channel`, and `account_id`
+— and each corruption must produce `typed_permission_required` with the snapshot unchanged. The
+account case runs on a conversation that actually has a channel identity, because a manual
+conversation has `account_id = null` and could never have proved account isolation. With every
+prerequisite intact the transfer enters the existing Engagement boundary and still reports
 `contact_permission_created: false`, `drafts_created: 0`, and `sends_started: false`.
 
 **H.** Every Discovery entry point is called as an `agent` and as a `system`. Observe is
@@ -71,11 +76,16 @@ system-only in both directions; assess, reason, review, transfer, the reason-sta
 presentation detail all refuse anything that is not an operator. The internal `discoveryDetail()`
 is deliberately left without an actor, and the test says so rather than leaving it untested.
 
-**I.** Edit, delete, revoke, and expiry each make the decision path refuse, and no transition is
-written. After a restart the path is still refused and still writes nothing. `I2` covers the
+**I.** Edit, delete, revoke, and expiry each close the same three doors — approve, reason, and
+transfer — and no transition is written. The transfer probe uses a real person, conversation,
+inbound message, and grant, so the refusal it observes is the Discovery-level one rather than an
+earlier conversation lookup. After a restart the path is still refused and still writes nothing. `I2` covers the
 agreed supersession case: a newer assessment on the *same* evidence cancels the earlier review
 task, refuses a reason decision that names the old assessment, refuses approval of the cancelled
-task, and writes no transition — while the current assessment keeps its own authority. The audit asserts
+task, and writes no transition — while the current assessment keeps its own authority. `I3`
+covers the harder case: an approval that was already granted, then superseded by a newer
+assessment on the same evidence, can no longer be transferred; approving the new assessment
+restores the path. The audit asserts
 *usability*, not a status label: a situation whose TTL has passed is refused either way, and
 asserting that the row reads `STALE` would have been a claim about maintenance timing, not about
 authority.

@@ -121,6 +121,36 @@ function request(port, route, token) {
 }
 
 // A1 — CANDIDATE, REVIEW, WAIT, IGNORE, STOP, and TRANSFER all require a durable assessment basis.
+
+// Every stale trigger must close the same three doors: approve, reason, and transfer.
+async function assertAllThreeDoorsClosed(h, situationId, pattern) {
+  const detail = h.detail(situationId);
+  const task = h.store.get("SELECT id FROM tasks WHERE kind='discovery_review' AND status='proposed'")?.id;
+  if (task) {
+    await assert.rejects(h.command('discovery.review', { task_id: task, expected_revision: detail.revision,
+      expected_evidence_fingerprint: detail.evidence_fingerprint, decision: 'approve' }), pattern);
+  }
+  await assert.rejects(h.command('discovery.reason', { situation_id: situationId, assessment_id: 'any',
+    expected_revision: detail.revision, expected_evidence_fingerprint: detail.evidence_fingerprint,
+    decision: 'IGNORE', reason: 'Audit of stale authority' }), pattern);
+  // A real conversation, so the refusal observed is the Discovery-level one and not a
+  // conversation lookup that fails earlier in the routing layer.
+  const person = await h.command('person.create', { name: 'Audit recipient', source: 'synthetic operator' });
+  h.settings.opportunity.authorBindings = [{ source_id: SOURCE, author_id: 'user:1',
+    conversation_id: person.conversation_id }];
+  await h.command('message.record', { conversation_id: person.conversation_id, text: 'Explicit inbound question', source: 'synthetic' });
+  const inboundId = h.store.get('SELECT id FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 1', person.conversation_id).id;
+  await h.command('permission.grant', { conversation_id: person.conversation_id, purpose: 'reply',
+    granted_by: 'synthetic recipient', evidence: 'synthetic explicit reply grant',
+    valid_from: '2020-01-01T00:00:00.000Z', expires_at: '2099-01-01T00:00:00.000Z' });
+  await assert.rejects(h.command('discovery.transfer', { situation_id: situationId,
+    conversation_id: person.conversation_id, inbound_message_id: inboundId, basis: 'Audit of stale authority' }),
+  pattern);
+  assert.equal(h.transitions(situationId).length, 0);
+  assert.equal(h.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='discovery.transferred'").n, 0);
+  assert.equal(h.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='discovery.review.approved'").n, 0);
+}
+
 test('A1 no decision state is reachable without a durable assessment behind it', async t => {
   const h = harness(t);
   await h.ingest();
@@ -376,7 +406,32 @@ test('G transfer fails one prerequisite at a time and never crosses the Engageme
   assert.equal(fullSnapshot(h), snapshot);
   h.settings.opportunity.authorBindings = [{ source_id: SOURCE, author_id: 'user:1', conversation_id: person.conversation_id }];
 
-  // G8 with every prerequisite the transfer enters the existing Engagement boundary and nothing more.
+  // G8 the typed grant is matched exactly: person, conversation, channel, and account are all
+  // part of its scope, and corrupting any one of them closes the door without side effects.
+  const grantRow = () => h.store.get('SELECT * FROM contact_permissions ORDER BY rowid DESC LIMIT 1');
+  for (const [column, value] of [['person_id', other.person_id], ['conversation_id', other.conversation_id],
+    ['channel', 'telegram']]) {
+    const original = grantRow()[column];
+    h.store.run(`UPDATE contact_permissions SET ${column}=? WHERE id=?`, value, grantRow().id);
+    snapshot = fullSnapshot(h);
+    await assert.rejects(transfer(), { code: 'typed_permission_required' });
+    assert.equal(fullSnapshot(h), snapshot, `a grant with a wrong ${column} must be refused with no writes`);
+    h.store.run(`UPDATE contact_permissions SET ${column}=? WHERE id=?`, original, grantRow().id);
+  }
+  // On a channel with a real account, a grant bound to a different account is refused too.
+  h.store.run("UPDATE conversations SET channel='telegram', channel_identity_id=NULL WHERE id=?", person.conversation_id);
+  h.store.run("INSERT INTO channel_identities(id,person_id,channel,account_id,external_id) VALUES(?,?,?,?,?)",
+    randomUUID(), h.store.get('SELECT id FROM persons LIMIT 1').id, 'telegram', 'account-a', 'external-a');
+  h.store.run('UPDATE conversations SET channel_identity_id=? WHERE id=?',
+    h.store.get('SELECT id FROM channel_identities ORDER BY rowid DESC LIMIT 1').id, person.conversation_id);
+  h.store.run('UPDATE contact_permissions SET account_id=? WHERE id=?', 'account-b', grantRow().id);
+  snapshot = fullSnapshot(h);
+  await assert.rejects(transfer(), { code: 'typed_permission_required' });
+  assert.equal(fullSnapshot(h), snapshot, 'a grant bound to another account must be refused with no writes');
+  h.store.run('UPDATE contact_permissions SET account_id=? WHERE id=?', 'account-a', grantRow().id);
+  h.store.run("UPDATE conversations SET channel='manual', channel_identity_id=NULL WHERE id=?", person.conversation_id);
+
+  // G9 with every prerequisite the transfer enters the existing Engagement boundary and nothing more.
   await h.command('permission.grant', { conversation_id: person.conversation_id, purpose: 'reply',
     granted_by: 'synthetic recipient', evidence: 'synthetic explicit reply grant',
     valid_from: '2020-01-01T00:00:00.000Z', expires_at: '2099-01-01T00:00:00.000Z' });
@@ -419,34 +474,24 @@ test('I stale authority stays stale across edit, delete, revoke, expiry, and res
   const edited = harness(t);
   const editedId = await candidate(edited);
   await edited.ingest(source({ message_id: 'message:1', version: 2, text: 'Edited before the decision.' }));
-  await assert.rejects(edited.command('discovery.reason', reasonPayload(edited, editedId, 'IGNORE')),
-    { code: /DISCOVERY_STALE/ });
-  assert.equal(edited.transitions(editedId).length, 0);
+  await assertAllThreeDoorsClosed(edited, editedId, { code: /DISCOVERY_STALE/ });
   edited.restart();
   assert.equal(edited.transitions(editedId).length, 0);
 
   const deleted = harness(t);
   const deletedId = await candidate(deleted);
   await deleted.ingest(source({ message_id: 'message:1', version: 2, operation: 'delete', text: null }));
-  await assert.rejects(deleted.command('discovery.reason', reasonPayload(deleted, deletedId, 'IGNORE')),
-    { code: /DISCOVERY_STALE/ });
+  await assertAllThreeDoorsClosed(deleted, deletedId, { code: /DISCOVERY_STALE/ });
 
   const revoked = harness(t);
   const revokedId = await candidate(revoked);
   revoked.settings.opportunity.allowedSourceRefs = [];
-  await assert.rejects(revoked.command('discovery.reason', reasonPayload(revoked, revokedId, 'IGNORE')),
-    { code: /DISCOVERY_STALE/ });
+  await assertAllThreeDoorsClosed(revoked, revokedId, { code: /DISCOVERY_STALE/ });
 
   const expired = harness(t);
   const expiredId = await candidate(expired);
   expired.store.run("UPDATE discovery_situations SET expires_at='2000-01-01T00:00:00.000Z' WHERE id=?", expiredId);
-  await assert.rejects(expired.command('discovery.reason', reasonPayload(expired, expiredId, 'IGNORE')),
-    { code: /DISCOVERY_STALE/ });
-  await assert.rejects(expired.command('discovery.review', { task_id: expired.store.get(
-    "SELECT id FROM tasks WHERE kind='discovery_review' AND status='proposed'").id,
-  expected_revision: expired.detail(expiredId).revision,
-  expected_evidence_fingerprint: expired.detail(expiredId).evidence_fingerprint, decision: 'approve' }),
-  { code: /DISCOVERY_STALE/ });
+  await assertAllThreeDoorsClosed(expired, expiredId, { code: /DISCOVERY_STALE/ });
   // A restart does not grant authority back, whatever label the row carries: the decision path
   // stays closed and nothing was written while it was closed.
   expired.restart();
@@ -488,4 +533,35 @@ test('I2 a superseded assessment loses its authority on the same evidence', asyn
     expected_revision: current.revision, expected_evidence_fingerprint: current.evidence_fingerprint,
     decision: 'IGNORE', reason: 'Audit of the current assessment' });
   assert.equal(h.transitions(situationId).length, 1);
+});
+
+test('I3 an approval that is superseded by a newer assessment cannot be transferred', async t => {
+  const h = harness(t);
+  const situationId = await candidate(h);
+  const firstTask = h.store.get("SELECT id FROM tasks WHERE kind='discovery_review' AND status='proposed'").id;
+  await h.command('discovery.review', { task_id: firstTask, expected_revision: h.detail(situationId).revision,
+    expected_evidence_fingerprint: h.detail(situationId).evidence_fingerprint, decision: 'approve' });
+  const person = await h.command('person.create', { name: 'Existing recipient', source: 'synthetic operator' });
+  h.settings.opportunity.authorBindings = [{ source_id: SOURCE, author_id: 'user:1',
+    conversation_id: person.conversation_id }];
+  await h.command('message.record', { conversation_id: person.conversation_id, text: 'Explicit inbound question', source: 'synthetic' });
+  const inboundId = h.store.get('SELECT id FROM messages WHERE conversation_id=? ORDER BY id DESC LIMIT 1', person.conversation_id).id;
+  await h.command('permission.grant', { conversation_id: person.conversation_id, purpose: 'reply',
+    granted_by: 'synthetic recipient', evidence: 'synthetic explicit reply grant',
+    valid_from: '2020-01-01T00:00:00.000Z', expires_at: '2099-01-01T00:00:00.000Z' });
+  const transfer = () => h.command('discovery.transfer', { situation_id: situationId,
+    conversation_id: person.conversation_id, inbound_message_id: inboundId, basis: 'Audit of superseded approval.' });
+
+  // A newer assessment on the same evidence retires the approval that was already granted.
+  await h.command('discovery.assess', assessmentPayload(h.detail(situationId), 'CANDIDATE'));
+  const snapshot = fullSnapshot(h);
+  await assert.rejects(transfer(), { code: /DISCOVERY_ASSESSMENT_STALE|DISCOVERY_REVIEW_REQUIRED/ });
+  assert.equal(fullSnapshot(h), snapshot);
+  assert.equal(h.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='discovery.transferred'").n, 0);
+
+  // Approving the new assessment restores the path.
+  const secondTask = h.store.get("SELECT id FROM tasks WHERE kind='discovery_review' AND status='proposed'").id;
+  await h.command('discovery.review', { task_id: secondTask, expected_revision: h.detail(situationId).revision,
+    expected_evidence_fingerprint: h.detail(situationId).evidence_fingerprint, decision: 'approve' });
+  assert.equal((await transfer()).status, 'TRANSFERRED');
 });
