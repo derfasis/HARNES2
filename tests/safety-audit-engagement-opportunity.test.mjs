@@ -122,20 +122,30 @@ test('E2 ACT needs a typed permission, and a broken one closes the door without 
     assert.equal(snapshot(h.store), current, `a grant with a wrong ${column} must be refused with no writes`);
     h.store.run(`UPDATE contact_permissions SET ${column}=? WHERE id=?`, permission[column], permission.id);
   }
+  // Purpose is part of the scope, checked on its own store: only a follow_up grant exists there,
+  // so a reply must be refused while the follow_up action is allowed. That pairing is what makes
+  // the refusal a statement about the purpose rather than about the action being impossible.
+  const purpose = await harness(t);
+  await purpose.grant('follow_up');
+  const withFollowUp = snapshot(purpose.store);
+  await assert.rejects(purpose.decide('ACT', { action: { purpose: 'reply', text: 'Ответ.' } }),
+    { code: 'typed_permission_required' });
+  assert.equal(snapshot(purpose.store), withFollowUp, 'a follow_up grant must not authorise a reply');
+  assert.ok((await purpose.decide('ACT', { action: { purpose: 'follow_up', text: 'Продолжение.' } })).decision_id);
+
   // Account isolation needs a conversation that really has one: on a manual channel
   // account_id is null and no mismatch could ever be expressed.
   h.store.run('INSERT INTO channel_identities(id,person_id,channel,account_id,external_id) VALUES(?,?,?,?,?)',
     id(), h.pid, 'telegram', 'account-a', 'external-a');
   const identity = h.store.get('SELECT id FROM channel_identities ORDER BY rowid DESC LIMIT 1').id;
   h.store.run("UPDATE conversations SET channel='telegram', channel_identity_id=? WHERE id=?", identity, h.cid);
-  h.store.run("UPDATE contact_permissions SET channel='telegram', account_id='account-b' WHERE id=?",
-    h.store.get('SELECT id FROM contact_permissions ORDER BY rowid DESC LIMIT 1').id);
-  const current = snapshot(h.store);
+  const replyGrant = h.store.get("SELECT * FROM contact_permissions WHERE purpose='reply' ORDER BY rowid DESC LIMIT 1");
+  h.store.run("UPDATE contact_permissions SET channel='telegram', account_id='account-b' WHERE id=?", replyGrant.id);
+  const accountBefore = snapshot(h.store);
   await assert.rejects(h.decide('ACT', { action: { purpose: 'reply', text: 'Ответ.' } }),
     { code: 'typed_permission_required' });
-  assert.equal(snapshot(h.store), current, 'a grant bound to another account must be refused with no writes');
-  h.store.run("UPDATE contact_permissions SET account_id='account-a' WHERE id=?",
-    h.store.get('SELECT id FROM contact_permissions ORDER BY rowid DESC LIMIT 1').id);
+  assert.equal(snapshot(h.store), accountBefore, 'a grant bound to another account must be refused with no writes');
+  h.store.run("UPDATE contact_permissions SET account_id='account-a' WHERE id=?", replyGrant.id);
 
   const decided = await h.decide('ACT', { action: { purpose: 'reply', text: 'Общая модель пояснена.' } });
   assert.equal(decided.kind, 'ACT');

@@ -11,7 +11,7 @@ this stage. A failing invariant is a finding, reported here and fixed in its own
 | Invariant | Statement | Result |
 | --- | --- | --- |
 | E1 | A decision requires the current engagement revision and message evidence from its own conversation. | PASS |
-| E2 | ACT requires a typed permission matching person, conversation, channel, and account, each proven separately. | PASS |
+| E2 | ACT requires a typed permission matching person, conversation, channel, account, **and purpose**, each proven separately. | PASS |
 | E3 | A suppressed person or a human-owned conversation produces no work, and history is not erased. | PASS |
 | E4 | A draft is never a send, and no delivery is ever claimed. | PASS |
 | E5 | Request replay returns the identical result and writes nothing; a changed payload under the same id conflicts. | PASS |
@@ -77,6 +77,10 @@ is answered on the path that actually resurrects: engagement is enabled, the cas
 stopped, the process restarts, a genuine new inbound arrives — and no engagement reopens, no
 second row appears, and no evaluation task is queued. The closed case is closed while AI-owned, so
 the refusal is not masked by a `HUMAN_OWNED` conversation.
+
+Purpose isolation is checked on its own store, where the only grant is a `follow_up`: a `reply`
+action must be refused and a `follow_up` action must succeed. Checking both in one place would have
+proved nothing, since an existing `reply` grant would authorise the reply regardless of purpose.
 
 Account isolation needed its own setup: on a manual conversation `account_id` is null, so no
 mismatch can even be expressed. The audit moves the conversation onto a real channel identity and
