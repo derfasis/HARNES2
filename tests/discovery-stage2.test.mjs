@@ -126,7 +126,8 @@ test('S2 WAIT deadline is durable, does not move on restart, and unlocks after t
   noEffects(h);
 
   // A parseable but non-ISO-8601 instant is rejected, and a valid offset form is stored canonically.
-  for (const rejected of ['Fri, 25 Sep 2026 15:00:01 GMT', '2026-09-25 12:00:01', '2026-13-45T99:99:99Z']) {
+  for (const rejected of ['Fri, 25 Sep 2026 15:00:01 GMT', '2026-09-25 12:00:01', '2026-13-45T99:99:99Z',
+    '2026-02-30T12:00:01Z', '2026-04-31T12:00:01Z', '2026-09-25T24:00:01Z', '2026-09-25T12:00:60Z']) {
     const other = harness(t), otherFixture = await candidate(other);
     await assert.rejects(other.command('discovery.reason',
       reasonPayload(other, otherFixture, 'WAIT', { wait: { kind: 'deadline', at: rejected } })),

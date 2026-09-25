@@ -26,7 +26,20 @@ const DISCOVERY_MAX_ACTIVE_SITUATIONS = 1000;
 const DISCOVERY_MAX_EVIDENCE_ROWS = 100000;
 const CONTEXT_NONE = 'none:';
 const CONTEXT_THREAD_PREFIX = 'thread:';
-const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/;
+const ISO_INSTANT = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(Z|[+-]\d{2}:\d{2})$/;
+// A durable wait deadline must name a real calendar instant. Node would otherwise
+// silently roll 2026-02-30 over into March, so the wall components are round-tripped.
+function parseIsoInstant(value) {
+  const parts = typeof value === 'string' ? ISO_INSTANT.exec(value) : null;
+  if (!parts) return null;
+  const [, year, month, day, hour, minute, second] = parts;
+  const wall = new Date(Date.UTC(+year, +month - 1, +day, +hour, +minute, +second));
+  if (Number.isNaN(wall.getTime()) || wall.getUTCFullYear() !== +year || wall.getUTCMonth() !== +month - 1
+    || wall.getUTCDate() !== +day || wall.getUTCHours() !== +hour || wall.getUTCMinutes() !== +minute
+    || wall.getUTCSeconds() !== +second) return null;
+  const at = new Date(value);
+  return Number.isNaN(at.getTime()) ? null : at;
+}
 
 function contextKeyForThread(threadId) {
   return threadId === null || threadId === undefined ? CONTEXT_NONE : `${CONTEXT_THREAD_PREFIX}${threadId}`;
@@ -653,10 +666,8 @@ function reasonTransition(service, p, actor) {
     } else {
       // Durable wait deadlines are stored and compared across restarts and hosts,
       // so only an explicit ISO-8601 instant is accepted and it is stored canonically.
-      const at = ISO_INSTANT.test(p.wait.at ?? '') ? new Date(p.wait.at) : null;
-      check(Object.keys(p.wait).length === 2 && typeof p.wait.at === 'string'
-        && at && at.getTime() > Date.now(),
-      'DISCOVERY_WAIT_INVALID');
+      const at = Object.keys(p.wait).length === 2 ? parseIsoInstant(p.wait.at) : null;
+      check(at && at.getTime() > Date.now(), 'DISCOVERY_WAIT_INVALID');
       wait = { kind, at: at.toISOString() };
     }
   } else {
