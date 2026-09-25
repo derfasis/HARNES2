@@ -92,6 +92,52 @@ test('4E a proposed review can be approved or rejected from the Discovery tab', 
   assert.equal(approval.body.payload.expected_evidence_fingerprint, 'fp-1');
 });
 
+// The click handler passes the button's dataset, so the real path is exercised through the
+// rendered markup rather than through a hand-written argument.
+const clickAction = async (ctx, html, doName, mode) => {
+  const buttons = [...html.matchAll(new RegExp(`<button[^>]*data-do="${doName}"[^>]*>`, 'g'))].map((match) => match[0]);
+  const chosen = mode ? buttons.find((markup) => markup.includes(`data-mode="${mode}"`)) : buttons[0];
+  assert.ok(chosen, `${doName}${mode ? ` (${mode})` : ''} must be rendered`);
+  await ctx.act(doName, chosen.match(/data-id="([^"]+)"/)?.[1] ?? '',
+    chosen.match(/data-mode="([^"]+)"/)?.[1] ?? '');
+};
+
+test('4E every reason decision is reachable from the rendered buttons, and each one sends itself', async () => {
+  for (const decision of ['WAIT', 'IGNORE', 'STOP']) {
+    const ctx = ui({ list: { items: [row()], next_cursor: null }, detail: situation() });
+    await ctx.loadDiscovery();
+    await ctx.selectSituation('sit-1');
+    await clickAction(ctx, ctx.discoveryDetailPanel(), 'discovery-reason-open', decision);
+    assert.match(ctx.form.title, new RegExp(decision), `the form must name the decision ${decision}`);
+    await ctx.form.submit({ reason: `Причина: ${decision}`, wait_kind: 'evidence_change' });
+    assert.equal(commandCall(ctx).body.payload.decision, decision);
+  }
+});
+
+test('4E a refused reason decision is reported and never retried, and the state is re-read', async () => {
+  const ctx = ui({ list: { items: [row()], next_cursor: null }, detail: situation() });
+  await ctx.loadDiscovery();
+  await ctx.selectSituation('sit-1');
+  await clickAction(ctx, ctx.discoveryDetailPanel(), 'discovery-reason-open');
+  ctx.failCommand = { code: 'DISCOVERY_EVIDENCE_FINGERPRINT_CONFLICT', message: 'Основание изменилось' };
+  await assert.rejects(ctx.form.submit({ reason: 'Причина', wait_kind: 'evidence_change' }),
+    { message: 'Основание изменилось' });
+  assert.equal(ctx.calls.filter((call) => call.route === '/api/commands').length, 1, 'one attempt only');
+  assert.equal(ctx.calls.at(-1).route, '/api/discovery/sit-1', 'canonical state is re-read after the refusal');
+});
+
+test('4E a stale basis shows no decision controls at all', async () => {
+  const stale = situation({ freshness: { fresh: false, reasons: ['DISCOVERY_EVIDENCE_STALE'] } });
+  const ctx = ui({ list: { items: [row()], next_cursor: null }, detail: stale });
+  await ctx.loadDiscovery();
+  await ctx.selectSituation('sit-1');
+  const html = ctx.discoveryDetailPanel();
+  assert.doesNotMatch(html, /discovery-review-approve/);
+  assert.doesNotMatch(html, /discovery-reason-open/);
+  assert.match(html, /Основание устарело/);
+  assert.match(html, /DISCOVERY_EVIDENCE_STALE/);
+});
+
 test('4E a reason decision is sent with the exact assessment, revision and fingerprint', async () => {
   const ctx = ui({ list: { items: [row()], next_cursor: null }, detail: situation() });
   await ctx.loadDiscovery();

@@ -86,8 +86,10 @@ function discoveryTab(){
 }
 function discoveryDetailPanel(){
   if(discoveryDetailError)return panel('Ситуация',empty('Ситуация больше недоступна',discoveryDetailError));
-  if(discoveryDetail&&!discoveryLive(discoveryDetail))
+  if(discoveryDetail&&['STOPPED','DISMISSED','TRANSFERRED','STALE'].includes(discoveryDetail.status))
     return panel(`Ситуация ${discoveryDetail.situation_id}`,`<p>Эта ситуация закрыта: ${esc(discoveryDetail.status)}. Решения недоступны.</p>`);
+  if(discoveryDetail&&discoveryDetail.freshness?.fresh!==true)
+    return panel(`Ситуация ${discoveryDetail.situation_id}`,`<p>Основание устарело: ${esc((discoveryDetail.freshness?.reasons??[]).join(', '))}. Решения недоступны, пока основание не обновится.</p>`);
   const d=discoveryDetail;
   if(!d)return panel('Ситуация',empty('Выберите ситуацию','Показываем только то, что уже записано в системе. Ничего не отправляется отсюда.'));
   const evidence=d.evidence.map(item=>`<p><strong>Зафиксированное наблюдение — не подтверждённый факт</strong>: ${esc(item.text)}${truncatedMark(item.text_truncated)}<small>${esc(item.message_id)} · версия ${item.message_version} · ${esc(item.author_id??'—')}</small></p>`).join('');
@@ -109,7 +111,10 @@ function discoveryDetailPanel(){
 
 // Stage 4E: the operator's existing write commands, exposed and nothing more. The UI never
 // decides, never repairs, and never retries a rejected decision on its own.
-const discoveryLive = d => !!d && !['STOPPED','DISMISSED','TRANSFERRED','STALE'].includes(d.status);
+// Actions are offered only for a live, fresh basis. A stale or expired situation is shown, but it
+// is not decided from the screen: the operator's own basis has already moved on.
+const discoveryLive = d => !!d && !['STOPPED','DISMISSED','TRANSFERRED','STALE'].includes(d.status)
+  && d.freshness?.fresh === true;
 const discoveryProposedReview = d => (d?.review_tasks ?? []).find(t => t.status === 'proposed');
 function discoveryOperatorActions(d) {
   if (!discoveryLive(d)) return '';
@@ -118,7 +123,10 @@ function discoveryOperatorActions(d) {
     parts.push(button('Одобрить разбор','discovery-review-approve',proposed.id,'primary'));
     parts.push(button('Отклонить','discovery-review-reject',proposed.id,'danger'));
   }
-  parts.push(button('Решение: WAIT / IGNORE / STOP','discovery-reason-open',d.situation_id));
+  // Each decision gets its own control. The decision travels in data-mode, exactly like the
+  // other actions carry their parameter, so the real click path cannot open an undefined form.
+  for (const decision of ['WAIT','IGNORE','STOP'])
+    parts.push(`<button class="button ${decision==='STOP'?'danger':'secondary'}" data-do="discovery-reason-open" data-id="${esc(d.situation_id)}" data-mode="${decision}">${decision}</button>`);
   return `<div class="actions">${parts.join('')}</div>`;
 }
 const reasonForm = decision => {
@@ -137,12 +145,17 @@ const reasonForm = decision => {
     const wait = decision === 'WAIT'
       ? (values.wait_kind === 'deadline' ? { kind: 'deadline', at: values.wait_at } : { kind: 'evidence_change' })
       : undefined;
-    await command('discovery.reason', { situation_id: d.situation_id, assessment_id: String(assessment.id),
-      expected_revision: d.revision, expected_evidence_fingerprint: d.evidence_fingerprint,
-      decision, reason: values.reason, ...(wait ? { wait } : {}) });
-    await selectSituation(d.situation_id);
-    await loadDiscovery();
-    render();
+    try {
+      await command('discovery.reason', { situation_id: d.situation_id, assessment_id: String(assessment.id),
+        expected_revision: d.revision, expected_evidence_fingerprint: d.evidence_fingerprint,
+        decision, reason: values.reason, ...(wait ? { wait } : {}) });
+    } finally {
+      // One attempt, always. A refusal means this screen is out of date, so the canonical state is
+      // re-read before the error reaches the operator.
+      await selectSituation(d.situation_id);
+      await loadDiscovery();
+      render();
+    }
   });
 };
 function engagementPanel(){
