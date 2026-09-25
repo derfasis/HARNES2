@@ -68,19 +68,31 @@ leaves the surface.
 `freshness` is the verdict only. Evidence stays behind the detail surface.
 
 **Detail** is an allowlist, not the internal projection. It carries `situation_id`, `status`,
-`storage_status`, `revision`, `evidence_fingerprint`, a `basis` of the six situational fields,
+`storage_status`, `revision`, `evidence_fingerprint`, a `basis` of seven situational fields
+(`source_ref`, `subject_ref`, `context_key`, `purpose`, `expires_at`, `created_at`, `updated_at`),
 `freshness`, bounded `evidence` rows, assessments with `hypothesis` and `why_now`, opening
 proposals, review tasks, and the standing `executable: false`, `contact_permission: false`,
 `sent: false`, `allowed_effects: []`.
 
 What the allowlist deliberately withholds: raw event `payload_json`, `partner_id`,
-`offer_fingerprint`, `source_kind`, and any transport metadata. Evidence rows expose the source
-event id, message id and version, author id, observation time, and the message text bounded to
-2000 characters with an explicit `text_truncated` flag — truncation is announced, never silent.
-Assessment and proposal text is bounded the same way, quotes included. The internal
-`discoveryDetail()` still carries the full durable projection, and Stage 3C does not change it.
+`offer_fingerprint`, `source_kind`, and any transport metadata.
 
-Reading it must never be presented as any of the following: Reading it must never be presented as any of the following:
+Evidence rows expose the source event id, message id and version, author id, observation time, and
+the message text. Every bounded string is capped at 2000 characters and carries its own flag next
+to it, so truncation is announced and never silent: `text_truncated` on evidence rows and on
+hypothesis and inference text, `quote_truncated` on attributed claims, `reason_truncated` on WHY
+NOW, and `text_truncated` / `rationale_truncated` on opening proposals.
+
+Each assessment reports `reasoning_version` and `reasoning_shape`. `structured_v1` is the
+structured reasoning written by Stage 1. `legacy_v0_strings` is a pre-Stage-1 assessment that
+stored `hypothesis` and `why_now` as two plain strings; those strings are projected verbatim and
+their `attributed_claims`, `inferences`, `uncertainty`, and `why_now.evidence_event_ids` are
+present but empty, because Stage 1 never recorded them and the projection will not invent them.
+
+The internal `discoveryDetail()` still carries the full durable projection, and Stage 3C does not
+change it.
+
+Reading it must never be presented as any of the following:
 
 - A hypothesis is an `unverified_proposal`, never a verified fact.
 - Evidence is a recorded observation, never a verified truth. A quote proves that someone said
