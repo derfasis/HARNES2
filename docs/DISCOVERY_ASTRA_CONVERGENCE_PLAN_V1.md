@@ -183,10 +183,14 @@ This is the required decision record before any implementation slice.
 
 ## 8. Migration order and gates
 
-Each stage is a separate reviewable slice. A later stage does not start merely
-because an earlier stage was implemented.
+Each stage has a contract gate and, only after a separate owner decision, a
+future implementation gate. This branch executes only the contract gates; it
+contains no Astra or production implementation. A later stage never starts
+merely because an earlier stage was designed.
 
 ### Stage 0 — Freeze and inventory
+
+**Contract gate (this branch):**
 
 - Keep `main@23195c2` frozen.
 - Record the current gate results and baseline SHA.
@@ -196,51 +200,70 @@ because an earlier stage was implemented.
 
 ### Stage 1 — Hypothesis and `WHY NOW` contract
 
+**Contract gate (this branch):**
+
 - Define durable fields and freshness/staleness transitions.
 - Keep model proposals separate from source truth.
-- Write black-box acceptance tests before implementation.
+- Specify the black-box acceptance cases that a future implementation must
+  satisfy; do not add those tests or implementation here.
 
-**Exit gate:** provenance, restart, edit, delete, and revoke tests pass; no
-contact effect exists.
+**Future implementation gate (separate branch):** after owner approval,
+provenance, restart, edit, delete, and revoke tests pass with no contact
+effect.
 
 ### Stage 2 — Reasoning contract
 
+**Contract gate (this branch):**
+
 - Specify `WAIT`, `IGNORE`, `REVIEW`, and `STOP` transitions.
 - Define operator-only state changes and idempotent replay.
-- Decide `STOP` versus `IGNORE` with the owner before coding `STOP`.
+- Record `STOP` versus `IGNORE` as an owner decision before coding `STOP`.
 
-**Exit gate:** state transition matrix, replay contract, and existing main
-regression all green.
+**Future implementation gate (separate branch):** after owner approval, the
+state transition matrix, replay contract, and existing main regression are
+green.
 
 ### Stage 3 — Review presentation
 
+**Contract gate (this branch):**
+
 - Define card fields, stale/revoked reasons, and no-permission wording.
 - Keep generic task execution excluded from review cards.
-- Prove UI state from durable database fixtures, not screenshots alone.
+- Specify the durable database fixtures a future UI integration must prove;
+  do not add a UI fixture here.
 
-**Exit gate:** UI contract and integration fixture reviewed; no live transport.
+**Future implementation gate (separate branch):** after owner approval, the UI
+contract and integration fixture are reviewed with no live transport.
 
 ### Stage 4 — Evaluation
 
-- Build synthetic corpus and scorer in a separate evaluation boundary.
-- Add proof-level metadata and baseline SHA to every report.
-- Prove that evaluation cannot mutate runtime authority.
+**Contract gate (this branch):**
 
-**Exit gate:** `live_proof=false` is machine-checkable; no runtime diff.
+- Specify a synthetic corpus and scorer in a separate evaluation boundary.
+- Specify proof-level metadata and baseline SHA for every report.
+- Specify the proof that evaluation cannot mutate runtime authority.
+
+**Future implementation gate (separate branch):** after owner approval,
+`live_proof=false` is machine-checkable and the runtime diff is empty.
 
 ### Stage 5 — Candidate learning
 
+**Contract gate (this branch):**
+
 - Define evidence-linked lessons and operator review.
-- Prove lessons remain `runtime_use=false` until explicitly activated.
-- Prove counterexamples and limitations survive review.
+- Define the `runtime_use=false` invariant and counterexample/limitation
+  retention requirements; do not implement learning here.
 
-**Exit gate:** candidate-only learning contract and regression coverage.
+**Future implementation gate (separate branch):** after owner approval, the
+candidate-only learning contract and regression coverage are green.
 
-### Stage 6 — Implementation and rollout decision
+### Stage 6 — Live rollout decision
 
-Only after Stages 0–5 are reviewed may the owner authorize a separate
-implementation branch. That decision must specify model/runtime enablement,
-credentials, telemetry, retention, rollback, and live-send authority separately.
+Stage 6 is not the authorization to write all of Stages 1–5 at once. Each
+future implementation slice needs its own owner approval and gate. Stage 6 is
+the separate decision about live rollout, model/runtime enablement,
+credentials, telemetry, retention, rollback, and live-send authority, after
+the relevant implementation gates have passed.
 
 ## 9. Acceptance and rollback rules
 
