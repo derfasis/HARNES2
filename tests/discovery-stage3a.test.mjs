@@ -71,11 +71,17 @@ async function candidate(h, decision = 'OBSERVE', messageId = 'message:1', threa
   return row.situation_id;
 }
 
+function item0(page) { return page.items[0]; }
+
 const EFFECT_TABLES = ['events', 'command_receipts', 'tasks', 'discovery_situations', 'discovery_evidence',
   'persons', 'conversations', 'messages', 'facts', 'engagements', 'drafts', 'approvals'];
 
+// Row contents, not just counts: a read that mutates an existing row must still fail this.
 function snapshot(h) {
-  return EFFECT_TABLES.map((table) => `${table}:${h.store.get(`SELECT COUNT(*) AS n FROM ${table}`).n}`).join('|');
+  return EFFECT_TABLES.map((table) => {
+    const rows = h.store.all(`SELECT * FROM ${table} ORDER BY id`).map((row) => JSON.stringify(row));
+    return `${table}[${rows.join(',')}]`;
+  }).join('|');
 }
 
 test('S3A IGNORE is listed as BLOCKED and unlocks on new evidence', async t => {
@@ -85,6 +91,9 @@ test('S3A IGNORE is listed as BLOCKED and unlocks on new evidence', async t => {
   const before = snapshot(h);
   const page = h.surface();
   assert.equal(snapshot(h), before, 'surface must not write');
+  assert.deepEqual(Object.keys(item0(page)).sort(), ['allowed_effects', 'contact_permission', 'decision',
+    'evidence_fingerprint', 'executable', 'freshness', 'reason', 'revision', 'situation_id', 'state',
+    'storage_status', 'transition_id', 'unlock', 'wait']);
   assert.equal(page.items.length, 1);
   const [item] = page.items;
   assert.equal(item.situation_id, situationId);
@@ -97,10 +106,11 @@ test('S3A IGNORE is listed as BLOCKED and unlocks on new evidence', async t => {
   assert.equal(item.storage_status, 'OBSERVING');
   assert.equal(typeof item.transition_id, 'string');
   assert.equal(item.freshness.fresh, true);
+  assert.deepEqual(Object.keys(item.freshness).sort(), ['fresh', 'reasons']);
+  assert.equal(JSON.stringify(page).includes('two hours a week'), false, 'surface must not expose source text');
   assert.deepEqual(item.allowed_effects, []);
   assert.equal(item.executable, false);
   assert.equal(item.contact_permission, false);
-  assert.ok(snapshot(h).includes(`events:${page.items.length > 0 ? before.split('events:')[1] : ''}`));
   // New evidence retires the IGNORE basis: the row leaves the surface entirely.
   await h.ingest(source({ message_id: 'message:2', text: 'New evidence changes the question.' }));
   assert.deepEqual(h.surface().items, []);
@@ -163,6 +173,18 @@ test('S3A each situation is listed once under its own latest transition and a ST
   assert.deepEqual(stopped.surface().items, []);
 });
 
+test('S3A a newer assessment on the same basis retires the previous transition row', async t => {
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse(NOW) });
+  const h = harness(t);
+  const situationId = await candidate(h);
+  await h.command('discovery.reason', reasonPayload(h, situationId, 'WAIT',
+    { wait: { kind: 'deadline', at: '2026-09-25T12:00:05.000Z' } }));
+  t.mock.timers.tick(10000);
+  assert.equal(h.surface().items[0].state, 'READY');
+  await h.command('discovery.assess', assessmentPayload(h, situationId));
+  assert.deepEqual(h.surface().items, [], 'a new assessment supersedes the old transition');
+});
+
 test('S3A surface is operator-only, strict, and bounded by limit plus keyset cursor', async t => {
   const h = harness(t);
   const ids = [];
@@ -212,7 +234,9 @@ test('S3A stale and revoked evidence is reported honestly and never repaired by 
   assert.ok(item.freshness.reasons.length > 0);
   assert.equal(snapshot(h), before);
 
+  const beforeRevoked = snapshot(revoked);
   const revokedItem = revoked.surface().items.find((row) => row.situation_id === revokedSituation);
   assert.equal(revokedItem.freshness.fresh, false);
-  assert.equal(snapshot(revoked), snapshot(revoked));
+  assert.ok(revokedItem.freshness.reasons.length > 0);
+  assert.equal(snapshot(revoked), beforeRevoked);
 });

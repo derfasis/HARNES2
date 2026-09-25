@@ -689,6 +689,7 @@ function reasonTransition(service, p, actor) {
 }
 
 const REASON_STATE_MAX_LIMIT = 100;
+const freshnessVerdict = state => ({ fresh: state.fresh, reasons: state.reasons });
 const SITUATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 // Read-only projection of situations whose latest durable reason transition still governs the
 // current basis. It reports what blocks them and never repairs, expires, or unlocks anything.
@@ -708,8 +709,11 @@ function reasonStates(service, options, actor) {
   const items = page.map((row) => {
     const transition = lastReasonTransition(service, row.id);
     const fingerprint = evidenceFingerprint(service, row.id);
-    // A transition that no longer describes the current evidence basis does not govern it.
-    if (!transition || transition.evidence_fingerprint !== fingerprint) return null;
+    // A transition governs the basis only while it still produced the current revision and
+    // describes the current evidence; a newer assessment or new evidence retires it.
+    if (!transition || transition.evidence_fingerprint !== fingerprint
+      || transition.result_revision !== row.revision) return null;
+    const state = fresh(service, row);
     const deadlineReached = transition.decision === 'WAIT' && transition.wait?.kind === 'deadline'
       && Date.parse(transition.wait.at) <= Date.now();
     return { situation_id: row.id, storage_status: row.status, revision: row.revision,
@@ -717,7 +721,9 @@ function reasonStates(service, options, actor) {
       wait: transition.wait ?? null, state: deadlineReached ? 'READY' : 'BLOCKED',
       unlock: transition.wait?.kind === 'deadline' ? 'DEADLINE_OR_EVIDENCE_CHANGE' : 'EVIDENCE_CHANGE',
       reason: deadlineReached ? 'DEADLINE_REACHED' : transition.reason,
-      freshness: fresh(service, row), executable: false, contact_permission: false, allowed_effects: [] };
+      // Only the verdict travels here: the situation detail stays the place that exposes evidence.
+      freshness: freshnessVerdict(state),
+      executable: false, contact_permission: false, allowed_effects: [] };
   }).filter(Boolean);
   return { items, next_cursor: rows.length > limit ? page.at(-1).id : null };
 }
