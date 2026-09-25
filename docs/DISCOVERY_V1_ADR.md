@@ -30,7 +30,11 @@ a reason cancels any review task that was proposed for the same basis.
               ▼     └── reason WAIT / IGNORE ──▶ OBSERVING
           OBSERVING          reason STOP ──▶ DISMISSED
 
-  edit / delete / revoke / expiry  ──▶  STALE   (at any point; nothing here comes back)
+  edit / delete / revoke / expiry  ──▶  STALE   (while active; nothing here comes back)
+
+  terminal states (DISMISSED, TRANSFERRED, STALE) stay as they are — a later edit or
+  revocation does not relabel them, and a STALE situation is never resurrected.
+
 ```
 
 Statuses are exactly `OBSERVING`, `CANDIDATE`, `DISMISSED`, `STALE`, `TRANSFERRED`, enforced by a
@@ -89,8 +93,10 @@ Pre-Stage-1 assessments stored two plain strings. They remain readable and are p
 than invented.
 
 A situation cannot be re-assessed on the same evidence after `IGNORE`, and cannot be re-assessed
-at all while a `WAIT` is still blocked. A reached deadline unblocks *reassessment* and creates a
-new review task; it never approves anything by itself.
+at all while a `WAIT` is still blocked. A reached deadline only removes that gate: it makes
+reassessment possible again. A new review task appears only if that reassessment is actually
+performed with decision `CANDIDATE`. The deadline itself never creates a task and never approves
+anything.
 
 ## Transfer boundary
 
@@ -105,7 +111,13 @@ failing closed on its own:
 5. a real inbound message exists in that conversation,
 6. a current typed reply permission matches person, conversation, channel, **and** account.
 
-Every rejected attempt leaves the database byte-identical. A successful transfer reports
+A rejection for a missing prerequisite, with the offer and purpose unchanged, leaves the database
+byte-identical — that exact scope is what the safety audit proves. The claim does not extend to a
+rejection taken while the configuration itself changed: the command layer runs offer invalidation
+first, and that maintenance pass may legitimately mark other situations `STALE` before the transfer
+itself is refused. That write is a configuration consequence, not a side effect of the transfer.
+
+A successful transfer reports
 `contact_permission_created: false`, `drafts_created: 0`, and `sends_started: false`; it creates
 engagement attention, nothing else. Discovery never creates a person, a permission, a draft, or a
 send.
