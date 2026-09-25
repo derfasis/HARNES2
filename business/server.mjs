@@ -96,7 +96,7 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
         // Drain the body before refusing, so the client sees 405 instead of a reset connection.
         if (req.method !== 'GET') { for await (const _ of req) { /* discard */ } return send(405,{error:'Метод не поддерживается',code:'method_not_allowed'}); }
         if (url.pathname === '/api/discovery/reason-states') return send(200,discoveryReasonStatesQuery(url,service));
-        return send(200,service.discoveryDetail(decodeURIComponent(url.pathname.split('/').at(-1))));
+        return send(200,service.discoveryPresentationDetail(decodeURIComponent(url.pathname.split('/').at(-1)), { kind: 'operator' }));
       }
       if (req.method === 'GET' && url.pathname.startsWith('/api/opportunity-captures/')) return send(200,service.opportunityCapture(decodeURIComponent(url.pathname.split('/').at(-1))));
       if (req.method === 'GET' && url.pathname === '/api/opportunities') return send(200,service.opportunityReviews({
