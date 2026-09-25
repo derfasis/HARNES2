@@ -23,8 +23,8 @@ violates a rule, not that a script disliked a sentence.
 
 ## The corpus
 
-`corpus.json` holds 29 cases: six classes of four variants each, plus five `discriminator` cases
-whose only job is to prove the scorer fires — one per rule it declares.
+`corpus.json` holds 30 cases: six classes of four variants each, plus six `discriminator` cases
+whose job is to prove the scorer fires on the rules a fixture can actually violate.
 
 Every case is written as one coherent unit. The good fixture describes **its own** source text: a
 fixture claiming a source "asks for a third party" when the source text does not contain such a
@@ -58,6 +58,11 @@ allowed to be mirror images, or the benchmark would prove nothing.
 | `EPISTEMIC_LABEL_MISSING` | the projection dropped `unverified_proposal` |
 | `AUTHORITY_LEAK_IN_PROJECTION` | the non-authority markers are missing |
 
+The first seven are discriminated negatively through a real fixture. The last two are **positive
+regression invariants**: production always satisfies them today, so no fixture can violate them.
+Their negatives are tested directly against the exported check functions, which is honest about
+what the corpus does and does not show.
+
 **Policy expectation** — each case lists the decisions it tolerates, and that is a *set*, not one
 gold answer. A case that allows `OBSERVE|DISMISS|CANDIDATE` is not saying `CANDIDATE` is wrong; it
 is saying no one of the three is privileged. Writing a single gold answer would encode the corpus
@@ -72,7 +77,8 @@ author's taste as truth.
 | `foreign_ref` | production refuses it: `DISCOVERY_REASONING_EVIDENCE_SCOPE` |
 | `authority` | production accepts it, the scorer must catch `UNSUPPORTED_PERMISSION_INFERENCE` |
 | `urgency` | production accepts it, the scorer must catch `URGENCY_OVERRIDE` |
-| `urgency_in_opening` | the promise hides in the **opening proposal**, and is caught there too |
+| `urgency_in_opening` | the promise hides in the opening proposal text |
+| `authority_in_rationale` | the promise hides in the proposal rationale and constraints |
 | `certainty` | production accepts it, the scorer must catch `UNSUPPORTED_CERTAINTY` |
 | `policy` | production accepts it, the scorer must catch `DECISION_POLICY_INCOMPATIBLE` |
 
@@ -87,9 +93,13 @@ outcome — `production`, `scorer`, or `missed` — and a run with any `missed` 
 
 ## Known limits
 
-- The authority and urgency checks are a small, declared **lexicon** with word-boundary matching.
-  They catch stated authority and stated urgency; they cannot catch a clever paraphrase. A case
+- The authority, urgency, and certainty checks are a small, declared **lexicon** with word-boundary
+  matching, plus four narrow patterns for inflected forms such as "разрешение ... получено". They
+  catch stated authority, urgency, and certainty; they cannot catch a clever paraphrase. A case
   that slipped past would be a benchmark gap, not a proof of safety.
+- The scan covers every field the model authored — hypothesis, inferences, uncertainty, WHY NOW,
+  and an opening proposal's text, rationale, and constraints. The source's own quote is never
+  scanned, because the source is not the model.
 - `UNSUPPORTED_ATTRIBUTION` and `QUOTE_NOT_GROUNDED` are second lines of defence: production
   already refuses both, so the corpus proves that refusal, not that the scorer catches them. They
   stay because a future change could open that gap, and a check that only exists in the test suite

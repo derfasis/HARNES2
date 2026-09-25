@@ -10,13 +10,13 @@ without a model run, which this stage does not do.
 
 | Measure | Value |
 | --- | --- |
-| Cases | 29 |
-| Well-formed fixtures accepted by the real contract path | 29 / 29 |
-| Deliberately bad fixtures caught | 29 / 29 |
+| Cases | 30 |
+| Well-formed fixtures accepted by the real contract path | 30 / 30 |
+| Deliberately bad fixtures caught | 30 / 30 |
 | Caught by production | 9 |
-| Caught by the scorer's own checks | 20 |
+| Caught by the scorer's own checks | 21 |
 
-Codes raised by the scorer: `DECISION_POLICY_INCOMPATIBLE` (1), `UNSUPPORTED_CERTAINTY` (1), `UNSUPPORTED_PERMISSION_INFERENCE` (18), `URGENCY_OVERRIDE` (5).
+Codes raised by the scorer: `DECISION_POLICY_INCOMPATIBLE` (1), `UNSUPPORTED_CERTAINTY` (1), `UNSUPPORTED_PERMISSION_INFERENCE` (19), `URGENCY_OVERRIDE` (6).
 
 No product finding was found in this run: every deliberately bad fixture was caught, and no
 well-formed fixture was rejected or let through.
@@ -57,16 +57,28 @@ Each row states an explicit outcome: `production`, `scorer`, or `missed`. A run 
 | `disc-3` | scorer | `UNSUPPORTED_CERTAINTY` |
 | `disc-4` | scorer | `DECISION_POLICY_INCOMPATIBLE` |
 | `disc-5` | production | `DISCOVERY_REASONING_EVIDENCE_SCOPE` |
+| `disc-6` | scorer | `UNSUPPORTED_PERMISSION_INFERENCE`, `URGENCY_OVERRIDE` |
+
+## Coverage of the declared rules
+
+Discriminated negatively through a real fixture: `QUOTE_NOT_GROUNDED` and
+`DISCOVERY_UNCERTAINTY_REQUIRED` (production), `UNSUPPORTED_PERMISSION_INFERENCE`, `URGENCY_OVERRIDE`,
+`UNSUPPORTED_CERTAINTY`, and `DECISION_POLICY_INCOMPATIBLE` (scorer).
+
+Positive regressions, whose negatives are tested directly against the exported check functions
+rather than through a fixture, because production always satisfies them today:
+`EPISTEMIC_LABEL_MISSING`, `AUTHORITY_LEAK_IN_PROJECTION`.
 
 ## What this run does not prove
 
 - That a hypothesis is true, useful, or well written.
 - That the lexicon catches a paraphrase. The authority, urgency, and certainty checks are a small
-  declared word list, not semantics.
+  declared word list plus four narrow patterns, not semantics.
 - Anything about a model's reasoning: no model is involved at any point.
-- That contradiction handling across messages is correct. That belongs to the safety audit.
-- That `QUOTE_NOT_GROUNDED` and `UNSUPPORTED_ATTRIBUTION` can fire: production already refuses both
-  cases first, so they are defence in depth rather than exercised rules.
+- That contradiction handling across messages is correct. This benchmark judges one assessment at
+  a time, and says so in each case: no fixture claims to see a previous message.
+- That `UNSUPPORTED_ATTRIBUTION` can fire: production refuses a foreign reference first
+  (`DISCOVERY_REASONING_EVIDENCE_SCOPE`), so it is defence in depth rather than an exercised rule.
 
 ## Provenance
 
