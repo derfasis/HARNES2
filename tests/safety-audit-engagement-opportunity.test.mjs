@@ -77,9 +77,11 @@ async function harness(t) {
 // E1 — a decision is bound to the exact engagement revision and to a real message.
 test('E1 a decision requires the current revision and real evidence', async t => {
   const h = await harness(t);
+  const before = snapshot(h.store);
   await assert.rejects(h.command('decision.commit', { engagement_id: h.eid, expected_revision: 999, kind: 'IGNORE',
     reason: 'x', expected_next: 'y', evidence: [{ type: 'message', id: h.mid }] }), { status: 409 });
   await assert.rejects(h.decide('IGNORE', { evidence: [{ type: 'message', id: 'no-such-message' }] }), { status: 409 });
+  assert.equal(snapshot(h.store), before, 'a refused decision must not write anything');
   assert.equal(h.service.engagement.get(h.eid).revision, 0);
   assert.equal(h.store.get("SELECT COUNT(*) AS n FROM engagement_decisions").n, 0);
 });
@@ -106,6 +108,21 @@ test('E2 ACT needs a typed permission, and a broken one closes the door without 
     assert.equal(snapshot(h.store), current, `a grant with a wrong ${column} must be refused with no writes`);
     h.store.run(`UPDATE contact_permissions SET ${column}=? WHERE id=?`, permission[column], permission.id);
   }
+  // Account isolation needs a conversation that really has one: on a manual channel
+  // account_id is null and no mismatch could ever be expressed.
+  h.store.run('INSERT INTO channel_identities(id,person_id,channel,account_id,external_id) VALUES(?,?,?,?,?)',
+    id(), h.pid, 'telegram', 'account-a', 'external-a');
+  const identity = h.store.get('SELECT id FROM channel_identities ORDER BY rowid DESC LIMIT 1').id;
+  h.store.run("UPDATE conversations SET channel='telegram', channel_identity_id=? WHERE id=?", identity, h.cid);
+  h.store.run("UPDATE contact_permissions SET channel='telegram', account_id='account-b' WHERE id=?",
+    h.store.get('SELECT id FROM contact_permissions ORDER BY rowid DESC LIMIT 1').id);
+  const current = snapshot(h.store);
+  await assert.rejects(h.decide('ACT', { action: { purpose: 'reply', text: 'Ответ.' } }),
+    { code: 'typed_permission_required' });
+  assert.equal(snapshot(h.store), current, 'a grant bound to another account must be refused with no writes');
+  h.store.run("UPDATE contact_permissions SET account_id='account-a' WHERE id=?",
+    h.store.get('SELECT id FROM contact_permissions ORDER BY rowid DESC LIMIT 1').id);
+
   const decided = await h.decide('ACT', { action: { purpose: 'reply', text: 'Общая модель пояснена.' } });
   assert.equal(decided.kind, 'ACT');
   assert.ok(decided.decision_id);
@@ -156,22 +173,37 @@ test('E5 request replay is idempotent and payload changes conflict', async t => 
   const first = await h.command('decision.commit', payload, OPERATOR, request);
   const second = await h.command('decision.commit', payload, OPERATOR, request);
   assert.equal(second.status, first.status);
+  const before = snapshot(h.store);
   await assert.rejects(h.command('decision.commit', { ...payload, reason: 'Changed' }, OPERATOR, request),
     { status: 409 });
+  assert.equal(snapshot(h.store), before, 'a conflicting replay must not write anything');
   assert.equal(h.store.get("SELECT COUNT(*) AS n FROM engagement_decisions").n, 1);
 });
 
 // E6 — a restart neither resumes a closed case nor restores authority.
 test('E6 a closed or stopped engagement stays closed across a restart', async t => {
-  const h = await harness(t);
-  await h.grant();
-  await h.decide('STOP');
-  h.restart();
-  assert.equal(h.service.engagement.current(h.cid), undefined);
-  const before = snapshot(h.store);
-  await assert.rejects(h.decide('ACT', { action: { purpose: 'reply', text: 'Ответ.' } }), { status: 409 });
-  assert.equal(snapshot(h.store), before);
-  assert.equal(h.store.get("SELECT COUNT(*) AS n FROM delivery_attempts").n, 0);
+  const stopped = await harness(t);
+  await stopped.grant();
+  await stopped.decide('STOP');
+  stopped.restart();
+  assert.equal(stopped.service.engagement.current(stopped.cid), undefined);
+  const before = snapshot(stopped.store);
+  await assert.rejects(stopped.decide('ACT', { action: { purpose: 'reply', text: 'Ответ.' } }), { status: 409 });
+  assert.equal(snapshot(stopped.store), before);
+  assert.equal(stopped.store.get("SELECT COUNT(*) AS n FROM delivery_attempts").n, 0);
+
+  const closed = await harness(t);
+  await closed.grant();
+  await closed.decide('HANDOFF');
+  const handoff = closed.store.get("SELECT id FROM engagement_handoffs WHERE status='requested' ORDER BY rowid DESC LIMIT 1");
+  await closed.command('handoff.accept', { engagement_id: closed.eid, handoff_id: handoff.id });
+  await closed.command('engagement.close', { engagement_id: closed.eid, evidence: 'Audit close: owner decision recorded.' });
+  closed.restart();
+  assert.equal(closed.service.engagement.current(closed.cid), undefined);
+  const closedBefore = snapshot(closed.store);
+  await assert.rejects(closed.decide('ACT', { action: { purpose: 'reply', text: 'Ответ.' } }), { status: 409 });
+  assert.equal(snapshot(closed.store), closedBefore);
+  assert.equal(closed.store.get("SELECT COUNT(*) AS n FROM delivery_attempts").n, 0);
 });
 
 // O1 — opportunity review is bound to the exact fingerprint and revision.
@@ -237,9 +269,16 @@ test('O3 a decided card cannot be re-decided, and replay stays idempotent', asyn
   assert.equal(second.review.revision, first.review.revision);
   assert.equal(second.review.status, first.review.status);
   const current = h.service.opportunityDetail(consumed.task_id);
+  const before = snapshot(h.store);
   await assert.rejects(h.command('opportunity.review.approve', { ...payload,
-    fingerprint: current.fingerprint, expected_revision: current.review.revision }, { kind: 'operator' }, id()),
+    fingerprint: current.fingerprint, expected_revision: current.review.revision }, OPERATOR, id()),
   { status: 409 });
+  const after = snapshot(h.store);
+  // A re-decide is a refusal, so the denial trail is the only permitted difference.
+  assert.deepEqual(tables(h.store).filter((table) => section(before, table) !== section(after, table)),
+    ['events']);
+  assert.equal(h.service.opportunityDetail(consumed.task_id).review.revision, current.review.revision,
+    'the settled revision does not move');
   // An approved review leaves the model output frozen and the card reviewable, not executed.
   const settled = h.service.opportunityDetail(consumed.task_id);
   assert.equal(settled.review.status, 'approved');

@@ -11,11 +11,11 @@ this stage. A failing invariant is a finding, reported here and fixed in its own
 | Invariant | Statement | Result |
 | --- | --- | --- |
 | E1 | A decision requires the current engagement revision and real message evidence. | PASS |
-| E2 | ACT requires a typed permission matching person, conversation, channel, and account. | PASS |
+| E2 | ACT requires a typed permission matching person, conversation, channel, and account, each proven separately. | PASS |
 | E3 | A suppressed person or a human-owned conversation produces no work, and history is not erased. | PASS |
 | E4 | A draft is never a send, and no delivery is ever claimed. | PASS |
 | E5 | Request replay is idempotent; a changed payload under the same id conflicts. | PASS |
-| E6 | A closed or stopped engagement stays closed across a restart. | PASS |
+| E6 | A closed **or** stopped engagement stays closed across a restart; both paths are exercised. | PASS |
 | O1 | Opportunity review requires the exact fingerprint and revision. | PASS |
 | O2 | Approving a card is a review act: non-executable, no contact, no send. | PASS |
 | O3 | A decided card cannot be decided twice, and replay stays idempotent. | PASS |
@@ -23,11 +23,14 @@ this stage. A failing invariant is a finding, reported here and fixed in its own
 
 ## How the refusals were checked
 
-The full row content of every table in the schema is captured before and after each refusal. Where
-a refusal is *supposed* to write something, that something is named and constrained, rather than
-being waved through:
+The full row content of every table in the schema is captured before and after **every** refusal
+in this audit: the stale-revision and missing-evidence decisions in E1, the broken grant in E2, the
+suppressed and human-owned cases in E3, the conflicting replay in E5, the closed and stopped cases
+in E6, the bad fingerprint, revision, and field set in O1, and the re-decide in O3. Where a refusal
+is *supposed* to write something, that something is named and constrained, rather than being waved
+through:
 
-- A refused Engagement or Opportunity command writes nothing at all.
+- A refused Engagement command writes nothing at all.
 - A refused **Opportunity review** writes exactly one thing: an `opportunity.review.denied` event.
 
 ## Finding for review: the denial trail is a durable write, by design
@@ -62,6 +65,11 @@ behaviour rather than adjusted to pass:
 3. "An approval returns a status" — false. It returns `review` plus explicit `executable: false`,
    `contact_permission: false`, and `allowed_effects: []`, which is a stronger claim than a status
    string would have been.
+
+Account isolation needed its own setup: on a manual conversation `account_id` is null, so no
+mismatch can even be expressed. The audit moves the conversation onto a real channel identity and
+binds the grant to a *different* account, so the refusal can only be about the account — and then
+re-binds it correctly to show the path opens again.
 
 ## What this audit does not cover
 
