@@ -158,6 +158,10 @@ test('S2 reason is stale-safe, operator-only, strict, and idempotent', async t =
     { code: 'DISCOVERY_WAIT_REQUIRED' });
   await assert.rejects(freshHarness.command('discovery.reason', reasonPayload(freshHarness, fresh, 'IGNORE', { wait: { kind: 'evidence_change' } })),
     { code: 'DISCOVERY_WAIT_NOT_ALLOWED' });
+  await assert.rejects(freshHarness.command('discovery.reason', reasonPayload(freshHarness, fresh, 'STOP', { wait: { kind: 'evidence_change' } })),
+    { code: 'DISCOVERY_WAIT_NOT_ALLOWED' });
+  await assert.rejects(freshHarness.command('discovery.reason', reasonPayload(freshHarness, fresh, 'WAIT', { wait: { kind: 'evidence_change', at: NOW } })),
+    { code: 'DISCOVERY_WAIT_INVALID' });
   await assert.rejects(freshHarness.command('discovery.reason', reasonPayload(freshHarness, fresh, 'WAIT', { wait: { kind: 'deadline', at: 'not-a-date' } })),
     { code: 'DISCOVERY_WAIT_INVALID' });
   const result = await freshHarness.command('discovery.reason', payload, request);
