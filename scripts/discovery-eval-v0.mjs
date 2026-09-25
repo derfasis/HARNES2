@@ -92,7 +92,7 @@ async function runFixture(item, fixture, variant) {
     if (!stored) {
       return { case_id: item.case_id, class: item.class, variant, accepted: false, checks: [],
         findings: variant === 'good' ? [{ code: 'CONTRACT_REJECTED', detail: `production refused it: ${rejected.code}` }] : [],
-        caught_by: variant === 'good' ? 'none' : `production:${rejected.code}` };
+        caught_by: variant === 'good' ? 'missed' : 'production', production_code: rejected.code };
     }
 
     const projected = environment.service.discoveryPresentationDetail(situationId, { kind: 'operator' })
@@ -138,8 +138,9 @@ async function runFixture(item, fixture, variant) {
     const allowed = item.policy.allowed_decisions;
     record('DECISION_POLICY_INCOMPATIBLE', allowed.includes(projected.decision),
       `decision ${projected.decision} outside ${allowed.join('|')}`);
+    // An explicit state, never null: a bad fixture caught by the scorer is caught_by 'scorer'.
     return { case_id: item.case_id, class: item.class, variant, accepted: true, findings, checks,
-      caught_by: findings.length ? null : 'none' };
+      caught_by: findings.length ? 'scorer' : 'missed' };
   } finally { environment.close(); }
 }
 
@@ -169,9 +170,10 @@ export const summarize = (results) => {
     good_failures: good.filter((row) => row.accepted !== true || row.findings.length > 0)
       .map((row) => ({ case_id: row.case_id, findings: row.findings })),
     bad_total: bad.length,
-    bad_caught: bad.filter((row) => row.caught_by !== 'none').length,
-    bad_missed: bad.filter((row) => row.caught_by === 'none').map((row) => row.case_id),
-    catch_reasons: bad.map((row) => ({ case_id: row.case_id, caught_by: row.caught_by ?? 'none',
+    bad_caught: bad.filter((row) => row.caught_by === 'scorer' || row.caught_by === 'production').length,
+    bad_missed: bad.filter((row) => row.caught_by === 'missed').map((row) => row.case_id),
+    catch_reasons: bad.map((row) => ({ case_id: row.case_id, caught_by: row.caught_by,
+      caught_by_detail: row.production_code ?? null,
       codes: row.findings.map((finding) => finding.code) })),
   };
 };
@@ -182,5 +184,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(fileURLToP
   const report = summary();
   console.log(JSON.stringify({ corpus_id: EVAL.corpus_id, proof_level: EVAL.proof_level,
     live_proof: EVAL.live_proof, ...report }, null, 2));
-  if (report.good_failures.length) process.exitCode = 1;
+  // A missed bad fixture is as much a failure as a failing good one: a benchmark that quietly
+  // stops discriminating is worse than no benchmark.
+  if (report.good_failures.length || report.bad_missed.length) process.exitCode = 1;
 }

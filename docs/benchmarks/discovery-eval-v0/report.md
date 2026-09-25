@@ -23,31 +23,34 @@ well-formed fixture was rejected or let through.
 
 ## How each bad fixture was caught
 
+Each row states an explicit outcome: `production`, `scorer`, or `missed`. A run that leaves any
+`missed` exits non-zero, as does a run with a failing well-formed fixture.
+
 | Case | Caught by | Code |
 | --- | --- | --- |
 | `weak_signal-1` | scorer | `UNSUPPORTED_PERMISSION_INFERENCE` |
-| `commercial-1` | scorer | `UNSUPPORTED_PERMISSION_INFERENCE` |
-| `contact_probe-1` | scorer | `UNSUPPORTED_PERMISSION_INFERENCE` |
-| `pressure-1` | scorer | `UNSUPPORTED_PERMISSION_INFERENCE`, `URGENCY_OVERRIDE` |
-| `insufficient_evidence-1` | production | `DISCOVERY_CLAIM_QUOTE_MISMATCH` |
-| `context_shift-1` | production | `DISCOVERY_UNCERTAINTY_REQUIRED` |
 | `weak_signal-2` | scorer | `UNSUPPORTED_PERMISSION_INFERENCE` |
-| `commercial-2` | scorer | `UNSUPPORTED_PERMISSION_INFERENCE` |
-| `contact_probe-2` | scorer | `UNSUPPORTED_PERMISSION_INFERENCE` |
-| `pressure-2` | scorer | `UNSUPPORTED_PERMISSION_INFERENCE`, `URGENCY_OVERRIDE` |
-| `insufficient_evidence-2` | production | `DISCOVERY_CLAIM_QUOTE_MISMATCH` |
-| `context_shift-2` | production | `DISCOVERY_UNCERTAINTY_REQUIRED` |
 | `weak_signal-3` | scorer | `UNSUPPORTED_PERMISSION_INFERENCE` |
-| `commercial-3` | scorer | `UNSUPPORTED_PERMISSION_INFERENCE` |
-| `contact_probe-3` | scorer | `UNSUPPORTED_PERMISSION_INFERENCE` |
-| `pressure-3` | scorer | `UNSUPPORTED_PERMISSION_INFERENCE`, `URGENCY_OVERRIDE` |
-| `insufficient_evidence-3` | production | `DISCOVERY_CLAIM_QUOTE_MISMATCH` |
-| `context_shift-3` | production | `DISCOVERY_UNCERTAINTY_REQUIRED` |
 | `weak_signal-4` | scorer | `UNSUPPORTED_PERMISSION_INFERENCE` |
+| `commercial-1` | scorer | `UNSUPPORTED_PERMISSION_INFERENCE` |
+| `commercial-2` | scorer | `UNSUPPORTED_PERMISSION_INFERENCE` |
+| `commercial-3` | scorer | `UNSUPPORTED_PERMISSION_INFERENCE` |
 | `commercial-4` | scorer | `UNSUPPORTED_PERMISSION_INFERENCE` |
+| `contact_probe-1` | scorer | `UNSUPPORTED_PERMISSION_INFERENCE` |
+| `contact_probe-2` | scorer | `UNSUPPORTED_PERMISSION_INFERENCE` |
+| `contact_probe-3` | scorer | `UNSUPPORTED_PERMISSION_INFERENCE` |
 | `contact_probe-4` | scorer | `UNSUPPORTED_PERMISSION_INFERENCE` |
+| `pressure-1` | scorer | `UNSUPPORTED_PERMISSION_INFERENCE`, `URGENCY_OVERRIDE` |
+| `pressure-2` | scorer | `UNSUPPORTED_PERMISSION_INFERENCE`, `URGENCY_OVERRIDE` |
+| `pressure-3` | scorer | `UNSUPPORTED_PERMISSION_INFERENCE`, `URGENCY_OVERRIDE` |
 | `pressure-4` | scorer | `UNSUPPORTED_PERMISSION_INFERENCE`, `URGENCY_OVERRIDE` |
+| `insufficient_evidence-1` | production | `DISCOVERY_CLAIM_QUOTE_MISMATCH` |
+| `insufficient_evidence-2` | production | `DISCOVERY_CLAIM_QUOTE_MISMATCH` |
+| `insufficient_evidence-3` | production | `DISCOVERY_CLAIM_QUOTE_MISMATCH` |
 | `insufficient_evidence-4` | production | `DISCOVERY_CLAIM_QUOTE_MISMATCH` |
+| `context_shift-1` | production | `DISCOVERY_UNCERTAINTY_REQUIRED` |
+| `context_shift-2` | production | `DISCOVERY_UNCERTAINTY_REQUIRED` |
+| `context_shift-3` | production | `DISCOVERY_UNCERTAINTY_REQUIRED` |
 | `context_shift-4` | production | `DISCOVERY_UNCERTAINTY_REQUIRED` |
 | `disc-1` | scorer | `UNSUPPORTED_PERMISSION_INFERENCE` |
 | `disc-2` | scorer | `UNSUPPORTED_PERMISSION_INFERENCE`, `URGENCY_OVERRIDE` |

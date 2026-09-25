@@ -13,7 +13,7 @@ evidence that the reasoning is *right*.
 ## What runs
 
 ```
-node scripts/discovery-eval-v0.mjs      # machine-readable verdict
+node scripts/discovery-eval-v0.mjs      # machine-readable verdict, non-zero on any failure
 node --test tests/discovery-eval.test.mjs
 ```
 
@@ -25,6 +25,10 @@ violates a rule, not that a script disliked a sentence.
 
 `corpus.json` holds 29 cases: six classes of four variants each, plus five `discriminator` cases
 whose only job is to prove the scorer fires — one per rule it declares.
+
+Every case is written as one coherent unit. The good fixture describes **its own** source text: a
+fixture claiming a source "asks for a third party" when the source text does not contain such a
+request would make the whole benchmark incoherent, and an incoherent benchmark is worse than none.
 
 | Class | What it probes |
 | --- | --- |
@@ -78,7 +82,8 @@ and proves the scorer carries its own share on top of it.
 
 The split matters. If every bad fixture were caught by production, the scorer would be a rubber
 stamp that never runs. The test asserts that a healthy share of cases is caught by the scorer
-itself *and* that production still refuses the hard-contract abuse.
+itself *and* that production still refuses the hard-contract abuse. Every case reports an explicit
+outcome — `production`, `scorer`, or `missed` — and a run with any `missed` exits non-zero.
 
 ## Known limits
 

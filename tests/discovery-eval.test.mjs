@@ -45,7 +45,7 @@ test('4B every deliberately bad fixture is caught, by production or by the score
   // caught by an assessment that production already accepted.
   const byScorer = report.catch_reasons.filter((row) => row.codes.length > 0);
   assert.ok(byScorer.length >= 8, `the scorer must carry its own weight, got ${byScorer.length}`);
-  const byProduction = report.catch_reasons.filter((row) => (row.caught_by ?? '').startsWith('production:'));
+  const byProduction = report.catch_reasons.filter((row) => row.caught_by === 'production');
   assert.ok(byProduction.length >= 4, `production must still catch hard-contract abuse, got ${byProduction.length}`);
 });
 
@@ -67,8 +67,9 @@ test('4B the scorer reports every code it claims to check', () => {
   const byKind = new Map(corpus.cases.map((item) => [item.case_id, item.bad_kind]));
   for (const row of report.catch_reasons) {
     const kind = byKind.get(row.case_id);
-    if (kind === 'ungrounded' || kind === 'no_uncertainty') {
-      assert.match(row.caught_by ?? '', /DISCOVERY_/, `${row.case_id} should be refused by production`);
+    if (kind === 'ungrounded' || kind === 'no_uncertainty' || kind === 'foreign_ref') {
+      assert.equal(row.caught_by, 'production', `${row.case_id} should be refused by production`);
+      assert.match(row.caught_by_detail ?? '', /DISCOVERY_/, `${row.case_id} should name a production code`);
     }
   }
 });
@@ -85,4 +86,31 @@ test('4B the evaluation is deterministic and offline by construction', async () 
   const second = summarize(await runEval());
   assert.equal(JSON.stringify(first), JSON.stringify(second));
   assert.equal(JSON.stringify(first), JSON.stringify(report));
+});
+
+test('4B every bad fixture reports an explicit catch state, never an ambiguous one', () => {
+  for (const row of report.catch_reasons) {
+    assert.ok(['scorer', 'production', 'missed'].includes(row.caught_by), `${row.case_id}: ${row.caught_by}`);
+    if (row.caught_by === 'scorer') assert.ok(row.codes.length > 0, `${row.case_id} caught without a code`);
+    if (row.caught_by === 'production') assert.ok(row.caught_by_detail, `${row.case_id} caught without a production code`);
+  }
+});
+
+test('4B the CLI fails on a missed bad fixture, not only on a failing good one', async () => {
+  const child = await import('node:child_process');
+  const path = await import('node:path');
+  const script = path.join(ROOT, 'scripts/discovery-eval-v0.mjs');
+  const clean = child.spawnSync(process.execPath, [script], { encoding: 'utf8' });
+  assert.equal(clean.status, 0, clean.stdout + clean.stderr);
+  // A corpus whose bad fixture is indistinguishable from a good one must not report success.
+  const item = corpus.cases.find((entry) => entry.class === 'discriminator');
+  const corpusPath = path.join(ROOT, 'docs/benchmarks/discovery-eval-v0/corpus.json');
+  const original = fs.readFileSync(corpusPath, 'utf8');
+  const weakened = { ...JSON.parse(original), cases: [{ ...item, bad: { ...item.bad, hypothesis: 'Возможно, полезно объяснить.', why_now: 'Вопрос общий.', uncertainty: ['Неясно.'], decision: item.bad.decision } }] };
+  fs.writeFileSync(corpusPath, JSON.stringify(weakened, null, 2));
+  try {
+    const failed = child.spawnSync(process.execPath, [script], { encoding: 'utf8' });
+    assert.equal(failed.status, 1, 'a missed bad fixture must fail the run');
+    assert.equal(JSON.parse(failed.stdout).bad_missed.length, 1);
+  } finally { fs.writeFileSync(corpusPath, original); }
 });
