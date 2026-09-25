@@ -67,6 +67,12 @@ leaves the surface.
 
 `freshness` is the verdict only. Evidence stays behind the detail surface.
 
+An assessment also reports `result_revision` and `evidence_fingerprint`. Stage 4E added
+`result_revision` for one reason: the operator screen must know whether the latest assessment
+still produced the situation's current revision, because a reason decision is refused otherwise.
+Offering a decision that is guaranteed to fail is worse than offering none, and the screen has no
+other honest way to tell. It is an additive field on the allowlist, not a new authority.
+
 **Detail** is an allowlist, not the internal projection. It carries `situation_id`, `status`,
 `storage_status`, `revision`, `evidence_fingerprint`, a `basis` of seven situational fields
 (`source_ref`, `subject_ref`, `context_key`, `purpose`, `expires_at`, `created_at`, `updated_at`),

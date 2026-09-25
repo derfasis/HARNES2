@@ -60,6 +60,7 @@ const situation = (over = {}) => ({
   evidence: [{ source_event_id: '9', message_id: 'message:1', message_version: 1, author_id: 'user:1',
     observed_at: '2026-01-01T00:00:00.000Z', text: 'Что входит?', text_truncated: false }],
   assessments: [{ id: '5', created_at: '2026-01-01T00:00:01.000Z', decision: 'CANDIDATE',
+    result_revision: 4, evidence_fingerprint: 'fp-1',
     epistemic_status: 'unverified_proposal', reasoning_version: 1, reasoning_shape: 'structured_v1',
     hypothesis: { text: 'Возможно.', text_truncated: false, attributed_claims: [], inferences: [],
       uncertainty: ['Не проверено'] },
@@ -223,4 +224,41 @@ test('4E the viewer never fabricates a decision the situation does not allow', a
   assert.doesNotMatch(html, /discovery-review-approve/);
   assert.doesNotMatch(html, /discovery-reason-open/);
   assert.match(html, /недоступн|закрыт|STOPPED/i);
+});
+
+test('4E reason controls disappear once the situation has moved past the latest assessment', async () => {
+  const ctx = ui({ list: { items: [row()], next_cursor: null }, detail: situation() });
+  await ctx.loadDiscovery();
+  await ctx.selectSituation('sit-1');
+  assert.match(ctx.discoveryDetailPanel(), /data-mode="IGNORE"/, 'a current basis offers the decisions');
+
+  // An approve moves the situation revision on. The assessment is still the latest one, but it no
+  // longer produced the current revision, so the reason buttons must be gone.
+  ctx.discoveryDetail = situation({ revision: 5, review_tasks: [] });
+  await ctx.selectSituation('sit-1');
+  const html = ctx.discoveryDetailPanel();
+  assert.doesNotMatch(html, /data-mode="IGNORE"/);
+  assert.doesNotMatch(html, /data-mode="WAIT"/);
+  assert.doesNotMatch(html, /data-mode="STOP"/);
+});
+
+test('4E a stale situation stays readable with no decisions, exactly like a closed one', async () => {
+  const stale = situation({ status: 'STALE', freshness: { fresh: false, reasons: ['DISCOVERY_NOT_LIVE'] } });
+  const ctx = ui({ list: { items: [row()], next_cursor: null }, detail: stale });
+  await ctx.loadDiscovery();
+  await ctx.selectSituation('sit-1');
+  const html = ctx.discoveryDetailPanel();
+  assert.match(html, /Что входит\?/, 'the record is still readable');
+  assert.match(html, /STALE/);
+  assert.doesNotMatch(html, /discovery-review-approve/);
+  assert.doesNotMatch(html, /data-mode="IGNORE"/);
+});
+
+test('4E the write screen states exactly what it does and does not do', async () => {
+  const ctx = ui({ list: { items: [row()], next_cursor: null }, detail: situation() });
+  await ctx.loadDiscovery();
+  await ctx.selectSituation('sit-1');
+  const html = ctx.discoveryDetailPanel();
+  assert.match(html, /решения меняют только состояние Discovery/);
+  assert.doesNotMatch(html, /ничего из этого экрана выполнить нельзя/);
 });

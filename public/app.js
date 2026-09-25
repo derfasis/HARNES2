@@ -86,8 +86,6 @@ function discoveryTab(){
 }
 function discoveryDetailPanel(){
   if(discoveryDetailError)return panel('Ситуация',empty('Ситуация больше недоступна',discoveryDetailError));
-  if(discoveryDetail&&['STOPPED','DISMISSED','TRANSFERRED','STALE'].includes(discoveryDetail.status))
-    return panel(`Ситуация ${discoveryDetail.situation_id}`,`<p>Эта ситуация закрыта: ${esc(discoveryDetail.status)}. Решения недоступны.</p>`);
   const d=discoveryDetail;
   if(!d)return panel('Ситуация',empty('Выберите ситуацию','Показываем только то, что уже записано в системе. Ничего не отправляется отсюда.'));
   const evidence=d.evidence.map(item=>`<p><strong>Зафиксированное наблюдение — не подтверждённый факт</strong>: ${esc(item.text)}${truncatedMark(item.text_truncated)}<small>${esc(item.message_id)} · версия ${item.message_version} · ${esc(item.author_id??'—')}</small></p>`).join('');
@@ -100,11 +98,11 @@ function discoveryDetailPanel(){
     <small>${esc(freshnessLine(a.freshness))}</small></div></div>`).join('');
   const proposals=d.opening_proposals.map(p=>`<p><strong>Предложение — не черновик, не отправлено, не даёт разрешения на контакт</strong>: ${esc(p.text)}${truncatedMark(p.text_truncated)}<small>${esc(p.rationale)}${truncatedMark(p.rationale_truncated)}</small></p>`).join('');
   return panel(`Ситуация ${d.situation_id}`,`<p>Статус: ${esc(d.status)} · в хранении: ${esc(d.storage_status)} · ревизия ${d.revision}</p>
-    ${discoveryDetail.freshness?.fresh===true?'':`<p class="section-note">Основание устарело: ${esc((discoveryDetail.freshness?.reasons??[]).join(', '))}. Решения недоступны, пока основание не обновится.</p>`}
+    ${['STOPPED','DISMISSED','TRANSFERRED','STALE'].includes(d.status)?`<p class="section-note">Эта ситуация закрыта: ${esc(d.status)}. Запись сохранена, решения недоступны.</p>`:d.freshness?.fresh===true?'':`<p class="section-note">Основание устарело: ${esc((d.freshness?.reasons??[]).join(', '))}. Решения недоступны, пока основание не обновится.</p>`}
     ${discoveryOperatorActions(d)}
     <p>${esc(freshnessLine(d.freshness))}</p><h3>Наблюдения</h3>${evidence||'<p>Пока нет.</p>'}
     <h3>Гипотезы</h3>${assessments||'<p>Пока нет.</p>'}<h3>Предложения</h3>${proposals||'<p>Пока нет.</p>'}
-    <p><strong>Не отправлено</strong> · <strong>Не даёт разрешения на контакт</strong> · ничего из этого экрана выполнить нельзя</p>
+    <p><strong>Не отправлено</strong> · <strong>Не даёт разрешения на контакт</strong> · отсюда ничего не отправляется; решения меняют только состояние Discovery</p>
     <p>Задачи ревью: ${d.review_tasks.map(t=>esc(t.status)).join(', ')||'нет'}</p>`);
 }
 
@@ -115,6 +113,13 @@ function discoveryDetailPanel(){
 const discoveryLive = d => !!d && !['STOPPED','DISMISSED','TRANSFERRED','STALE'].includes(d.status)
   && d.freshness?.fresh === true;
 const discoveryProposedReview = d => (d?.review_tasks ?? []).find(t => t.status === 'proposed');
+// A reason decision is only possible while the latest assessment still produced the situation's
+// current revision on the current evidence. After an approve the revision moves on, and offering
+// the buttons would be offering a guaranteed DISCOVERY_REASON_ASSESSMENT_STALE.
+const discoveryReasonable = d => {
+  const a = d?.assessments?.at(-1);
+  return !!a && a.result_revision === d.revision && a.evidence_fingerprint === d.evidence_fingerprint;
+};
 function discoveryOperatorActions(d) {
   if (!discoveryLive(d)) return '';
   const proposed = discoveryProposedReview(d), parts = [];
@@ -124,6 +129,7 @@ function discoveryOperatorActions(d) {
   }
   // Each decision gets its own control. The decision travels in data-mode, exactly like the
   // other actions carry their parameter, so the real click path cannot open an undefined form.
+  if (!discoveryReasonable(d)) return parts.length ? `<div class="actions">${parts.join('')}</div>` : '';
   for (const decision of ['WAIT','IGNORE','STOP'])
     parts.push(`<button class="button ${decision==='STOP'?'danger':'secondary'}" data-do="discovery-reason-open" data-id="${esc(d.situation_id)}" data-mode="${decision}">${decision}</button>`);
   return `<div class="actions">${parts.join('')}</div>`;
