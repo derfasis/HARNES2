@@ -23,6 +23,7 @@ function ui({ list, detail, listStatus = 200, detailStatus = 200, detailOrder = 
     globalThis.discoverySelection=null;
     globalThis.api=async(route,body)=>{
       globalThis.calls.push({route,body,method:body===undefined?'GET':'POST'});
+      if(route==='/api/discovery/decisions')return {items:[],next_cursor:null};
       if(route.startsWith('/api/discovery/reason-states')){
         if(globalThis.listStatus!==200)throw new Error('Discovery недоступен');
         return globalThis.discoveryList;
@@ -111,11 +112,14 @@ test('3E list renders only the frozen reason-state fields and never invents mean
 test('3E the list issues one GET and pagination only follows the keyset cursor', async () => {
   const ctx = ui({ list: { items: [reasonRow()], next_cursor: 'cursor-2' } });
   await ctx.loadDiscovery();
-  assert.deepEqual(ctx.calls.map((call) => call.route), ['/api/discovery/reason-states']);
-  assert.equal(ctx.calls[0].method, 'GET');
+  // One refresh reads both read-only Discovery surfaces, and never writes.
+  assert.deepEqual(ctx.calls.map((call) => call.route),
+    ['/api/discovery/reason-states', '/api/discovery/decisions']);
+  assert.equal(ctx.calls.every((call) => call.method === 'GET'), true);
   await ctx.nextDiscoveryPage();
-  assert.equal(ctx.calls[1].route, '/api/discovery/reason-states?cursor=cursor-2');
-  assert.equal(ctx.calls[1].method, 'GET');
+  const paged = ctx.calls.at(-1);
+  assert.equal(paged.route, '/api/discovery/reason-states?cursor=cursor-2');
+  assert.equal(paged.method, 'GET');
   assert.equal(ctx.calls.some((call) => call.method === 'POST'), false);
 });
 
@@ -123,7 +127,7 @@ test('3E selecting a situation only GETs its detail and renders epistemic labels
   const ctx = ui({ list: { items: [reasonRow()], next_cursor: null }, detail: situation() });
   await ctx.loadDiscovery();
   await ctx.selectSituation('sit-1');
-  assert.equal(ctx.calls[1].route, '/api/discovery/sit-1');
+  assert.equal(ctx.calls.at(-1).route, '/api/discovery/sit-1');
   assert.equal(ctx.calls[1].method, 'GET');
   const html = ctx.discoveryDetailPanel();
   assert.match(html, /Непроверенное предложение/);
@@ -212,7 +216,8 @@ test('3E the wired click actions read only and never fall through to a command',
   await ctx.loadDiscovery();
   await ctx.act('discovery-select', 'sit-1');
   assert.equal(ctx.currentSelection(), 'sit-1');
-  assert.deepEqual(ctx.calls.map((call) => call.route), ['/api/discovery/reason-states', '/api/discovery/sit-1']);
+  assert.deepEqual(ctx.calls.map((call) => call.route),
+    ['/api/discovery/reason-states', '/api/discovery/decisions', '/api/discovery/sit-1']);
   await ctx.act('discovery-next');
   assert.equal(ctx.calls[2].route, '/api/discovery/reason-states?cursor=cursor-2');
   assert.equal(ctx.calls.some((call) => call.method === 'POST'), false);
