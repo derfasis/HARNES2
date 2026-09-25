@@ -123,7 +123,7 @@ test('3B reason-states list is served behind the existing operator HTTP boundary
   // The literal path is the list, never a situation lookup.
   const detail = await api(`/api/discovery/${situationId}`, { token });
   assert.equal(detail.status, 200);
-  assert.equal(detail.body.id, situationId);
+  assert.equal(detail.body.situation_id, situationId);
   assert.equal(detail.body.assessments.at(-1).epistemic_status, 'unverified_proposal');
   assert.equal(detail.body.executable, false);
   assert.equal(detail.body.contact_permission, false);

@@ -852,6 +852,50 @@ function detail(service, situationId) {
     executable: false, contact_permission: false, allowed_effects: [] };
 }
 
+const PRESENTATION_TEXT_LIMIT = 2000;
+const boundedText = value => {
+  const text = typeof value === 'string' ? value : '';
+  return text.length > PRESENTATION_TEXT_LIMIT
+    ? { value: text.slice(0, PRESENTATION_TEXT_LIMIT), truncated: true }
+    : { value: text, truncated: false };
+};
+// An allowlisted view for presentation surfaces. The internal discoveryDetail() keeps the full
+// durable projection; this one carries only what an operator may read, and says so where it cuts.
+function presentationDetail(service, situationId, actor) {
+  operator(actor);
+  const row = detail(service, situationId);
+  return {
+    situation_id: row.id, status: row.status, storage_status: row.storage_status, revision: row.revision,
+    evidence_fingerprint: row.evidence_fingerprint,
+    basis: { source_ref: row.source_ref, subject_ref: row.subject_ref, context_key: row.context_key,
+      purpose: row.purpose, expires_at: row.expires_at, created_at: row.created_at, updated_at: row.updated_at },
+    freshness: { fresh: row.freshness.fresh, reasons: [...row.freshness.reasons] },
+    evidence: row.evidence.map((item) => {
+      const text = boundedText(item.source?.text);
+      return { source_event_id: String(item.source_event_id), message_id: item.message_id,
+        message_version: item.message_version, author_id: item.source?.author_id ?? null,
+        observed_at: item.observed_at, text: text.value, text_truncated: text.truncated };
+    }),
+    assessments: row.assessments.map((assessment) => ({
+      id: assessment.id, created_at: assessment.created_at, decision: assessment.decision,
+      epistemic_status: assessment.epistemic_status, reasoning_version: assessment.reasoning_version,
+      hypothesis: { text: boundedText(assessment.hypothesis?.text).value,
+        attributed_claims: (assessment.hypothesis?.attributed_claims ?? []).map(claim => ({
+          source_event_id: claim.source_event_id, quote: boundedText(claim.quote).value })),
+        inferences: (assessment.hypothesis?.inferences ?? []).map(inference => ({
+          text: boundedText(inference.text).value, evidence_event_ids: inference.evidence_event_ids })),
+        uncertainty: assessment.hypothesis?.uncertainty ?? [] },
+      why_now: { reason: boundedText(assessment.why_now?.reason).value,
+        evidence_event_ids: assessment.why_now?.evidence_event_ids ?? [] },
+      freshness: { fresh: assessment.freshness.fresh, reasons: [...assessment.freshness.reasons] },
+      executable: false, contact_permission: false, allowed_effects: [] })),
+    opening_proposals: row.opening_proposals.map(proposal => ({ id: proposal.id, created_at: proposal.created_at,
+      text: boundedText(proposal.text).value, rationale: boundedText(proposal.rationale).value,
+      constraints: proposal.constraints ?? [], executable: false, contact_permission: false, sent: false })),
+    review_tasks: row.review_tasks.map(task => ({ id: task.id, status: task.status, created_at: task.created_at })),
+    executable: false, contact_permission: false, sent: false, allowed_effects: [] };
+}
+
 export function markDiscoveryPending(service, sourceEventId) {
   if (service.config.discovery?.enabled !== true) return false;
   return markPending(service, sourceEventId);
@@ -1026,4 +1070,4 @@ export function discoveryCommand(service, action, payload, actor) {
   return transfer(service, payload);
 }
 
-export { detail as discoveryDetail, reasonStates as discoveryReasonStates };
+export { detail as discoveryDetail, reasonStates as discoveryReasonStates, presentationDetail as discoveryPresentationDetail };

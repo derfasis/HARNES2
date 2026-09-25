@@ -8,7 +8,7 @@ import { requestTelegramRecovery } from './sources/telegram-readonly.mjs';
 import { REVIEW_ACTIONS, reviewOpportunity, opportunityReviewDetail, opportunityReviews } from './opportunity-review.mjs';
 
 import { EngagementLoop, ENGAGEMENT_ACTIONS, ENGAGEMENT_AGENT_ACTIONS } from './engagement.mjs';
-import { discoveryCommand, discoveryDetail, discoveryReasonStates, ensureDiscoveryApplied, hasDiscoveryPending, invalidateDiscoveryOffers, markDiscoveryPending, reconcileDiscoveryPending, recordDiscoveryFailure, staleMaterialEvidence, DISCOVERY_ACTIONS, DISCOVERY_REVIEW_TASK } from './discovery.mjs';
+import { discoveryCommand, discoveryDetail, discoveryPresentationDetail, discoveryReasonStates, ensureDiscoveryApplied, hasDiscoveryPending, invalidateDiscoveryOffers, markDiscoveryPending, reconcileDiscoveryPending, recordDiscoveryFailure, staleMaterialEvidence, DISCOVERY_ACTIONS, DISCOVERY_REVIEW_TASK } from './discovery.mjs';
 
 const OUTCOMES = new Set(['qualified','call_proposed','call_accepted','call_booked','call_attended','no_show','joined','declined','business_value']);
 export class BusinessService {
@@ -459,6 +459,7 @@ export class BusinessService {
   opportunityReviews(options) { return opportunityReviews(this, options); }
   discoveryDetail(situationId) { return discoveryDetail(this, situationId); }
   discoveryReasonStates(options = {}, actor) { return discoveryReasonStates(this, options, actor); }
+  discoveryPresentationDetail(situationId, actor) { return discoveryPresentationDetail(this, situationId, actor); }
   detail(conversationId) {
     const conversation = this.conversation(conversationId), person = this.person(conversation.person_id);
     return { conversation, person,
