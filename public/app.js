@@ -48,6 +48,9 @@ async function loadDiscovery() {
   discoveryCursorStack=[];
   try { discoveryList=await api('/api/discovery/reason-states'); discoveryError=null; }
   catch(error) { discoveryList=null; discoveryError=error.message; }
+  // The open situation is re-read too, so a card that went stale, revoked, or unavailable is never
+  // left on screen looking fresh next to an already updated list.
+  if(discoverySelection) await selectSituation(discoverySelection);
 }
 async function nextDiscoveryPage() {
   const cursor=discoveryList?.next_cursor; if(!cursor) return;

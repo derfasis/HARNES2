@@ -43,6 +43,9 @@ function ui({ list, detail, listStatus = 200, detailStatus = 200, detailOrder = 
     globalThis.render=()=>{};
     globalThis.discoveryDetailPanel=discoveryDetailPanel;
     globalThis.currentSelection=()=>discoverySelection;
+    globalThis.setDetail=value=>{globalThis.discoveryDetail=value;};
+    globalThis.setStaleDetail=id=>{globalThis.staleDetail=id;};
+    globalThis.panel=()=>discoveryDetailPanel();
     globalThis.calls=[];
     globalThis.staleDetail=null;
     globalThis.listStatus=${listStatus};
@@ -216,4 +219,26 @@ test('3E the wired click actions read only and never fall through to a command',
   assert.equal(ctx.calls.some((call) => call.route === '/api/commands'), false);
   // A viewer action must not reach the shared refresh tail either, which would claim "Сохранено".
   assert.equal(ctx.commands, undefined);
+});
+
+test('3E a background refresh re-reads the open situation instead of leaving a stale card', async () => {
+  const ctx = ui({ list: { items: [reasonRow()], next_cursor: null }, detail: situation() });
+  await ctx.loadDiscovery();
+  await ctx.selectSituation('sit-1');
+  assert.match(ctx.discoveryDetailPanel(), /Свежее/);
+
+  // The situation goes stale underneath the viewer: the next refresh must notice.
+  ctx.setDetail(situation({ freshness: { fresh: false, reasons: ['DISCOVERY_EXPIRED'] } }));
+  await ctx.loadDiscovery();
+  const updated = ctx.discoveryDetailPanel();
+  assert.match(updated, /Неактуально: DISCOVERY_EXPIRED/);
+  // The situation line changed; the assessment keeps its own, separately computed freshness.
+  assert.doesNotMatch(updated, /<p>Свежее<\/p>/);
+
+  // And if it disappears entirely, the card degrades instead of pretending it is still there.
+  ctx.setStaleDetail('sit-1');
+  await ctx.loadDiscovery();
+  assert.match(ctx.discoveryDetailPanel(), /Ситуация больше недоступна/);
+  assert.equal(ctx.currentSelection(), 'sit-1');
+  assert.equal(ctx.calls.some((call) => call.method === 'POST'), false);
 });
