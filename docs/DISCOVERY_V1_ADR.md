@@ -13,8 +13,10 @@ It watches sanitized public sources, groups what it saw into a **situation**, an
 or a reviewed reasoning step to judge it. It never contacts anyone, never sends anything, and
 never treats its own output as a fact.
 
-The unit of work is the **situation**, keyed by source, subject, and conversational context, with
-a bounded evidence set and a TTL. Evidence is what a source actually said, recorded immutably.
+The unit of work is the **situation**, keyed by source, subject, conversational context, purpose,
+**and** offer fingerprint, with a bounded evidence set and a TTL. A change of purpose or of the
+offer therefore opens a different situation rather than silently reusing the old one — evidence
+collected for one offer is never evidence for another. Evidence is what a source actually said, recorded immutably.
 Everything else is interpretation, and interpretation is labelled as such.
 
 ## Lifecycle
@@ -162,10 +164,16 @@ signal for an operator — never an automatic reason, assessment, transfer, or c
 
 ## Proof levels
 
-Everything in this ADR is proven at `proof_level=integration` with `live_proof=false`: offline
-synthetic fixtures, deterministic timestamps, no model call, no network, no Telegram, no scheduler
-tick, and no live transport. Live proof does not exist for Discovery today and must not be implied
-by any of these documents.
+The implemented Discovery v1 behaviours this ADR describes are covered at
+`proof_level=integration` with `live_proof=false`: offline synthetic fixtures, deterministic
+timestamps, no model call, no network, no Telegram, no scheduler tick, and no live transport. Live
+proof does not exist for Discovery today and must not be implied by any of these documents.
+
+The rest of this ADR is **contract and policy**, not proof: the forbidden list, the statement that
+a future attention signal must stay operator-directed, and the rule that no deadline may produce a
+decision. Those are commitments the code is expected to honour; they are not claims that a test
+currently demonstrates them. Where this document and a test disagree, the test is the evidence and
+this document is the defect.
 
 ## Where the evidence lives
 
