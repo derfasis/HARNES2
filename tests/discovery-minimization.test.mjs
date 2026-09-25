@@ -129,15 +129,18 @@ test('3C detail is an allowlisted projection and hides the internal payload', as
   const [assessment] = body.assessments;
   assert.equal(assessment.epistemic_status, 'unverified_proposal');
   assert.deepEqual(Object.keys(assessment.hypothesis).sort(),
-    ['attributed_claims', 'inferences', 'text', 'uncertainty']);
+    ['attributed_claims', 'inferences', 'text', 'text_truncated', 'uncertainty']);
+  assert.equal(assessment.hypothesis.text_truncated, false);
+  assert.equal(assessment.reasoning_shape, 'structured_v1');
   assert.equal(assessment.hypothesis.attributed_claims[0].quote, 'I have two hours a week.');
   assert.equal(assessment.why_now.reason, assessment.why_now.reason);
   assert.deepEqual(Object.keys(assessment.freshness).sort(), ['fresh', 'reasons']);
+  assert.deepEqual(Object.keys(assessment.why_now).sort(), ['evidence_event_ids', 'reason', 'reason_truncated']);
   assert.equal(assessment.executable, false);
 
   const [proposal] = body.opening_proposals;
-  assert.deepEqual(Object.keys(proposal).sort(),
-    ['constraints', 'contact_permission', 'executable', 'id', 'rationale', 'sent', 'text']);
+  assert.deepEqual(Object.keys(proposal).sort(), ['constraints', 'contact_permission', 'executable', 'id',
+    'rationale', 'rationale_truncated', 'sent', 'text', 'text_truncated']);
   assert.equal(proposal.sent, false);
   assert.equal(proposal.executable, false);
   assert.deepEqual(Object.keys(body.review_tasks[0]).sort(), ['created_at', 'id', 'status']);
@@ -180,4 +183,63 @@ test('3C presentation detail is operator-only and the internal read model is unc
   assert.deepEqual(after.evidence[0].source, JSON.parse(app.store.get('SELECT payload_json FROM events WHERE id=?',
     after.evidence[0].source_event_id).payload_json), 'internal read model keeps the raw source payload');
   assert.equal(presentation.evidence[0].source, undefined);
+});
+
+test('3C every bounded text announces its own truncation, including quotes and proposals', async t => {
+  const { app, api } = await fixture(t);
+  const long = 'y'.repeat(3000);
+  const ingested = await app.service.command('source.ingest', source({ text: `${TEXT} ${long}` }), randomUUID(),
+    { kind: 'channel', sourceId: SOURCE });
+  const situationId = app.store.get('SELECT situation_id FROM discovery_evidence WHERE source_event_id=?',
+    ingested.source_event_id).situation_id;
+  const detail = app.service.discoveryDetail(situationId);
+  const evidence = [String(detail.evidence[0].source_event_id)];
+  await app.service.command('discovery.assess', { situation_id: situationId, expected_revision: detail.revision,
+    expected_evidence_fingerprint: detail.evidence_fingerprint, decision: 'CANDIDATE', evidence_event_ids: evidence,
+    hypothesis: { text: long, evidence_event_ids: evidence,
+      attributed_claims: [{ source_event_id: evidence[0], quote: long }],
+      inferences: [{ text: long, evidence_event_ids: evidence }], uncertainty: [long.slice(0, 1900)] },
+    why_now: { reason: long, evidence_event_ids: evidence },
+    opening_proposal: { text: long, rationale: long, constraints: [long.slice(0, 450)] } },
+  randomUUID(), { kind: 'operator' });
+  const token = (await api('/api/session')).body.token;
+  const body = (await api(`/api/discovery/${situationId}`, { token })).body;
+  const [assessment] = body.assessments;
+  assert.equal(assessment.hypothesis.text_truncated, true);
+  assert.equal(assessment.hypothesis.text.length, 2000);
+  assert.equal(assessment.hypothesis.attributed_claims[0].quote_truncated, true);
+  assert.equal(assessment.hypothesis.attributed_claims[0].quote.length, 2000);
+  assert.equal(assessment.hypothesis.inferences[0].text_truncated, true);
+  assert.equal(assessment.why_now.reason_truncated, true);
+  assert.equal(assessment.why_now.reason.length, 2000);
+  const [proposal] = body.opening_proposals;
+  assert.equal(proposal.text_truncated, true);
+  assert.equal(proposal.rationale_truncated, true);
+});
+
+test('3C a legacy v0 assessment survives the projection with its two strings intact', async t => {
+  const { app, config, api } = await fixture(t);
+  const ingested = await app.service.command('source.ingest', source(), randomUUID(),
+    { kind: 'channel', sourceId: SOURCE });
+  const situationId = app.store.get('SELECT situation_id FROM discovery_evidence WHERE source_event_id=?',
+    ingested.source_event_id).situation_id;
+  const detail = app.service.discoveryDetail(situationId);
+  // A pre-Stage-1 durable assessment: two plain strings, no structured reasoning, no version.
+  app.store.run("INSERT INTO events(partner_id,kind,actor,payload_json,created_at) VALUES(?,?,?,?,?)",
+    config.partnerId, 'discovery.assessment', 'operator:legacy', JSON.stringify({ situation_id: situationId,
+      basis_revision: 0, result_revision: 1, decision: 'OBSERVE', hypothesis: 'Legacy free-text hypothesis.',
+      why_now: 'Legacy free-text why now.', evidence: [String(detail.evidence[0].source_event_id)] }),
+    new Date().toISOString());
+  const token = (await api('/api/session')).body.token;
+  const body = (await api(`/api/discovery/${situationId}`, { token })).body;
+  const [assessment] = body.assessments;
+  assert.equal(assessment.reasoning_version, 0);
+  assert.equal(assessment.reasoning_shape, 'legacy_v0_strings');
+  assert.equal(assessment.hypothesis.text, 'Legacy free-text hypothesis.');
+  assert.equal(assessment.why_now.reason, 'Legacy free-text why now.');
+  assert.deepEqual(assessment.hypothesis.attributed_claims, []);
+  assert.deepEqual(assessment.hypothesis.inferences, []);
+  assert.deepEqual(assessment.hypothesis.uncertainty, []);
+  assert.deepEqual(assessment.why_now.evidence_event_ids, []);
+  assert.equal(assessment.epistemic_status, 'unverified_proposal');
 });

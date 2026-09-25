@@ -853,11 +853,12 @@ function detail(service, situationId) {
 }
 
 const PRESENTATION_TEXT_LIMIT = 2000;
-const boundedText = value => {
+// Every bounded presentation string carries an explicit truncation flag next to it.
+const boundedText = (value, name) => {
   const text = typeof value === 'string' ? value : '';
   return text.length > PRESENTATION_TEXT_LIMIT
-    ? { value: text.slice(0, PRESENTATION_TEXT_LIMIT), truncated: true }
-    : { value: text, truncated: false };
+    ? { [name]: text.slice(0, PRESENTATION_TEXT_LIMIT), [`${name}_truncated`]: true }
+    : { [name]: text, [`${name}_truncated`]: false };
 };
 // An allowlisted view for presentation surfaces. The internal discoveryDetail() keeps the full
 // durable projection; this one carries only what an operator may read, and says so where it cuts.
@@ -871,26 +872,35 @@ function presentationDetail(service, situationId, actor) {
       purpose: row.purpose, expires_at: row.expires_at, created_at: row.created_at, updated_at: row.updated_at },
     freshness: { fresh: row.freshness.fresh, reasons: [...row.freshness.reasons] },
     evidence: row.evidence.map((item) => {
-      const text = boundedText(item.source?.text);
       return { source_event_id: String(item.source_event_id), message_id: item.message_id,
         message_version: item.message_version, author_id: item.source?.author_id ?? null,
-        observed_at: item.observed_at, text: text.value, text_truncated: text.truncated };
+        observed_at: item.observed_at, ...boundedText(item.source?.text, 'text') };
     }),
-    assessments: row.assessments.map((assessment) => ({
-      id: assessment.id, created_at: assessment.created_at, decision: assessment.decision,
-      epistemic_status: assessment.epistemic_status, reasoning_version: assessment.reasoning_version,
-      hypothesis: { text: boundedText(assessment.hypothesis?.text).value,
-        attributed_claims: (assessment.hypothesis?.attributed_claims ?? []).map(claim => ({
-          source_event_id: claim.source_event_id, quote: boundedText(claim.quote).value })),
-        inferences: (assessment.hypothesis?.inferences ?? []).map(inference => ({
-          text: boundedText(inference.text).value, evidence_event_ids: inference.evidence_event_ids })),
-        uncertainty: assessment.hypothesis?.uncertainty ?? [] },
-      why_now: { reason: boundedText(assessment.why_now?.reason).value,
-        evidence_event_ids: assessment.why_now?.evidence_event_ids ?? [] },
-      freshness: { fresh: assessment.freshness.fresh, reasons: [...assessment.freshness.reasons] },
-      executable: false, contact_permission: false, allowed_effects: [] })),
+    assessments: row.assessments.map((assessment) => {
+      const hypothesis = boundedText(typeof assessment.hypothesis === 'string'
+        ? assessment.hypothesis : assessment.hypothesis?.text, 'text');
+      const whyNow = boundedText(typeof assessment.why_now === 'string'
+        ? assessment.why_now : assessment.why_now?.reason, 'reason');
+      // A v0 assessment stored two plain strings. They are projected into the same shape without
+      // inventing claims, inferences, or uncertainty that were never recorded.
+      const legacy = assessment.reasoning_version === 0;
+      return {
+        id: assessment.id, created_at: assessment.created_at, decision: assessment.decision,
+        epistemic_status: assessment.epistemic_status, reasoning_version: assessment.reasoning_version,
+        hypothesis: { ...hypothesis,
+          attributed_claims: (typeof assessment.hypothesis === 'string' ? [] : assessment.hypothesis?.attributed_claims ?? [])
+            .map(claim => ({ source_event_id: claim.source_event_id, ...boundedText(claim.quote, 'quote') })),
+          inferences: (typeof assessment.hypothesis === 'string' ? [] : assessment.hypothesis?.inferences ?? [])
+            .map(inference => ({ ...boundedText(inference.text, 'text'), evidence_event_ids: inference.evidence_event_ids })),
+          uncertainty: typeof assessment.hypothesis === 'string' ? [] : assessment.hypothesis?.uncertainty ?? [] },
+        why_now: { ...whyNow,
+          evidence_event_ids: typeof assessment.why_now === 'string' ? [] : assessment.why_now?.evidence_event_ids ?? [] },
+        freshness: { fresh: assessment.freshness.fresh, reasons: [...assessment.freshness.reasons] },
+        reasoning_shape: legacy ? 'legacy_v0_strings' : 'structured_v1',
+        executable: false, contact_permission: false, allowed_effects: [] };
+    }),
     opening_proposals: row.opening_proposals.map(proposal => ({ id: proposal.id, created_at: proposal.created_at,
-      text: boundedText(proposal.text).value, rationale: boundedText(proposal.rationale).value,
+      ...boundedText(proposal.text, 'text'), ...boundedText(proposal.rationale, 'rationale'),
       constraints: proposal.constraints ?? [], executable: false, contact_permission: false, sent: false })),
     review_tasks: row.review_tasks.map(task => ({ id: task.id, status: task.status, created_at: task.created_at })),
     executable: false, contact_permission: false, sent: false, allowed_effects: [] };
