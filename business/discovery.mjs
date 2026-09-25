@@ -77,7 +77,7 @@ function liveSituation(service, key) {
 }
 
 function evidenceRows(service, situationId) {
-  return service.store.all(`SELECT de.*, e.payload_json FROM discovery_evidence de
+  return service.store.all(`SELECT de.*, e.payload_json, e.created_at AS observed_at FROM discovery_evidence de
     JOIN events e ON e.id=de.source_event_id WHERE de.situation_id=? ORDER BY de.created_at,de.rowid`, situationId)
     .map(row => ({ ...row, source: parse(row.payload_json) }));
 }
@@ -503,6 +503,51 @@ function observe(service, p, actor) {
     contact_permission: false, allowed_effects: [] };
 }
 
+// Interpretations live only in assessment events. The caller cannot supply
+// observations, source attribution, freshness, or authority via this contract.
+function assessmentReasoning(p, evidenceIds, currentEvidence) {
+  if (typeof p.hypothesis === 'string' && typeof p.why_now === 'string') {
+    return { hypothesis: requiredText(p.hypothesis, 'hypothesis', 4000),
+      whyNow: requiredText(p.why_now, 'why_now', 4000), reasoningVersion: 0 };
+  }
+  fields(p.hypothesis, ['text', 'evidence_event_ids', 'attributed_claims', 'inferences', 'uncertainty']);
+  fields(p.why_now, ['reason', 'evidence_event_ids']);
+  const selected = new Set(evidenceIds);
+  const references = value => {
+    const refs = textList(value, 100, 150);
+    check(refs.length > 0, 'DISCOVERY_REASONING_EVIDENCE_REQUIRED');
+    check(new Set(refs).size === refs.length, 'DISCOVERY_REASONING_EVIDENCE_DUPLICATE');
+    check(refs.every(ref => selected.has(ref)), 'DISCOVERY_REASONING_EVIDENCE_SCOPE');
+    return refs;
+  };
+  const items = value => {
+    check(Array.isArray(value) && value.length <= 20, 'DISCOVERY_LIST_INVALID');
+    return value;
+  };
+  const hypothesis = {
+    text: requiredText(p.hypothesis.text, 'hypothesis text', 4000),
+    evidence_event_ids: references(p.hypothesis.evidence_event_ids),
+    attributed_claims: items(p.hypothesis.attributed_claims).map(claim => {
+      fields(claim, ['source_event_id', 'quote']);
+      const sourceId = references([claim.source_event_id])[0];
+      const quote = requiredText(claim.quote, 'claim quote', 4000);
+      const evidence = currentEvidence.find(item => String(item.source_event_id) === sourceId);
+      check(typeof evidence.source.text === 'string' && evidence.source.text.includes(quote), 'DISCOVERY_CLAIM_QUOTE_MISMATCH');
+      // An exact quote proves only that the source said this, not that it is true.
+      return { source_event_id: sourceId, quote };
+    }),
+    inferences: items(p.hypothesis.inferences).map(inference => {
+      fields(inference, ['text', 'evidence_event_ids']);
+      return { text: requiredText(inference.text, 'inference text', 4000),
+        evidence_event_ids: references(inference.evidence_event_ids) };
+    }),
+    uncertainty: textList(p.hypothesis.uncertainty, 20, 2000),
+  };
+  check(hypothesis.uncertainty.length > 0, 'DISCOVERY_UNCERTAINTY_REQUIRED');
+  return { hypothesis, whyNow: { reason: requiredText(p.why_now.reason, 'why_now reason', 4000),
+    evidence_event_ids: references(p.why_now.evidence_event_ids) }, reasoningVersion: 1 };
+}
+
 function assessment(service, p) {
   const limits = config(service);
   invalidateChangedOffers(service, limits.offerFingerprint, limits.purpose);
@@ -521,8 +566,7 @@ function assessment(service, p) {
   const known = new Set(currentEvidence.map(item => String(item.source_event_id)));
   check(evidenceIds.every(value => known.has(value) && sourceIsCurrent(service,
     currentEvidence.find(item => String(item.source_event_id) === value), currentMessages)), 'DISCOVERY_ASSESSMENT_EVIDENCE_SCOPE');
-  const hypothesis = requiredText(p.hypothesis, 'hypothesis', 4000);
-  const whyNow = requiredText(p.why_now, 'why_now', 4000);
+  const { hypothesis, whyNow, reasoningVersion } = assessmentReasoning(p, evidenceIds, currentEvidence);
   check(p.decision === 'CANDIDATE' ? p.opening_proposal !== undefined : p.opening_proposal === undefined,
     'DISCOVERY_OPENING_SCOPE');
   const opening = p.opening_proposal === undefined ? null : (() => {
@@ -539,6 +583,7 @@ function assessment(service, p) {
     decision: p.decision, hypothesis, whyNow, opening });
   const assessmentId = record(service, 'discovery.assessment', { situation_id: row.id, basis_revision: row.revision,
     result_revision: resultRevision, decision: p.decision, hypothesis, why_now: whyNow, evidence: evidenceIds,
+    reasoning_version: reasoningVersion,
     evidence_fingerprint: evidenceFingerprint(service, row.id), assessment_fingerprint: assessmentFingerprintValue });
   const openingId = opening ? record(service, 'discovery.opening_proposal', { situation_id: row.id,
     assessment_id: assessmentId, ...opening }) : null;
@@ -640,14 +685,36 @@ function transfer(service, p) {
 
 function detail(service, situationId) {
   const row = situation(service, situationId), evidence = evidenceRows(service, row.id);
+  const state = fresh(service, row, null, evidence), fingerprint = evidenceFingerprint(service, row.id);
+  const staleEvent = service.store.get("SELECT payload_json FROM events WHERE partner_id=? AND kind='discovery.situation.stale' AND json_extract(payload_json,'$.situation_id')=? ORDER BY id DESC LIMIT 1",
+    service.config.partnerId, row.id);
   const assessments = service.store.all("SELECT id,created_at,payload_json FROM events WHERE partner_id=? AND kind='discovery.assessment' AND json_extract(payload_json,'$.situation_id')=? ORDER BY id",
     service.config.partnerId, row.id).map(event => ({ id: String(event.id), ...parse(event.payload_json) }));
+  for (const assessment of assessments) {
+    const reasons = [...state.reasons];
+    if (staleEvent) reasons.push(parse(staleEvent.payload_json).reason);
+    if (assessment.evidence_fingerprint !== fingerprint) reasons.push('DISCOVERY_EVIDENCE_CHANGED');
+    if (assessment.id !== assessments.at(-1).id) reasons.push('DISCOVERY_ASSESSMENT_SUPERSEDED');
+    assessment.reasoning_version ??= 0;
+    assessment.epistemic_status = 'unverified_proposal';
+    // Applies to BOTH hypothesis and WHY NOW. Recomputed from durable source
+    // state, never from a persisted model assertion or a command receipt.
+    assessment.freshness = { fresh: reasons.length === 0, reasons: [...new Set(reasons)] };
+    assessment.basis = { source_ref: row.source_ref, subject_ref: row.subject_ref, context_key: row.context_key,
+      purpose: row.purpose, offer_fingerprint: row.offer_fingerprint,
+      evidence_fingerprint: assessment.evidence_fingerprint, expires_at: row.expires_at,
+      evidence: evidence.filter(item => assessment.evidence.includes(String(item.source_event_id))).map(item => ({
+        source_event_id: String(item.source_event_id), message_id: item.message_id, message_version: item.message_version,
+        author_id: item.source.author_id, observed_at: item.observed_at,
+        created_at: item.source.created_at, updated_at: item.source.updated_at,
+      })) };
+  }
   const openingProposals = service.store.all("SELECT id,created_at,payload_json FROM events WHERE partner_id=? AND kind='discovery.opening_proposal' AND json_extract(payload_json,'$.situation_id')=? ORDER BY id",
     service.config.partnerId, row.id).map(event => ({ id: String(event.id), ...parse(event.payload_json) }));
   const reviewTasks = service.store.all("SELECT id,status,created_at FROM tasks WHERE partner_id=? AND kind='discovery_review' AND evidence IN (SELECT id FROM events WHERE partner_id=? AND kind='discovery.assessment' AND json_extract(payload_json,'$.situation_id')=?) ORDER BY created_at",
     service.config.partnerId, service.config.partnerId, row.id);
   return { ...row, evidence, assessments, opening_proposals: openingProposals, review_tasks: reviewTasks,
-    evidence_fingerprint: evidenceFingerprint(service, row.id), freshness: fresh(service, row),
+    evidence_fingerprint: fingerprint, freshness: state,
     executable: false, contact_permission: false, allowed_effects: [] };
 }
 
