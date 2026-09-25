@@ -44,10 +44,15 @@ function overview(){
 // Stage 3E: a read-only Discovery viewer. It renders the frozen 3B/3C projections and issues
 // nothing but the two GET endpoints. There is deliberately no command path here.
 let discoveryList=null,discoveryError=null,discoveryDetail=null,discoverySelection=null,discoveryDetailError='',discoveryCursorStack=[];
+let discoveryQueue=null;
 async function loadDiscovery() {
   discoveryCursorStack=[];
-  try { discoveryList=await api('/api/discovery/reason-states'); discoveryError=null; }
-  catch(error) { discoveryList=null; discoveryError=error.message; }
+  try {
+    discoveryList=await api('/api/discovery/reason-states');
+    // The situations an operator can still act on. The reason-state list alone cannot reach them.
+    discoveryQueue=await api('/api/discovery/decisions');
+    discoveryError=null;
+  } catch(error) { discoveryList=null; discoveryQueue=null; discoveryError=error.message; }
   // The open situation is re-read too, so a card that went stale, revoked, or unavailable is never
   // left on screen looking fresh next to an already updated list.
   if(discoverySelection) await selectSituation(discoverySelection);
@@ -81,7 +86,12 @@ function discoveryTab(){
     <strong>${esc(item.situation_id)}</strong><small>${esc(item.decision)} · ${esc(item.state)}</small>
     <small>Условие: ${esc(item.unlock)}</small><small>${esc(item.reason)}</small>
     <small>${item.wait?`Ожидание: ${esc(item.wait.kind)}${item.wait.at?` до ${esc(item.wait.at)} (${esc(date(item.wait.at))})`:''}`:'Ожидание: нет'}</small><small>${esc(freshnessLine(item.freshness))}</small></button>`).join('');
-  return `${panel('Discovery: состояния решений',rows?`<div class="person-list">${rows}</div>`:empty('Нет заблокированных ситуаций','Здесь появляются ситуации, ожидающие решения. Ничего менять из этого экрана нельзя.'),discoveryList?.next_cursor?button('Далее','discovery-next'):'')}
+  const queue=(discoveryQueue?.items??[]).filter(item=>item.review_available||item.reason_available);
+  const queueRows=queue.map(item=>`<button class="person-card ${item.situation_id===discoverySelection?'active':''}" data-do="discovery-select" data-id="${esc(item.situation_id)}">
+    <strong>${esc(item.situation_id)}</strong><small>${item.review_available?'Ждёт ревью':''}${item.review_available&&item.reason_available?' · ':''}${item.reason_available?'Можно принять решение':''}</small>
+    <small>${esc(freshnessLine(item.freshness))}</small></button>`).join('');
+  return `${queue.length?panel('Discovery: требуют решения',`<div class="person-list">${queueRows}</div>`):''}
+    ${panel('Discovery: состояния решений',rows?`<div class="person-list">${rows}</div>`:empty('Нет заблокированных ситуаций','Здесь появляются ситуации, ожидающие решения. Ничего менять из этого экрана нельзя.'),discoveryList?.next_cursor?button('Далее','discovery-next'):'')}
     ${discoveryDetailPanel()}`;
 }
 function discoveryDetailPanel(){

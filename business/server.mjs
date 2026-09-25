@@ -46,6 +46,16 @@ function discoveryReasonStatesQuery(url, service) {
   }
   return service.discoveryReasonStates(options, { kind: 'operator' });
 }
+const discoveryDecisionQueueQuery = (url, service) => discoveryQueueOptions(url, service);
+const discoveryQueueOptions = (url, service) => {
+  const options = {};
+  for (const [name, values] of url.searchParams) {
+    ensure(REASON_STATES_QUERY.has(name) && values.length === 1, 'Неизвестный параметр запроса', 400);
+    if (name === 'limit') { ensure(/^[0-9]{1,3}$/.test(values[0]), 'Некорректный limit', 400); options.limit = Number(values[0]); }
+    else { ensure(CURSOR_ID.test(values[0]), 'Некорректный cursor', 400); options.cursor = values[0]; }
+  }
+  return service.discoveryDecisionQueue(options, { kind: 'operator' });
+};
 export async function start({ config = loadConfig(), directory = DATA } = {}) {
   ensure(config.server.host === '127.0.0.1', 'Only loopback dashboard binding is supported', 409);
   validateAllowedSourceRefs(config);
@@ -96,6 +106,7 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
         // Drain the body before refusing, so the client sees 405 instead of a reset connection.
         if (req.method !== 'GET') { for await (const _ of req) { /* discard */ } return send(405,{error:'Метод не поддерживается',code:'method_not_allowed'}); }
         if (url.pathname === '/api/discovery/reason-states') return send(200,discoveryReasonStatesQuery(url,service));
+        if (url.pathname === '/api/discovery/decisions') return send(200,discoveryDecisionQueueQuery(url,service));
         return send(200,service.discoveryPresentationDetail(decodeURIComponent(url.pathname.split('/').at(-1)), { kind: 'operator' }));
       }
       if (req.method === 'GET' && url.pathname.startsWith('/api/opportunity-captures/')) return send(200,service.opportunityCapture(decodeURIComponent(url.pathname.split('/').at(-1))));

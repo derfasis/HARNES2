@@ -13,7 +13,8 @@ business read model  →  HTTP presentation boundary  →  future UI
 
 | Surface | Route | Content |
 | --- | --- | --- |
-| List | `GET /api/discovery/reason-states?limit=&cursor=` | Reason-state rows only |
+| Reason states | `GET /api/discovery/reason-states?limit=&cursor=` | Reason-state rows only |
+| Decision queue | `GET /api/discovery/decisions?limit=&cursor=` | Live situations an operator could still act on |
 | Detail | `GET /api/discovery/:id` | Allowlisted situation projection |
 
 The literal `reason-states` path is matched before the `:id` path, so it can never be read as
@@ -118,7 +119,9 @@ The single exception is additive and bounded: Stage 4E added `result_revision` a
 `evidence_fingerprint` to the assessment projection, because an operator screen must be able to tell
 whether the latest assessment still produced the situation's current revision before offering a
 decision. Both are read-only copies of values already durable in the assessment event. They change
-no authority, no fingerprint semantics, and no command. If a real leak is found in the detail
+no authority, no fingerprint semantics, and no command. A pre-Stage-1 assessment recorded no
+fingerprint at all, so it reports `evidence_fingerprint: null` rather than a value the contract
+invents — and a legacy assessment can never carry a reason action. If a real leak is found in the detail
 payload, narrowing it is its own minimal change with its own review.
 
 proof_level=integration; live_proof=false.

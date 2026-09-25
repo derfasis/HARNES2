@@ -22,7 +22,7 @@ async function startService() {
   config.telegram = { ...config.telegram, enabled: false, liveSending: false };
   config.engagement = { ...config.engagement, enabled: false };
   const store = new Store(directory), service = new BusinessService(store, config);
-  return { store, service, close() { store.close(); fs.rmSync(directory, { recursive: true, force: true }); } };
+  return { store, service, config, close() { store.close(); fs.rmSync(directory, { recursive: true, force: true }); } };
 }
 
 async function assess(app) {
@@ -65,6 +65,7 @@ function ui({ list, detail } = {}) {
     globalThis.api=async(route,body)=>{
       globalThis.calls.push({ route, body, method: body===undefined?'GET':'POST' });
       if(route==='/api/discovery/reason-states') return globalThis.discoveryList;
+      if(route==='/api/discovery/decisions') return globalThis.discoveryQueue??{ items: [], next_cursor: null };
       if(route.startsWith('/api/discovery/')){
         const id=decodeURIComponent(route.split('/').at(-1));
         if(globalThis.failNext && globalThis.failNext.route===route){ const e=new Error(globalThis.failNext.message); e.code=globalThis.failNext.code; throw e; }
@@ -321,4 +322,45 @@ test('4E the write screen states exactly what it does and does not do', async ()
   const html = ctx.discoveryDetailPanel();
   assert.match(html, /решения меняют только состояние Discovery/);
   assert.doesNotMatch(html, /ничего из этого экрана выполнить нельзя/);
+});
+
+test('4E an operator can actually reach a decision from the queue, on a real service', async () => {
+  const app = await startService();
+  const situationId = await assess(app);
+  const projected = app.service.discoveryPresentationDetail(situationId, { kind: 'operator' });
+  const queue = app.service.discoveryDecisionQueue({}, { kind: 'operator' });
+  const item = queue.items.find((entry) => entry.situation_id === situationId);
+  assert.ok(item, 'a freshly assessed situation must be reachable');
+  assert.equal(item.review_available, true, 'its proposed review is actionable');
+  assert.equal(item.reason_available, true, 'its latest assessment is still the basis');
+  assert.equal(item.review_task_id, projected.review_tasks[0].id);
+
+  // And the rendered queue offers that exact situation for selection.
+  const ctx = ui({ list: { items: [], next_cursor: null },
+    detail: { ...situation(), situation_id: situationId, revision: item.revision,
+      evidence_fingerprint: item.evidence_fingerprint, assessments: projected.assessments } });
+  ctx.discoveryQueue = queue;
+  await ctx.loadDiscovery();
+  const html = ctx.discoveryTab();
+  assert.match(html, new RegExp(`data-id="${situationId}"`), 'the queue row is selectable');
+  await clickAction(ctx, html, 'discovery-select', '');
+  const panel = ctx.discoveryDetailPanel();
+  assert.match(panel, /discovery-review-approve/);
+  assert.match(panel, /data-mode="IGNORE"/);
+  app.close();
+});
+
+test('4E a legacy assessment reports a null fingerprint instead of a missing one', async () => {
+  const app = await startService();
+  const situationId = await assess(app);
+  app.store.run("INSERT INTO events(partner_id,kind,actor,payload_json,created_at) VALUES(?,?,?,?,?)",
+    app.config.partnerId, 'discovery.assessment', 'operator:legacy',
+    JSON.stringify({ situation_id: situationId, basis_revision: 0, result_revision: app.service.discoveryDetail(situationId).revision,
+      decision: 'OBSERVE', hypothesis: 'Legacy free-text hypothesis.', why_now: 'Legacy free-text why now.',
+      evidence: [] }), new Date().toISOString());
+  const legacy = app.service.discoveryPresentationDetail(situationId, { kind: 'operator' })
+    .assessments.find((entry) => entry.reasoning_shape === 'legacy_v0_strings');
+  assert.equal(legacy.evidence_fingerprint, null, 'no fingerprint is invented for a legacy assessment');
+  assert.equal(legacy.result_revision, app.service.discoveryDetail(situationId).revision);
+  app.close();
 });
