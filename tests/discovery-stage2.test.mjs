@@ -146,14 +146,50 @@ test('S2 reason is stale-safe, operator-only, strict, and idempotent', async t =
   await h.ingest(source({ version: 2, text: 'Edited before the reason decision.' }));
   await assert.rejects(h.command('discovery.reason', reasonPayload(h, f, 'IGNORE')), { code: /DISCOVERY_STALE/ });
 
-  const fresh = await candidate(h);
+  const freshHarness = harness(t);
+  const fresh = await candidate(freshHarness);
   const request = id();
-  const payload = reasonPayload(h, fresh, 'IGNORE');
-  await assert.rejects(h.command('discovery.reason', payload, request, { kind: 'agent' }), { status: 403 });
-  await assert.rejects(h.command('discovery.reason', { ...payload, unexpected: true }), { code: 'DISCOVERY_FIELDS_INVALID' });
-  const result = await h.command('discovery.reason', payload, request);
-  assert.equal(await h.command('discovery.reason', payload, request).then((value) => value.status), result.status);
-  await assert.rejects(h.command('discovery.reason', { ...payload, reason: 'changed payload' }, request), { status: 409 });
-  assert.equal(h.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='discovery.reason.transitioned'").n, 1);
+  const payload = reasonPayload(freshHarness, fresh, 'IGNORE');
+  await assert.rejects(freshHarness.command('discovery.reason', payload, request, { kind: 'agent' }), { status: 403 });
+  await assert.rejects(freshHarness.command('discovery.reason', { ...payload, unexpected: true }), { code: 'DISCOVERY_FIELDS_INVALID' });
+  await assert.rejects(freshHarness.command('discovery.reason', reasonPayload(freshHarness, fresh, 'REVIEW')),
+    { code: 'DISCOVERY_REASON_DECISION_INVALID' });
+  await assert.rejects(freshHarness.command('discovery.reason', reasonPayload(freshHarness, fresh, 'WAIT')),
+    { code: 'DISCOVERY_WAIT_REQUIRED' });
+  await assert.rejects(freshHarness.command('discovery.reason', reasonPayload(freshHarness, fresh, 'IGNORE', { wait: { kind: 'evidence_change' } })),
+    { code: 'DISCOVERY_WAIT_NOT_ALLOWED' });
+  await assert.rejects(freshHarness.command('discovery.reason', reasonPayload(freshHarness, fresh, 'WAIT', { wait: { kind: 'deadline', at: 'not-a-date' } })),
+    { code: 'DISCOVERY_WAIT_INVALID' });
+  const result = await freshHarness.command('discovery.reason', payload, request);
+  assert.equal(await freshHarness.command('discovery.reason', payload, request).then((value) => value.status), result.status);
+  await assert.rejects(freshHarness.command('discovery.reason', { ...payload, reason: 'changed payload' }, request), { status: 409 });
+  assert.equal(freshHarness.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='discovery.reason.transitioned'").n, 1);
+  noEffects(freshHarness);
+});
+
+test('S2 REVIEW remains the existing CANDIDATE review path and never transfers or contacts', async t => {
+  const h = harness(t), f = await candidate(h, 'CANDIDATE');
+  await assert.rejects(h.command('discovery.reason', reasonPayload(h, f, 'REVIEW')),
+    { code: 'DISCOVERY_REASON_DECISION_INVALID' });
+  const detail = h.detail(f.situationId);
+  assert.equal(detail.review_tasks.length, 1);
+  const approved = await h.command('discovery.review', { task_id: detail.review_tasks[0].id,
+    expected_revision: detail.revision, expected_evidence_fingerprint: detail.evidence_fingerprint, decision: 'approve' });
+  assert.equal(approved.status, 'CANDIDATE');
+  assert.equal(h.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='discovery.transferred'").n, 0);
   noEffects(h);
+});
+
+test('S2 reason rejects delete, revoke, and expiry between assessment and transition', async t => {
+  const deleted = harness(t), deletedFixture = await candidate(deleted);
+  await deleted.ingest(source({ version: 2, operation: 'delete', text: null, updated_at: '2026-09-25T10:30:00.000Z' }));
+  await assert.rejects(deleted.command('discovery.reason', reasonPayload(deleted, deletedFixture, 'IGNORE')), { code: /DISCOVERY_STALE/ });
+
+  const revoked = harness(t), revokedFixture = await candidate(revoked);
+  revoked.settings.opportunity.allowedSourceRefs = [];
+  await assert.rejects(revoked.command('discovery.reason', reasonPayload(revoked, revokedFixture, 'IGNORE')), { code: /DISCOVERY_STALE/ });
+
+  const expired = harness(t), expiredFixture = await candidate(expired);
+  expired.store.run("UPDATE discovery_situations SET expires_at='2000-01-01T00:00:00.000Z' WHERE id=?", expiredFixture.situationId);
+  await assert.rejects(expired.command('discovery.reason', reasonPayload(expired, expiredFixture, 'IGNORE')), { code: /DISCOVERY_STALE/ });
 });
