@@ -688,6 +688,40 @@ function reasonTransition(service, p, actor) {
     allowed_effects: [] };
 }
 
+const REASON_STATE_MAX_LIMIT = 100;
+const SITUATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+// Read-only projection of situations whose latest durable reason transition still governs the
+// current basis. It reports what blocks them and never repairs, expires, or unlocks anything.
+function reasonStates(service, options, actor) {
+  operator(actor);
+  fields(options, ['limit', 'cursor']);
+  const limit = options.limit === undefined ? REASON_STATE_MAX_LIMIT : options.limit;
+  check(Number.isInteger(limit) && limit >= 1 && limit <= REASON_STATE_MAX_LIMIT, 'DISCOVERY_FIELDS_INVALID');
+  if (options.cursor !== undefined) {
+    // Keyset cursor is a situation id; a malformed one must not silently read as the first page.
+    check(typeof options.cursor === 'string' && SITUATION_ID.test(options.cursor), 'DISCOVERY_FIELDS_INVALID');
+  }
+  const rows = service.store.all(`SELECT * FROM discovery_situations
+    WHERE partner_id=? AND ${ACTIVE} AND id>? ORDER BY id LIMIT ?`,
+  service.config.partnerId, options.cursor ?? '', limit + 1);
+  const page = rows.slice(0, limit);
+  const items = page.map((row) => {
+    const transition = lastReasonTransition(service, row.id);
+    const fingerprint = evidenceFingerprint(service, row.id);
+    // A transition that no longer describes the current evidence basis does not govern it.
+    if (!transition || transition.evidence_fingerprint !== fingerprint) return null;
+    const deadlineReached = transition.decision === 'WAIT' && transition.wait?.kind === 'deadline'
+      && Date.parse(transition.wait.at) <= Date.now();
+    return { situation_id: row.id, storage_status: row.status, revision: row.revision,
+      evidence_fingerprint: fingerprint, transition_id: transition.id, decision: transition.decision,
+      wait: transition.wait ?? null, state: deadlineReached ? 'READY' : 'BLOCKED',
+      unlock: transition.wait?.kind === 'deadline' ? 'DEADLINE_OR_EVIDENCE_CHANGE' : 'EVIDENCE_CHANGE',
+      reason: deadlineReached ? 'DEADLINE_REACHED' : transition.reason,
+      freshness: fresh(service, row), executable: false, contact_permission: false, allowed_effects: [] };
+  }).filter(Boolean);
+  return { items, next_cursor: rows.length > limit ? page.at(-1).id : null };
+}
+
 function review(service, p, actor) {
   operator(actor);
   const limits = config(service);
@@ -986,4 +1020,4 @@ export function discoveryCommand(service, action, payload, actor) {
   return transfer(service, payload);
 }
 
-export { detail as discoveryDetail };
+export { detail as discoveryDetail, reasonStates as discoveryReasonStates };
