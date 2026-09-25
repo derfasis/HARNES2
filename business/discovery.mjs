@@ -659,10 +659,11 @@ function reasonTransition(service, p, actor) {
     check(p.wait === undefined, 'DISCOVERY_WAIT_NOT_ALLOWED');
   }
   cancelReviews(service, row.id);
+  const basisRevision = row.revision;
   const updated = touch(service, row, p.decision === 'STOP' ? 'DISMISSED' : 'OBSERVING');
   record(service, 'discovery.reason.transitioned', {
     situation_id: row.id, assessment_id: assessment.id,
-    assessment_fingerprint: assessment.assessment_fingerprint, basis_revision: assessment.basis_revision,
+    assessment_fingerprint: assessment.assessment_fingerprint, basis_revision: basisRevision,
     result_revision: updated.revision, evidence_fingerprint: fingerprint, decision: p.decision,
     reason: reasonText, wait,
   });

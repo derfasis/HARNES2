@@ -166,6 +166,10 @@ test('S2 reason is stale-safe, operator-only, strict, and idempotent', async t =
   await assert.rejects(freshHarness.command('discovery.reason', reasonPayload(freshHarness, fresh, 'WAIT', { wait: { kind: 'deadline', at: 'not-a-date' } })),
     { code: 'DISCOVERY_WAIT_INVALID' });
   const result = await freshHarness.command('discovery.reason', payload, request);
+  const transition = JSON.parse(freshHarness.store.get(
+    "SELECT payload_json FROM events WHERE kind='discovery.reason.transitioned' ORDER BY id DESC LIMIT 1").payload_json);
+  assert.equal(transition.basis_revision, fresh.result.revision);
+  assert.equal(transition.result_revision, transition.basis_revision + 1);
   assert.equal(await freshHarness.command('discovery.reason', payload, request).then((value) => value.status), result.status);
   await assert.rejects(freshHarness.command('discovery.reason', { ...payload, reason: 'changed payload' }, request), { status: 409 });
   assert.equal(freshHarness.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='discovery.reason.transitioned'").n, 1);
