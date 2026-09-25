@@ -136,6 +136,8 @@ test('4E a stale basis shows no decision controls at all', async () => {
   assert.doesNotMatch(html, /discovery-reason-open/);
   assert.match(html, /Основание устарело/);
   assert.match(html, /DISCOVERY_EVIDENCE_STALE/);
+  // The record stays readable: a stale basis hides the decisions, not the evidence behind them.
+  assert.match(html, /Что входит\?/);
 });
 
 test('4E a reason decision is sent with the exact assessment, revision and fingerprint', async () => {

@@ -88,8 +88,6 @@ function discoveryDetailPanel(){
   if(discoveryDetailError)return panel('Ситуация',empty('Ситуация больше недоступна',discoveryDetailError));
   if(discoveryDetail&&['STOPPED','DISMISSED','TRANSFERRED','STALE'].includes(discoveryDetail.status))
     return panel(`Ситуация ${discoveryDetail.situation_id}`,`<p>Эта ситуация закрыта: ${esc(discoveryDetail.status)}. Решения недоступны.</p>`);
-  if(discoveryDetail&&discoveryDetail.freshness?.fresh!==true)
-    return panel(`Ситуация ${discoveryDetail.situation_id}`,`<p>Основание устарело: ${esc((discoveryDetail.freshness?.reasons??[]).join(', '))}. Решения недоступны, пока основание не обновится.</p>`);
   const d=discoveryDetail;
   if(!d)return panel('Ситуация',empty('Выберите ситуацию','Показываем только то, что уже записано в системе. Ничего не отправляется отсюда.'));
   const evidence=d.evidence.map(item=>`<p><strong>Зафиксированное наблюдение — не подтверждённый факт</strong>: ${esc(item.text)}${truncatedMark(item.text_truncated)}<small>${esc(item.message_id)} · версия ${item.message_version} · ${esc(item.author_id??'—')}</small></p>`).join('');
@@ -102,6 +100,7 @@ function discoveryDetailPanel(){
     <small>${esc(freshnessLine(a.freshness))}</small></div></div>`).join('');
   const proposals=d.opening_proposals.map(p=>`<p><strong>Предложение — не черновик, не отправлено, не даёт разрешения на контакт</strong>: ${esc(p.text)}${truncatedMark(p.text_truncated)}<small>${esc(p.rationale)}${truncatedMark(p.rationale_truncated)}</small></p>`).join('');
   return panel(`Ситуация ${d.situation_id}`,`<p>Статус: ${esc(d.status)} · в хранении: ${esc(d.storage_status)} · ревизия ${d.revision}</p>
+    ${discoveryDetail.freshness?.fresh===true?'':`<p class="section-note">Основание устарело: ${esc((discoveryDetail.freshness?.reasons??[]).join(', '))}. Решения недоступны, пока основание не обновится.</p>`}
     ${discoveryOperatorActions(d)}
     <p>${esc(freshnessLine(d.freshness))}</p><h3>Наблюдения</h3>${evidence||'<p>Пока нет.</p>'}
     <h3>Гипотезы</h3>${assessments||'<p>Пока нет.</p>'}<h3>Предложения</h3>${proposals||'<p>Пока нет.</p>'}
