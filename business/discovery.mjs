@@ -226,32 +226,98 @@ export function staleMaterialEvidence(service) {
   return service.store.transaction(() => staleMaterialEvidenceRows(service));
 }
 
-export function invalidateRevokedDiscoverySources(service) {
+const DISCOVERY_MAINTENANCE_MAX = 1000;
+const REVOKED_MAINTENANCE_CURSOR_CHANNEL = 'discovery-revoked-maintenance-v1';
+
+function readRevokedMaintenanceCursor(service) {
+  const row = service.store.get('SELECT cursor FROM channel_offsets WHERE channel=? AND account_id=?',
+    REVOKED_MAINTENANCE_CURSOR_CHANNEL, service.config.partnerId);
+  if (!row) return null;
+  try {
+    const value = parse(row.cursor);
+    return typeof value.source_ref === 'string' ? value.source_ref : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeRevokedMaintenanceCursor(service, sourceRef) {
+  service.store.run(`INSERT INTO channel_offsets(channel,account_id,cursor) VALUES(?,?,?)
+    ON CONFLICT(channel,account_id) DO UPDATE SET cursor=excluded.cursor`,
+  REVOKED_MAINTENANCE_CURSOR_CHANNEL, service.config.partnerId, JSON.stringify({ source_ref: sourceRef }));
+}
+
+export function invalidateRevokedDiscoverySources(service, limit = DISCOVERY_MAINTENANCE_MAX) {
+  check(Number.isInteger(limit) && limit >= 1 && limit <= DISCOVERY_MAINTENANCE_MAX,
+    'DISCOVERY_MAINTENANCE_LIMIT');
   return service.store.transaction(() => {
-    const active = service.store.all(`SELECT * FROM discovery_situations WHERE partner_id=?
-      AND status IN ('OBSERVING','CANDIDATE') ORDER BY updated_at,id LIMIT ?`, service.config.partnerId, DISCOVERY_MAX_ACTIVE_SITUATIONS);
-    const pending = service.store.all(`SELECT DISTINCT COALESCE(json_extract(s.payload_json,'$.source_id'),'') AS source_ref,
-        CAST(p.payload_json->>'$.source_event_id' AS INTEGER) AS source_event_id
-      FROM events p
-      JOIN events s ON s.partner_id=p.partner_id AND s.kind='source.message'
-        AND s.id=CAST(p.payload_json->>'$.source_event_id' AS INTEGER)
-      WHERE p.partner_id=? AND p.kind=?
-        AND NOT EXISTS (SELECT 1 FROM events a WHERE a.partner_id=p.partner_id AND a.kind=?
-          AND a.payload_json->>'$.source_event_id'=p.payload_json->>'$.source_event_id')`,
-    service.config.partnerId, DISCOVERY_PENDING, DISCOVERY_APPLIED);
-    const sourceRefs = new Set([...active.map(row => row.source_ref), ...pending.map(row => row.source_ref)]);
-    const revoked = new Set([...sourceRefs].filter(sourceRef => sourceAccessReadiness(service, sourceRef).reason === 'SOURCE_NOT_ALLOWED'));
-    let count = 0;
-    for (const row of active) {
-      if (revoked.has(row.source_ref)) {
-        markStale(service, row, 'SOURCE_REVOKED');
-        count++;
-      }
+    const scanLimit = limit;
+    const maintenanceRows = (after, take, before = null) => {
+      const predicates = [], params = [service.config.partnerId, service.config.partnerId,
+        DISCOVERY_PENDING, DISCOVERY_APPLIED];
+      if (after !== null) { predicates.push('source_ref > ?'); params.push(after); }
+      if (before !== null) { predicates.push('source_ref <= ?'); params.push(before); }
+      params.push(take);
+      const predicate = predicates.length ? `WHERE ${predicates.join(' AND ')}` : '';
+      return service.store.all(`SELECT source_ref FROM (
+          SELECT COALESCE(source_ref,'') AS source_ref
+          FROM discovery_situations
+          WHERE partner_id=? AND status IN ('OBSERVING','CANDIDATE')
+          UNION
+          SELECT COALESCE(json_extract(s.payload_json,'$.source_id'),'') AS source_ref
+          FROM events p
+          JOIN events s ON s.partner_id=p.partner_id AND s.kind='source.message'
+            AND s.id=CAST(p.payload_json->>'$.source_event_id' AS INTEGER)
+          WHERE p.partner_id=? AND p.kind=?
+            AND NOT EXISTS (SELECT 1 FROM events a WHERE a.partner_id=p.partner_id AND a.kind=?
+              AND a.payload_json->>'$.source_event_id'=p.payload_json->>'$.source_event_id')
+        ) AS grouped ${predicate} ORDER BY source_ref LIMIT ?`, ...params);
+    };
+    const cursor = readRevokedMaintenanceCursor(service);
+    let sourceRefs = maintenanceRows(cursor, scanLimit);
+    if (cursor !== null && sourceRefs.length < scanLimit) {
+      sourceRefs = sourceRefs.concat(maintenanceRows(null, scanLimit - sourceRefs.length, cursor));
     }
-    for (const row of pending) {
-      if (revoked.has(row.source_ref))
-        record(service, DISCOVERY_APPLIED, { source_event_id: String(row.source_event_id),
+    writeRevokedMaintenanceCursor(service, sourceRefs.length
+      ? String(sourceRefs[sourceRefs.length - 1].source_ref ?? '') : null);
+
+    const sourceRefValues = sourceRefs.map(row => String(row.source_ref ?? ''));
+    const sourceRefSet = new Set(sourceRefValues);
+    const revoked = new Set([...sourceRefSet]
+      .filter(sourceRef => sourceAccessReadiness(service, sourceRef).reason === 'SOURCE_NOT_ALLOWED'));
+    const queues = sourceRefValues.map(sourceRef => {
+      const active = service.store.get(`SELECT * FROM discovery_situations
+        WHERE partner_id=? AND status IN ('OBSERVING','CANDIDATE') AND source_ref=?
+        ORDER BY updated_at,id LIMIT 1`, service.config.partnerId, sourceRef);
+      const pending = service.store.get(`SELECT DISTINCT COALESCE(json_extract(s.payload_json,'$.source_id'),'') AS source_ref,
+          CAST(p.payload_json->>'$.source_event_id' AS INTEGER) AS source_event_id
+        FROM events p
+        JOIN events s ON s.partner_id=p.partner_id AND s.kind='source.message'
+          AND s.id=CAST(p.payload_json->>'$.source_event_id' AS INTEGER)
+        WHERE p.partner_id=? AND p.kind=?
+          AND NOT EXISTS (SELECT 1 FROM events a WHERE a.partner_id=p.partner_id AND a.kind=?
+            AND a.payload_json->>'$.source_event_id'=p.payload_json->>'$.source_event_id')
+          AND COALESCE(json_extract(s.payload_json,'$.source_id'),'')=?
+        ORDER BY p.id LIMIT 1`, service.config.partnerId, DISCOVERY_PENDING, DISCOVERY_APPLIED, sourceRef);
+      const items = [];
+      if (active) items.push({ kind: 'active', row: active });
+      if (pending) items.push({ kind: 'pending', row: pending });
+      return { sourceRef, items };
+    });
+    let budget = limit;
+    let count = 0;
+    const rounds = Math.max(0, ...queues.map(queue => queue.items.length));
+    for (let round = 0; round < rounds && budget > 0; round += 1) {
+      for (const queue of queues) {
+        if (!budget) break;
+        const item = queue.items[round];
+        if (!item || !revoked.has(queue.sourceRef)) continue;
+        if (item.kind === 'active') markStale(service, item.row, 'SOURCE_REVOKED');
+        else record(service, DISCOVERY_APPLIED, { source_event_id: String(item.row.source_event_id),
           stage: 'source_projection', projection_status: 'source_revoked' });
+        count++;
+        budget--;
+      }
     }
     return count;
   });
@@ -521,6 +587,21 @@ function review(service, p, actor) {
     executable: false, contact_permission: false, allowed_effects: [] };
 }
 
+function requireTransferAuthorBinding(service, situationRow, conversationId) {
+  const evidence = evidenceRows(service, situationRow.id)[0];
+  check(evidence, 'DISCOVERY_AUTHOR_BINDING_REQUIRED');
+  const bindings = service.config.opportunity?.authorBindings;
+  check(Array.isArray(bindings), 'DISCOVERY_AUTHOR_BINDING_REQUIRED');
+  const valid = bindings.every(binding => binding && typeof binding === 'object'
+    && Object.keys(binding).length === 3
+    && typeof binding.source_id === 'string' && typeof binding.author_id === 'string'
+    && typeof binding.conversation_id === 'string');
+  const authorMatches = valid ? bindings.filter(binding => binding.source_id === evidence.source.source_id
+    && binding.author_id === evidence.source.author_id) : [];
+  check(valid && authorMatches.length === 1
+    && authorMatches[0].conversation_id === conversationId, 'DISCOVERY_AUTHOR_BINDING_REQUIRED');
+}
+
 function transfer(service, p) {
   const limits = config(service);
   invalidateChangedOffers(service, limits.offerFingerprint, limits.purpose);
@@ -534,16 +615,19 @@ function transfer(service, p) {
   check(approved, 'DISCOVERY_REVIEW_REQUIRED');
   const conversation = service.conversation(p.conversation_id), person = service.person(conversation.person_id);
   check(!person.suppressed && conversation.ownership === 'AI_OWNED', 'DISCOVERY_CONVERSATION_UNAVAILABLE');
+  requireTransferAuthorBinding(service, row, conversation.id);
   const inbound = service.store.get("SELECT * FROM messages WHERE id=? AND conversation_id=? AND direction='in'",
     requiredText(p.inbound_message_id, 'inbound_message_id', 150), conversation.id);
   check(inbound, 'DISCOVERY_INBOUND_REQUIRED');
+  service.engagement.resolvePermission(conversation.id, 'reply');
   const basis = requiredText(p.basis, 'transfer basis', 4000);
-  check(!service.engagement.managed(conversation.id), 'DISCOVERY_ENGAGEMENT_EXISTS');
-  const opened = service.engagement.open({ conversation_id: conversation.id, topic: 'Вхідне звернення після Discovery',
-    current_need: 'Уточнити актуальну потребу за реальним вхідним повідомленням.',
-    unknowns: ['Discovery is background evidence, not consent or confirmed interest.'],
-    close_condition: 'Потребу з вхідного повідомлення вирішено або людина відмовилася.' }, { kind: 'operator' }, false);
-  const engagement = service.engagement.get(opened.engagement_id);
+  const existing = service.engagement.current(conversation.id);
+  const engagement = existing ? service.engagement.get(existing.id) : service.engagement.get(
+    service.engagement.open({ conversation_id: conversation.id, topic: 'Вхідне звернення після Discovery',
+      current_need: 'Уточнити актуальну потребу за реальним вхідним повідомленням.',
+      unknowns: ['Discovery is background evidence, not consent or confirmed interest.'],
+      close_condition: 'Потребу з вхідного повідомлення вирішено або людина відмовилася.' }, { kind: 'operator' }, false).engagement_id,
+  );
   service.engagement.signal(engagement, 'inbound', { message_id: inbound.id });
   const updated = touch(service, row, 'TRANSFERRED');
   service.store.run('UPDATE discovery_situations SET transferred_engagement_id=? WHERE id=?', engagement.id, row.id);
@@ -650,8 +734,10 @@ export function ensureDiscoveryApplied(service, sourceEventId) {
 
 export function reconcileDiscoveryPending(service, limit = 50) {
   check(Number.isInteger(limit) && limit >= 1 && limit <= 100, 'DISCOVERY_RECONCILE_LIMIT');
-  invalidateRevokedDiscoverySources(service);
-  if (service.config.discovery?.enabled !== true) return { processed: 0, failed: 0, deferred: 0 };
+  const reserveNormalSlot = service.config.discovery?.enabled === true && limit > 1 ? 1 : 0;
+  const maintained = invalidateRevokedDiscoverySources(service, limit - reserveNormalSlot);
+  const budget = Math.max(0, limit - maintained);
+  if (service.config.discovery?.enabled !== true || budget === 0) return { processed: 0, failed: 0, deferred: 0 };
   const sourceLimit = Math.min(1000, Math.max(limit * 4, limit));
   const sourceRefRows = (after, take, before = null) => {
     const predicates = [], params = [service.config.partnerId, DISCOVERY_PENDING, DISCOVERY_APPLIED];
@@ -701,14 +787,16 @@ export function reconcileDiscoveryPending(service, limit = 50) {
     sourceRef, service.config.partnerId, DISCOVERY_PENDING, DISCOVERY_APPLIED, DISCOVERY_FAILED, limit);
     const access = sourceAccessReadiness(service, sourceRef);
     if (!access.current && access.reason !== 'SOURCE_NOT_ALLOWED') { deferred += rows.length; continue; }
+    if (access.reason === 'SOURCE_NOT_ALLOWED') continue;
     if (rows.length) queues.push({ rows, index: 0 });
   }
-  let processed = 0, failed = 0;
-  while (processed + failed < limit) {
+  let processed = 0, failed = 0, attempts = 0;
+  while (attempts < budget) {
     let progressed = false;
     for (const queue of queues) {
-      if (processed + failed >= limit || queue.index >= queue.rows.length) continue;
+      if (attempts >= budget || queue.index >= queue.rows.length) continue;
       const row = queue.rows[queue.index++];
+      attempts++;
       try {
         const result = ensureDiscoveryApplied(service, String(row.source_event_id));
         if (result.status === 'deferred') deferred++;

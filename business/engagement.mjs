@@ -116,13 +116,18 @@ export class EngagementLoop {
     if(enqueue)this.enqueue(this.get(eid),{type:'operator_open'});
     return {engagement_id:eid};
   }
-  permission(e,purpose) {
-    const c=this.s.conversation(e.conversation_id), person=this.s.person(c.person_id);
-    ensure(!person.suppressed&&c.ownership==='AI_OWNED'&&!['CLOSED','STOPPED'].includes(e.status),'Work is not AI owned',409);
-    const permission=this.db.get('SELECT * FROM contact_permissions WHERE partner_id=? AND person_id=? AND conversation_id=? AND channel=? AND purpose=? AND revoked_at IS NULL AND valid_from<=? AND expires_at>? ORDER BY created_at DESC,rowid DESC LIMIT 1',e.partner_id,c.person_id,c.id,c.channel,purpose,now(),now());
+  resolvePermission(conversationId,purpose) {
+    const c=this.s.conversation(conversationId), person=this.s.person(c.person_id);
+    ensure(!person.suppressed&&c.ownership==='AI_OWNED','Work is not AI owned',409);
+    const permission=this.db.get('SELECT * FROM contact_permissions WHERE partner_id=? AND person_id=? AND conversation_id=? AND channel=? AND purpose=? AND revoked_at IS NULL AND valid_from<=? AND expires_at>? ORDER BY created_at DESC,rowid DESC LIMIT 1',this.s.config.partnerId,c.person_id,c.id,c.channel,purpose,now(),now());
     ensure(permission,'A current typed permission is required',409,'typed_permission_required');
     const account=c.channel_identity_id?this.db.get('SELECT account_id FROM channel_identities WHERE id=?',c.channel_identity_id)?.account_id:null;
-    ensure(permission.account_id===(account??null),'Permission account changed',409,'typed_permission_required');return permission;
+    ensure(permission.account_id===(account??null),'Permission account changed',409,'typed_permission_required');
+    return permission;
+  }
+  permission(e,purpose) {
+    ensure(!['CLOSED','STOPPED'].includes(e.status),'Engagement closed',409);
+    return this.resolvePermission(e.conversation_id,purpose);
   }
   assertDraft(d,{execution=false}={}) {
     // Historical managed drafts stay managed even after the matter is closed.
