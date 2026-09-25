@@ -130,6 +130,7 @@ test('S2 STOP closes only this Discovery situation and never touches person, eng
   const h = harness(t), f = await candidate(h, 'CANDIDATE');
   const result = await h.command('discovery.reason', reasonPayload(h, f, 'STOP'));
   assert.equal(result.status, 'STOPPED');
+  assert.equal(h.store.get('SELECT status FROM discovery_situations WHERE id=?', f.situationId).status, 'DISMISSED');
   assert.equal(h.store.get('SELECT COUNT(*) AS n FROM tasks WHERE kind=\'discovery_review\' AND status=\'proposed\'').n, 0);
   assert.equal(h.detail(f.situationId).status, 'STOPPED');
   await assert.rejects(h.command('discovery.assess', assessmentPayload(h, f.situationId)), { code: /DISCOVERY_STALE/ });
