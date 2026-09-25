@@ -42,10 +42,11 @@ function settings() {
   return config;
 }
 
-async function harness(t) {
+async function harness(t, { engagement = false } = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harnes-audit-4c-'));
   let store = new Store(directory);
   const config = settings();
+  config.engagement = { ...config.engagement, enabled: engagement };
   let service = new BusinessService(store, config);
   t.after(() => { store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
   const h = { directory, config, get store() { return store; }, get service() { return service; },
@@ -56,8 +57,11 @@ async function harness(t) {
   h.pid = person.person_id;
   const inbound = await h.command('message.record', { conversation_id: h.cid, text: 'Скільки коштує участь?', source: 'synthetic' });
   h.mid = inbound.message_id;
-  const opened = await h.command('engagement.open', { conversation_id: h.cid, topic: 'Умови партнерства',
-    current_need: 'Стартові витрати', close_condition: 'Відповідь отримана або відмова', unknowns: ['Умови не перевірені'] });
+  const opened = engagement
+    ? { engagement_id: h.service.engagement.current(h.cid).id }
+    : await h.command('engagement.open', { conversation_id: h.cid, topic: 'Умови партнерства',
+      current_need: 'Стартові витрати', close_condition: 'Відповідь отримана або відмова',
+      unknowns: ['Умови не перевірені'] });
   h.eid = opened.engagement_id;
   h.grant = (purpose = 'reply', extra = {}) => h.command('permission.grant', { conversation_id: h.cid, purpose,
     granted_by: 'audit recipient', evidence: 'Synthetic explicit request for this purpose',
@@ -78,10 +82,15 @@ async function harness(t) {
 test('E1 a decision requires the current revision and real evidence', async t => {
   const h = await harness(t);
   // Each refusal is wrapped on its own: a group snapshot would only prove the combined effect.
+  // A real message from a different conversation is the case production scopes evidence for.
+  const other = await h.command('person.create', { name: 'Other person', source: 'offline audit' });
+  const otherInbound = await h.command('message.record', { conversation_id: other.conversation_id,
+    text: 'Чужое повідомлення', source: 'synthetic' });
   for (const refuse of [
     () => h.command('decision.commit', { engagement_id: h.eid, expected_revision: 999, kind: 'IGNORE',
       reason: 'x', expected_next: 'y', evidence: [{ type: 'message', id: h.mid }] }),
     () => h.decide('IGNORE', { evidence: [{ type: 'message', id: 'no-such-message' }] }),
+    () => h.decide('IGNORE', { evidence: [{ type: 'message', id: otherInbound.message_id }] }),
   ]) {
     const before = snapshot(h.store);
     await assert.rejects(refuse(), { status: 409 });
@@ -176,8 +185,12 @@ test('E5 request replay is idempotent and payload changes conflict', async t => 
   const payload = { engagement_id: h.eid, expected_revision: 0, kind: 'IGNORE', reason: 'Audit',
     expected_next: 'Await inbound', evidence: [{ type: 'message', id: h.mid }] };
   const first = await h.command('decision.commit', payload, OPERATOR, request);
+  // The snapshot is taken after the first success, so a replay that wrote again would show.
+  const afterFirst = snapshot(h.store);
   const second = await h.command('decision.commit', payload, OPERATOR, request);
-  assert.equal(second.status, first.status);
+  assert.deepEqual(JSON.parse(JSON.stringify(second)), JSON.parse(JSON.stringify(first)),
+    'a replayed request must return the identical result');
+  assert.equal(snapshot(h.store), afterFirst, 'a replayed request must not write again');
   const before = snapshot(h.store);
   await assert.rejects(h.command('decision.commit', { ...payload, reason: 'Changed' }, OPERATOR, request),
     { status: 409 });
@@ -186,8 +199,8 @@ test('E5 request replay is idempotent and payload changes conflict', async t => 
 });
 
 // E6 — a restart neither resumes a closed case nor restores authority.
-test('E6 a closed or stopped engagement stays closed across a restart', async t => {
-  const stopped = await harness(t);
+test('E6 a closed or stopped engagement stays closed and does not resurrect on new inbound', async t => {
+  const stopped = await harness(t, { engagement: true });
   await stopped.grant();
   await stopped.decide('STOP');
   stopped.restart();
@@ -196,12 +209,15 @@ test('E6 a closed or stopped engagement stays closed across a restart', async t 
   await assert.rejects(stopped.decide('ACT', { action: { purpose: 'reply', text: 'Ответ.' } }), { status: 409 });
   assert.equal(snapshot(stopped.store), before);
   assert.equal(stopped.store.get("SELECT COUNT(*) AS n FROM delivery_attempts").n, 0);
+  // The real resurrection path: a new inbound after the case is closed must not reopen it.
+  await stopped.command('message.record', { conversation_id: stopped.cid, text: 'Нове вхідне повідомлення', source: 'synthetic' });
+  assert.equal(stopped.service.engagement.current(stopped.cid), undefined, 'a closed case must not reopen');
+  assert.equal(stopped.store.get('SELECT COUNT(*) AS n FROM engagements').n, 1);
+  assert.equal(stopped.store.get("SELECT COUNT(*) AS n FROM engagement_tasks et JOIN tasks t ON t.id=et.task_id WHERE t.status='pending' AND t.conversation_id=?", stopped.cid).n, 0);
 
-  const closed = await harness(t);
+  // Closed directly while AI-owned, so the refusal is not masked by a HUMAN_OWNED conversation.
+  const closed = await harness(t, { engagement: true });
   await closed.grant();
-  await closed.decide('HANDOFF');
-  const handoff = closed.store.get("SELECT id FROM engagement_handoffs WHERE status='requested' ORDER BY rowid DESC LIMIT 1");
-  await closed.command('handoff.accept', { engagement_id: closed.eid, handoff_id: handoff.id });
   await closed.command('engagement.close', { engagement_id: closed.eid, evidence: 'Audit close: owner decision recorded.' });
   closed.restart();
   assert.equal(closed.service.engagement.current(closed.cid), undefined);
@@ -209,6 +225,9 @@ test('E6 a closed or stopped engagement stays closed across a restart', async t 
   await assert.rejects(closed.decide('ACT', { action: { purpose: 'reply', text: 'Ответ.' } }), { status: 409 });
   assert.equal(snapshot(closed.store), closedBefore);
   assert.equal(closed.store.get("SELECT COUNT(*) AS n FROM delivery_attempts").n, 0);
+  await closed.command('message.record', { conversation_id: closed.cid, text: 'Нове вхідне повідомлення', source: 'synthetic' });
+  assert.equal(closed.service.engagement.current(closed.cid), undefined, 'a closed case must not reopen');
+  assert.equal(closed.store.get('SELECT COUNT(*) AS n FROM engagements').n, 1);
 });
 
 // O1 — opportunity review is bound to the exact fingerprint and revision.
@@ -274,9 +293,11 @@ test('O3 a decided card cannot be re-decided, and replay stays idempotent', asyn
   const request = id();
   const payload = { task_id: consumed.task_id, fingerprint: detail.fingerprint, expected_revision: 0 };
   const first = await h.command('opportunity.review.approve', payload, OPERATOR, request);
+  const afterFirst = snapshot(h.store);
   const second = await h.command('opportunity.review.approve', payload, OPERATOR, request);
-  assert.equal(second.review.revision, first.review.revision);
-  assert.equal(second.review.status, first.review.status);
+  assert.deepEqual(JSON.parse(JSON.stringify(second)), JSON.parse(JSON.stringify(first)),
+    'a replayed approval must return the identical result');
+  assert.equal(snapshot(h.store), afterFirst, 'a replayed approval must not write again');
   const current = h.service.opportunityDetail(consumed.task_id);
   const before = snapshot(h.store);
   await assert.rejects(h.command('opportunity.review.approve', { ...payload,

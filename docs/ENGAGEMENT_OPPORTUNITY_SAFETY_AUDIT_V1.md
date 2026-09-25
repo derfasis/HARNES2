@@ -10,15 +10,15 @@ this stage. A failing invariant is a finding, reported here and fixed in its own
 
 | Invariant | Statement | Result |
 | --- | --- | --- |
-| E1 | A decision requires the current engagement revision and real message evidence. | PASS |
+| E1 | A decision requires the current engagement revision and message evidence from its own conversation. | PASS |
 | E2 | ACT requires a typed permission matching person, conversation, channel, and account, each proven separately. | PASS |
 | E3 | A suppressed person or a human-owned conversation produces no work, and history is not erased. | PASS |
 | E4 | A draft is never a send, and no delivery is ever claimed. | PASS |
-| E5 | Request replay is idempotent; a changed payload under the same id conflicts. | PASS |
-| E6 | A closed **or** stopped engagement stays closed across a restart; both paths are exercised. | PASS |
+| E5 | Request replay returns the identical result and writes nothing; a changed payload under the same id conflicts. | PASS |
+| E6 | A closed **or** stopped engagement stays closed across a restart and does not reopen on a new inbound. | PASS |
 | O1 | Opportunity review requires the exact fingerprint and revision. | PASS |
 | O2 | Approving a card is a review act: non-executable, no contact, no send. | PASS |
-| O3 | A decided card cannot be decided twice, and replay stays idempotent. | PASS |
+| O3 | A decided card cannot be decided twice; a replay returns the identical result and writes nothing. | PASS |
 | O4 | Nothing in this audit performs an external call. | PASS |
 
 ## How the refusals were checked
@@ -69,6 +69,14 @@ behaviour rather than adjusted to pass:
 3. "An approval returns a status" — false. It returns `review` plus explicit `executable: false`,
    `contact_permission: false`, and `allowed_effects: []`, which is a stronger claim than a status
    string would have been.
+
+Two of these needed real setup rather than a stronger-looking assertion. Idempotence is proven by
+comparing the whole result of a replay against the first result and by taking the snapshot *after*
+the first success, so a replay that quietly wrote again would show. And the resurrection question
+is answered on the path that actually resurrects: engagement is enabled, the case is closed or
+stopped, the process restarts, a genuine new inbound arrives — and no engagement reopens, no
+second row appears, and no evaluation task is queued. The closed case is closed while AI-owned, so
+the refusal is not masked by a `HUMAN_OWNED` conversation.
 
 Account isolation needed its own setup: on a manual conversation `account_id` is null, so no
 mismatch can even be expressed. The audit moves the conversation onto a real channel identity and
