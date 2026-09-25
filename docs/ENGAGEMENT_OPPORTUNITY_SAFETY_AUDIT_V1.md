@@ -23,8 +23,9 @@ this stage. A failing invariant is a finding, reported here and fixed in its own
 
 ## How the refusals were checked
 
-The full row content of every table in the schema is captured before and after **every** refusal
-in this audit: the stale-revision and missing-evidence decisions in E1, the broken grant in E2, the
+The full row content of every table in the schema is captured immediately before and after **each
+individual refusal** — never once around a group of them, which would prove only the combined
+effect: the stale-revision and missing-evidence decisions in E1, the broken grant in E2, the
 suppressed and human-owned cases in E3, the conflicting replay in E5, the closed and stopped cases
 in E6, the bad fingerprint, revision, and field set in O1, and the re-decide in O3. Where a refusal
 is *supposed* to write something, that something is named and constrained, rather than being waved
@@ -32,8 +33,10 @@ through:
 
 - A refused Engagement command writes nothing at all.
 - A refused **Opportunity review** writes exactly one thing: an `opportunity.review.denied` event.
+  Each refused review is measured on its own, and each may add exactly one denial and change
+  nothing else.
 
-## Finding for review: the denial trail is a durable write, by design
+## Contract: the denial trail is a durable write, by design
 
 The first version of `O1` asserted that a refused review changes nothing. It does not, and the code
 says so on purpose: `business/service.mjs` re-records the denial in its own transaction after the
@@ -48,10 +51,11 @@ that was not approvable. The audit now asserts it precisely instead of asserting
 - never the untrusted payload, never a grant, never a status change,
 - and the review task stays `proposed` with no draft, no permission, and no contact.
 
-**This is a contract question, not a bug.** Should a refusal be durable? The current code says yes
-and proves it can be done without leaking untrusted text. If we want a refusal to leave no trace,
-that is a small, separate change — and it would cost the operator the ability to see attempted
-approvals. The audit records the behaviour; the decision is Dev's.
+**Decided: a refusal is durable.** Keeping the trail is useful and safe — an operator can see that
+someone tried to approve something that was not approvable, and the payload is small enough to
+carry none of the untrusted text, no grant, and no status mutation. The contract is therefore
+fixed as: *the denial trail is durable by design, with exactly `action`, `task_id`, `code`, and
+`request_id`, and nothing else.* A refusal that wrote more than that would be a finding.
 
 ## Corrections made while writing the audit
 

@@ -77,11 +77,16 @@ async function harness(t) {
 // E1 — a decision is bound to the exact engagement revision and to a real message.
 test('E1 a decision requires the current revision and real evidence', async t => {
   const h = await harness(t);
-  const before = snapshot(h.store);
-  await assert.rejects(h.command('decision.commit', { engagement_id: h.eid, expected_revision: 999, kind: 'IGNORE',
-    reason: 'x', expected_next: 'y', evidence: [{ type: 'message', id: h.mid }] }), { status: 409 });
-  await assert.rejects(h.decide('IGNORE', { evidence: [{ type: 'message', id: 'no-such-message' }] }), { status: 409 });
-  assert.equal(snapshot(h.store), before, 'a refused decision must not write anything');
+  // Each refusal is wrapped on its own: a group snapshot would only prove the combined effect.
+  for (const refuse of [
+    () => h.command('decision.commit', { engagement_id: h.eid, expected_revision: 999, kind: 'IGNORE',
+      reason: 'x', expected_next: 'y', evidence: [{ type: 'message', id: h.mid }] }),
+    () => h.decide('IGNORE', { evidence: [{ type: 'message', id: 'no-such-message' }] }),
+  ]) {
+    const before = snapshot(h.store);
+    await assert.rejects(refuse(), { status: 409 });
+    assert.equal(snapshot(h.store), before, 'a refused decision must not write anything');
+  }
   assert.equal(h.service.engagement.get(h.eid).revision, 0);
   assert.equal(h.store.get("SELECT COUNT(*) AS n FROM engagement_decisions").n, 0);
 });
@@ -213,15 +218,21 @@ test('O1 opportunity review needs the exact fingerprint and revision', async t =
   const detail = h.service.opportunityDetail(consumed.task_id);
   const review = { task_id: consumed.task_id, fingerprint: detail.fingerprint, expected_revision: 0 };
 
-  const before = snapshot(h.store);
-  await assert.rejects(h.command('opportunity.review.approve', { ...review, fingerprint: 'wrong' }), { status: 409 });
-  await assert.rejects(h.command('opportunity.review.approve', { ...review, expected_revision: 42 }), { status: 409 });
-  await assert.rejects(h.command('opportunity.review.approve', { ...review, unexpected: true }), { status: 409 });
+  // Each refusal is wrapped on its own, and each may add exactly one denial event — nothing else.
+  const denialsBefore = () => h.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='opportunity.review.denied'").n;
+  for (const payload of [{ ...review, fingerprint: 'wrong' }, { ...review, expected_revision: 42 },
+    { ...review, unexpected: true }]) {
+    const before = snapshot(h.store), denials = denialsBefore();
+    await assert.rejects(h.command('opportunity.review.approve', payload), { status: 409 });
+    const after = snapshot(h.store);
+    const changed = tables(h.store).filter((table) => section(before, table) !== section(after, table));
+    assert.deepEqual(changed, ['events'], `a refused review changed ${changed.join(', ')}`);
+    assert.equal(denialsBefore(), denials + 1, 'exactly one denial is recorded per refusal');
+  }
   // A refusal is designed to leave one durable trace: a denial event that survives the rollback.
   // It must carry only the action, the task, the error code and the request id — never the
   // untrusted payload, never a grant, never a status change.
   const denials = h.store.all("SELECT payload_json FROM events WHERE kind='opportunity.review.denied' ORDER BY id");
-  assert.equal(denials.length, 3, 'every refused review is recorded once');
   for (const denial of denials) {
     const payload = JSON.parse(denial.payload_json);
     assert.deepEqual(Object.keys(payload).sort(), ['action', 'code', 'request_id', 'task_id']);
@@ -229,8 +240,6 @@ test('O1 opportunity review needs the exact fingerprint and revision', async t =
     assert.equal(payload.contact_permission, undefined);
     assert.equal(payload.granted, undefined);
   }
-  const changed = tables(h.store).filter((table) => section(before, table) !== section(snapshot(h.store), table));
-  assert.deepEqual(changed, ['events'], 'only the denial trail may change');
   assert.equal(h.store.get('SELECT status FROM tasks WHERE id=?', consumed.task_id).status, 'proposed');
   assert.equal(h.store.get("SELECT COUNT(*) AS n FROM contact_permissions").n, 0);
   assert.equal(h.store.get("SELECT COUNT(*) AS n FROM drafts").n, 0);
