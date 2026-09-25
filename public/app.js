@@ -23,13 +23,14 @@ async function command(action,payload) {
 async function refresh() {
   state=await api('/api/state');if(selected) detail=await api(`/api/conversations/${encodeURIComponent(selected)}`);
   if(tab==='tasks')state.opportunity_reviews=await api(`/api/opportunities?status=${encodeURIComponent(reviewFilter)}&offset=${reviewOffset}`);
+  if(tab==='discovery')await loadDiscovery();
   $('#model-status').textContent=state.runtime.ready?'Модель подключена':'Ожидает подключения ИИ';
   $('#model-status').className=`pill${state.runtime.ready?' ready':''}`;render();
 }
 function render(){
-  const titles={overview:'Обзор',people:'Люди и диалоги',tasks:'Задачи',experience:'Память и опыт',capabilities:'Способности',runs:'История работы',settings:'Подключения'};
+  const titles={overview:'Обзор',people:'Люди и диалоги',tasks:'Задачи',discovery:'Discovery',experience:'Память и опыт',capabilities:'Способности',runs:'История работы',settings:'Подключения'};
   $('#page-title').textContent=titles[tab];document.querySelectorAll('[data-tab]').forEach(x=>x.classList.toggle('active',x.dataset.tab===tab));
-  $('#content').innerHTML=({overview:overview,people:people,tasks:tasks,experience:experience,capabilities:capabilities,runs:runs,settings:settings}[tab])();
+  $('#content').innerHTML=({overview:overview,people:people,tasks:tasks,discovery:discoveryTab,experience:experience,capabilities:capabilities,runs:runs,settings:settings}[tab])();
 }
 function overview(){
   const m=state.metrics,pendingTasks=state.tasks.filter(t=>['pending','proposed','running'].includes(t.status));
@@ -39,6 +40,68 @@ function overview(){
   ${panel('Рабочие способности',state.capabilities.slice(0,4).map(c=>`<div class="feature"><div>${esc(c.name)}<small>${esc(c.id)}</small></div>${badge(c.status)}</div>`).join(''),button('Открыть','go-capabilities'))}</div>
   ${!state.runtime.ready?`<div class="section-note">Архитектура установлена. Можно вести контакты, записывать сообщения, планировать задачи и сохранять опыт. Для самостоятельной работы партнёра осталось подключить модель.</div>`:''}
   ${panel('Последние события',state.events.length?state.events.slice(0,6).map(e=>`<div class="activity"><span class="marker"></span><div>${esc(e.kind)}<small>${date(e.created_at)} · ${esc(label(e.actor))}</small></div></div>`).join(''):empty('История начинается здесь','Здесь появятся действия партнёра и ваши решения.'))}`;
+}
+// Stage 3E: a read-only Discovery viewer. It renders the frozen 3B/3C projections and issues
+// nothing but the two GET endpoints. There is deliberately no command path here.
+let discoveryList=null,discoveryError=null,discoveryDetail=null,discoverySelection=null,discoveryDetailError='',discoveryCursorStack=[];
+async function loadDiscovery() {
+  discoveryCursorStack=[];
+  try { discoveryList=await api('/api/discovery/reason-states'); discoveryError=null; }
+  catch(error) { discoveryList=null; discoveryError=error.message; }
+  // The open situation is re-read too, so a card that went stale, revoked, or unavailable is never
+  // left on screen looking fresh next to an already updated list.
+  if(discoverySelection) await selectSituation(discoverySelection);
+}
+async function nextDiscoveryPage() {
+  const cursor=discoveryList?.next_cursor; if(!cursor) return;
+  try { discoveryList=await api(`/api/discovery/reason-states?cursor=${encodeURIComponent(cursor)}`); discoveryError=null; }
+  catch(error) { discoveryError=error.message; }
+}
+async function selectSituation(situationId) {
+  // A slow response for an earlier selection must never replace the one the operator is reading.
+  const request=discoveryCursorStack.length,tokenAtRequest=++discoveryRequest;
+  discoverySelection=situationId; discoveryDetailError='';
+  try {
+    const loaded=await api(`/api/discovery/${encodeURIComponent(situationId)}`);
+    if(tokenAtRequest!==discoveryRequest||discoverySelection!==situationId) return;
+    discoveryDetail=loaded;
+  } catch(error) {
+    if(tokenAtRequest!==discoveryRequest||discoverySelection!==situationId) return;
+    discoveryDetail=null; discoveryDetailError=error.message;
+  }
+  void request;
+}
+let discoveryRequest=0;
+const truncatedMark=value=>value?' <span class="truncated" title="Показано сокращённо">обрезано</span>':'';
+const freshnessLine=value=>value.fresh?'Свежее':'Неактуально: '+value.reasons.join(', ');
+function discoveryTab(){
+  if(discoveryError)return empty('Discovery недоступен',discoveryError);
+  const items=discoveryList?.items??[];
+  const rows=items.map(item=>`<button class="person-card ${item.situation_id===discoverySelection?'active':''}" data-do="discovery-select" data-id="${esc(item.situation_id)}">
+    <strong>${esc(item.situation_id)}</strong><small>${esc(item.decision)} · ${esc(item.state)}</small>
+    <small>Условие: ${esc(item.unlock)}</small><small>${esc(item.reason)}</small>
+    <small>${item.wait?`Ожидание: ${esc(item.wait.kind)}${item.wait.at?` до ${esc(item.wait.at)} (${esc(date(item.wait.at))})`:''}`:'Ожидание: нет'}</small><small>${esc(freshnessLine(item.freshness))}</small></button>`).join('');
+  return `${panel('Discovery: состояния решений',rows?`<div class="person-list">${rows}</div>`:empty('Нет заблокированных ситуаций','Здесь появляются ситуации, ожидающие решения. Ничего менять из этого экрана нельзя.'),discoveryList?.next_cursor?button('Далее','discovery-next'):'')}
+    ${discoveryDetailPanel()}`;
+}
+function discoveryDetailPanel(){
+  if(discoveryDetailError)return panel('Ситуация',empty('Ситуация больше недоступна',discoveryDetailError));
+  const d=discoveryDetail;
+  if(!d)return panel('Ситуация',empty('Выберите ситуацию','Показываем только то, что уже записано в системе. Ничего не отправляется отсюда.'));
+  const evidence=d.evidence.map(item=>`<p><strong>Зафиксированное наблюдение — не подтверждённый факт</strong>: ${esc(item.text)}${truncatedMark(item.text_truncated)}<small>${esc(item.message_id)} · версия ${item.message_version} · ${esc(item.author_id??'—')}</small></p>`).join('');
+  const assessments=d.assessments.map(a=>`<div class="feature"><div>
+    <strong>Непроверенное предложение</strong> (${esc(a.reasoning_shape==='legacy_v0_strings'?'старый формат':'структурированный')}): ${esc(a.hypothesis.text)}${truncatedMark(a.hypothesis.text_truncated)}
+    ${a.hypothesis.attributed_claims.map(c=>`<p>Цитата: ${esc(c.quote)}${truncatedMark(c.quote_truncated)}</p>`).join('')}
+    ${a.hypothesis.inferences.map(x=>`<p>Предположение: ${esc(x.text)}${truncatedMark(x.text_truncated)}</p>`).join('')}
+    <p>Неизвестно: ${esc(a.hypothesis.uncertainty.join('; ')||'—')}</p>
+    <p><strong>Почему сейчас</strong>: ${esc(a.why_now.reason)}${truncatedMark(a.why_now.reason_truncated)}</p>
+    <small>${esc(freshnessLine(a.freshness))}</small></div></div>`).join('');
+  const proposals=d.opening_proposals.map(p=>`<p><strong>Предложение — не черновик, не отправлено, не даёт разрешения на контакт</strong>: ${esc(p.text)}${truncatedMark(p.text_truncated)}<small>${esc(p.rationale)}${truncatedMark(p.rationale_truncated)}</small></p>`).join('');
+  return panel(`Ситуация ${d.situation_id}`,`<p>Статус: ${esc(d.status)} · в хранении: ${esc(d.storage_status)} · ревизия ${d.revision}</p>
+    <p>${esc(freshnessLine(d.freshness))}</p><h3>Наблюдения</h3>${evidence||'<p>Пока нет.</p>'}
+    <h3>Гипотезы</h3>${assessments||'<p>Пока нет.</p>'}<h3>Предложения</h3>${proposals||'<p>Пока нет.</p>'}
+    <p><strong>Не отправлено</strong> · <strong>Не даёт разрешения на контакт</strong> · ничего из этого экрана выполнить нельзя</p>
+    <p>Задачи ревью: ${d.review_tasks.map(t=>esc(t.status)).join(', ')||'нет'}</p>`);
 }
 function engagementPanel(){
   const all=detail.engagements??[],e=all.find(e=>!['CLOSED','STOPPED'].includes(e.status));
@@ -131,6 +194,9 @@ function modal(title,content,onSubmit){
 const convOptions=()=>[['','Общая работа партнёра'],...state.conversations.map(c=>[c.id,c.name])];
 const convPayload=()=>({conversation_id:selected});
 async function act(action,itemId,extra){
+  // Discovery is a viewer: both branches only read, and neither reaches command().
+  if(action==='discovery-select'){await selectSituation(itemId);render();return;}
+  if(action==='discovery-next'){await nextDiscoveryPage();render();return;}
   if(action.startsWith('eng-')){
     const e=(detail?.engagements??[]).find(e=>!['CLOSED','STOPPED'].includes(e.status));
     const ep={engagement_id:e?.id};
