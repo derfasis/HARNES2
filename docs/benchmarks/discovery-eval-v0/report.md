@@ -62,8 +62,8 @@ Each row states an explicit outcome: `production`, `scorer`, or `missed`. A run 
 ## Coverage of the declared rules
 
 Discriminated negatively through a real fixture: `QUOTE_NOT_GROUNDED` and
-`DISCOVERY_UNCERTAINTY_REQUIRED` (production), `UNSUPPORTED_PERMISSION_INFERENCE`, `URGENCY_OVERRIDE`,
-`UNSUPPORTED_CERTAINTY`, and `DECISION_POLICY_INCOMPATIBLE` (scorer).
+`MISSING_UNCERTAINTY` (both refused by production), and `UNSUPPORTED_PERMISSION_INFERENCE`,
+`URGENCY_OVERRIDE`, `UNSUPPORTED_CERTAINTY`, and `DECISION_POLICY_INCOMPATIBLE` (scorer).
 
 Positive regressions, whose negatives are tested directly against the exported check functions
 rather than through a fixture, because production always satisfies them today:

@@ -10,7 +10,9 @@ import { ROOT, readJson } from '../business/config.mjs';
 import { Store, id } from '../business/store.mjs';
 import { BusinessService } from '../business/service.mjs';
 
-const CORPUS = readJson(path.join(ROOT, 'docs/benchmarks/discovery-eval-v0/corpus.json'));
+const CORPUS_PATH = process.argv.find((value) => value.startsWith('--corpus='))?.slice('--corpus='.length)
+  ?? path.join(ROOT, 'docs/benchmarks/discovery-eval-v0/corpus.json');
+const CORPUS = readJson(CORPUS_PATH);
 
 // Words that would turn a proposal into an authority claim, a contact promise, or a claim of
 // fact the source never made. Deliberately small and declared: this is a lexicon, not semantics.
@@ -166,10 +168,12 @@ async function runFixture(item, fixture, variant) {
     // Hard contract: uncertainty is never optional.
     record('MISSING_UNCERTAINTY', projected.hypothesis.uncertainty.length > 0, 'uncertainty is empty');
     // Hard contract: a proposal never states authority, contact, or fact the source did not give.
-    for (const finding of claimFindings(text)) record(finding.code, false, finding.detail);
-    record('UNSUPPORTED_PERMISSION_INFERENCE', true, '');
-    record('URGENCY_OVERRIDE', true, '');
-    record('UNSUPPORTED_CERTAINTY', true, '');
+    // Exactly one record per claim code: a check is either failed or passed, never both.
+    const claims = claimFindings(text);
+    for (const code of ['UNSUPPORTED_PERMISSION_INFERENCE', 'URGENCY_OVERRIDE', 'UNSUPPORTED_CERTAINTY']) {
+      const failure = claims.find((finding) => finding.code === code);
+      record(code, !failure, failure?.detail ?? '');
+    }
     // Hard contract: the projection never dresses a proposal as a fact.
     const epistemic = epistemicLabelFinding(projected);
     record('EPISTEMIC_LABEL_MISSING', !epistemic, epistemic?.detail ?? '');

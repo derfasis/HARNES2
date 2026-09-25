@@ -103,17 +103,21 @@ test('4B the CLI fails on a missed bad fixture, not only on a failing good one',
   const script = path.join(ROOT, 'scripts/discovery-eval-v0.mjs');
   const clean = child.spawnSync(process.execPath, [script], { encoding: 'utf8' });
   assert.equal(clean.status, 0, clean.stdout + clean.stderr);
-  // A corpus whose bad fixture is indistinguishable from a good one must not report success.
+  // A corpus whose bad fixture is indistinguishable from a good one must not report success. The
+  // weakened corpus is written to a temporary file: the tracked corpus is never touched, so a
+  // crash cannot leave the working tree dirty and a parallel run cannot read a swapped corpus.
+  const os = await import('node:os');
   const item = corpus.cases.find((entry) => entry.class === 'discriminator');
-  const corpusPath = path.join(ROOT, 'docs/benchmarks/discovery-eval-v0/corpus.json');
-  const original = fs.readFileSync(corpusPath, 'utf8');
-  const weakened = { ...JSON.parse(original), cases: [{ ...item, bad: { ...item.bad, hypothesis: 'Возможно, полезно объяснить.', why_now: 'Вопрос общий.', uncertainty: ['Неясно.'], decision: item.bad.decision } }] };
-  fs.writeFileSync(corpusPath, JSON.stringify(weakened, null, 2));
-  try {
-    const failed = child.spawnSync(process.execPath, [script], { encoding: 'utf8' });
-    assert.equal(failed.status, 1, 'a missed bad fixture must fail the run');
-    assert.equal(JSON.parse(failed.stdout).bad_missed.length, 1);
-  } finally { fs.writeFileSync(corpusPath, original); }
+  const weakened = { ...JSON.parse(fs.readFileSync(path.join(ROOT,
+    'docs/benchmarks/discovery-eval-v0/corpus.json'), 'utf8')),
+    cases: [{ ...item, bad: { ...item.bad, hypothesis: 'Возможно, полезно объяснить.',
+      why_now: 'Вопрос общий.', uncertainty: ['Неясно.'], decision: item.bad.decision } }] };
+  const temporary = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'harnes2-eval-corpus-')), 'corpus.json');
+  fs.writeFileSync(temporary, JSON.stringify(weakened, null, 2));
+  const failed = child.spawnSync(process.execPath, [script, `--corpus=${temporary}`], { encoding: 'utf8' });
+  assert.equal(failed.status, 1, 'a missed bad fixture must fail the run');
+  assert.equal(JSON.parse(failed.stdout).bad_missed.length, 1);
+  fs.rmSync(path.dirname(temporary), { recursive: true, force: true });
 });
 
 test('4B the claim scan covers every authored field, and a clean one is silent', () => {

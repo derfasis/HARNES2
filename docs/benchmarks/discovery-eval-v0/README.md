@@ -13,7 +13,8 @@ evidence that the reasoning is *right*.
 ## What runs
 
 ```
-node scripts/discovery-eval-v0.mjs      # machine-readable verdict, non-zero on any failure
+node scripts/discovery-eval-v0.mjs                    # machine-readable verdict, non-zero on failure
+node scripts/discovery-eval-v0.mjs --corpus=<path>    # run against another corpus file
 node --test tests/discovery-eval.test.mjs
 ```
 
@@ -23,8 +24,9 @@ violates a rule, not that a script disliked a sentence.
 
 ## The corpus
 
-`corpus.json` holds 30 cases: six classes of four variants each, plus six `discriminator` cases
-whose job is to prove the scorer fires on the rules a fixture can actually violate.
+`corpus.json` holds 30 cases: six classes of four variants each, plus six `discriminator` cases.
+Five of them make the scorer's own checks fire; one (`foreign_ref`) proves production refuses a
+foreign evidence reference before the scorer ever sees it.
 
 Every case is written as one coherent unit. The good fixture describes **its own** source text: a
 fixture claiming a source "asks for a third party" when the source text does not contain such a
@@ -58,10 +60,12 @@ allowed to be mirror images, or the benchmark would prove nothing.
 | `EPISTEMIC_LABEL_MISSING` | the projection dropped `unverified_proposal` |
 | `AUTHORITY_LEAK_IN_PROJECTION` | the non-authority markers are missing |
 
-The first seven are discriminated negatively through a real fixture. The last two are **positive
-regression invariants**: production always satisfies them today, so no fixture can violate them.
-Their negatives are tested directly against the exported check functions, which is honest about
-what the corpus does and does not show.
+Six of these eight are discriminated negatively through a real fixture: `QUOTE_NOT_GROUNDED` and
+`MISSING_UNCERTAINTY` by production, and `UNSUPPORTED_PERMISSION_INFERENCE`, `URGENCY_OVERRIDE`,
+`UNSUPPORTED_CERTAINTY`, and `DECISION_POLICY_INCOMPATIBLE` by the scorer. The last two are
+**positive regression invariants**: production always satisfies them today, so no fixture can
+violate them, and their negatives are tested directly against the exported check functions. That
+split is stated rather than blurred.
 
 **Policy expectation** — each case lists the decisions it tolerates, and that is a *set*, not one
 gold answer. A case that allows `OBSERVE|DISMISS|CANDIDATE` is not saying `CANDIDATE` is wrong; it
