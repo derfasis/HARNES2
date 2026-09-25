@@ -19,8 +19,9 @@ test('4B the corpus covers six classes plus an explicit discriminator set', () =
   for (const name of [...classes].filter((value) => value !== 'discriminator')) {
     assert.equal(corpus.cases.filter((item) => item.class === name).length, 4, name);
   }
-  // The discriminator cases exist so that every rule the scorer declares is actually exercised
-  // by at least one fixture, instead of being declared and never fired.
+  // The discriminator cases make the scorer's own rules fire. Two projection invariants are
+  // deliberately not discriminated here — no fixture can violate what production always
+  // satisfies — and the foreign-reference case proves a production refusal, not a scorer catch.
   const kinds = new Set(corpus.cases.map((item) => item.bad_kind));
   for (const kind of ['ungrounded', 'no_uncertainty', 'authority', 'urgency', 'certainty',
     'urgency_in_opening', 'authority_in_rationale', 'foreign_ref', 'policy']) {

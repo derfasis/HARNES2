@@ -61,13 +61,16 @@ Each row states an explicit outcome: `production`, `scorer`, or `missed`. A run 
 
 ## Coverage of the declared rules
 
-Discriminated negatively through a real fixture: `QUOTE_NOT_GROUNDED` and
-`MISSING_UNCERTAINTY` (both refused by production), and `UNSUPPORTED_PERMISSION_INFERENCE`,
-`URGENCY_OVERRIDE`, `UNSUPPORTED_CERTAINTY`, and `DECISION_POLICY_INCOMPATIBLE` (scorer).
+Exercised through a production rejection: `QUOTE_NOT_GROUNDED`, `MISSING_UNCERTAINTY`, and
+`UNSUPPORTED_ATTRIBUTION`.
 
-Positive regressions, whose negatives are tested directly against the exported check functions
-rather than through a fixture, because production always satisfies them today:
-`EPISTEMIC_LABEL_MISSING`, `AUTHORITY_LEAK_IN_PROJECTION`.
+Exercised by the scorer, because production accepts these assessments:
+`UNSUPPORTED_PERMISSION_INFERENCE`, `URGENCY_OVERRIDE`, `UNSUPPORTED_CERTAINTY`, and the policy
+layer's `DECISION_POLICY_INCOMPATIBLE`.
+
+Positive regression invariants, whose negatives are tested directly against the exported check
+functions because production always satisfies them: `EPISTEMIC_LABEL_MISSING`,
+`AUTHORITY_LEAK_IN_PROJECTION`.
 
 ## What this run does not prove
 

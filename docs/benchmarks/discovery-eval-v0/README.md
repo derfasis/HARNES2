@@ -60,12 +60,19 @@ allowed to be mirror images, or the benchmark would prove nothing.
 | `EPISTEMIC_LABEL_MISSING` | the projection dropped `unverified_proposal` |
 | `AUTHORITY_LEAK_IN_PROJECTION` | the non-authority markers are missing |
 
-Six of these eight are discriminated negatively through a real fixture: `QUOTE_NOT_GROUNDED` and
-`MISSING_UNCERTAINTY` by production, and `UNSUPPORTED_PERMISSION_INFERENCE`, `URGENCY_OVERRIDE`,
-`UNSUPPORTED_CERTAINTY`, and `DECISION_POLICY_INCOMPATIBLE` by the scorer. The last two are
-**positive regression invariants**: production always satisfies them today, so no fixture can
-violate them, and their negatives are tested directly against the exported check functions. That
-split is stated rather than blurred.
+The eight hard-contract rules fall into three groups, and the split is stated rather than blurred:
+
+- **Exercised through a production rejection**: `QUOTE_NOT_GROUNDED`, `MISSING_UNCERTAINTY`, and
+  `UNSUPPORTED_ATTRIBUTION` — production refuses all three first, so the corpus demonstrates the
+  refusal, and the scorer's own copies of these rules are defence in depth.
+- **Exercised by the scorer**: `UNSUPPORTED_PERMISSION_INFERENCE`, `URGENCY_OVERRIDE`, and
+  `UNSUPPORTED_CERTAINTY` — production accepts these assessments, so only the scorer can object.
+- **Positive regression invariants**: `EPISTEMIC_LABEL_MISSING` and `AUTHORITY_LEAK_IN_PROJECTION` —
+  production always satisfies them today, no fixture can violate them, and their negatives are
+  tested directly against the exported check functions.
+
+`DECISION_POLICY_INCOMPATIBLE` is not a hard-contract rule at all. It is the policy layer, and it is
+discriminated by a fixture like the scorer rules.
 
 **Policy expectation** — each case lists the decisions it tolerates, and that is a *set*, not one
 gold answer. A case that allows `OBSERVE|DISMISS|CANDIDATE` is not saying `CANDIDATE` is wrong; it
