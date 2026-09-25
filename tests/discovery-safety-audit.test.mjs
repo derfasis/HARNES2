@@ -179,22 +179,34 @@ test('A1 no decision state is reachable without a durable assessment behind it',
 });
 
 // B — exactly one immutable transition per decision, tied to the current assessment and fingerprint.
-test('B each reason decision leaves exactly one immutable transition on the current basis', async t => {
-  const h = harness(t);
-  const situationId = await candidate(h);
-  const request = id();
-  const payload = reasonPayload(h, situationId, 'WAIT', { wait: { kind: 'evidence_change' } });
-  await h.command('discovery.reason', payload, { kind: 'operator' }, request);
-  await h.command('discovery.reason', payload, { kind: 'operator' }, request);
-  const transitions = h.transitions(situationId);
-  assert.equal(transitions.length, 1, 'replaying one request must not create a second transition');
-  const transition = JSON.parse(transitions[0].payload_json);
-  const detail = h.detail(situationId);
-  assert.equal(transition.assessment_id, String(detail.assessments.at(-1).id));
-  assert.equal(transition.evidence_fingerprint, detail.evidence_fingerprint);
-  assert.equal(transition.result_revision, transition.basis_revision + 1);
-  assert.equal(transition.result_revision, detail.revision);
-});
+const REASON_CASES = [
+  { decision: 'WAIT', extra: { wait: { kind: 'evidence_change' } } },
+  { decision: 'IGNORE', extra: {} },
+  { decision: 'STOP', extra: {} },
+];
+
+for (const { decision, extra } of REASON_CASES) {
+  test(`B ${decision} leaves exactly one immutable transition on the current basis`, async t => {
+    const h = harness(t);
+    const situationId = await candidate(h);
+    const request = id();
+    const payload = reasonPayload(h, situationId, decision, extra);
+    await h.command('discovery.reason', payload, { kind: 'operator' }, request);
+    await h.command('discovery.reason', payload, { kind: 'operator' }, request);
+    const transitions = h.transitions(situationId);
+    assert.equal(transitions.length, 1, 'replaying one request must not create a second transition');
+    const transition = JSON.parse(transitions[0].payload_json);
+    const detail = h.detail(situationId);
+    assert.equal(transition.decision, decision);
+    assert.equal(transition.assessment_id, String(detail.assessments.at(-1).id));
+    assert.equal(transition.evidence_fingerprint, detail.evidence_fingerprint);
+    assert.equal(transition.result_revision, transition.basis_revision + 1);
+    assert.equal(transition.result_revision, detail.revision);
+    assert.equal(typeof transition.reason, 'string');
+    // The transition names the wait it was actually given, or records that there was none.
+    assert.deepEqual(transition.wait ?? null, extra.wait ?? null);
+  });
+}
 
 // C — unlock conditions exactly as Stage 2 defines them, and nothing else unlocks.
 test('C IGNORE and WAIT unlock only on the condition their decision names', async t => {
@@ -436,7 +448,11 @@ test('G transfer fails one prerequisite at a time and never crosses the Engageme
 
   // The same grant on the same account is accepted, which is what makes the refusal meaningful.
   h.store.run("UPDATE contact_permissions SET account_id='account-a' WHERE id=?", grantRow().id);
-  assert.equal((await transfer()).status, 'TRANSFERRED');
+  const result = await transfer();
+  assert.equal(result.status, 'TRANSFERRED');
+  assert.equal(result.contact_permission_created, false);
+  assert.equal(result.drafts_created, 0);
+  assert.equal(result.sends_started, false);
   assert.equal(h.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='discovery.transferred'").n, 1);
 
   // G9 with every prerequisite the transfer enters the existing Engagement boundary and nothing more.

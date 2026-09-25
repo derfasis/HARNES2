@@ -12,7 +12,7 @@ network, Telegram, or scheduler run.
 | Invariant | Statement | Test | Result |
 | --- | --- | --- | --- |
 | A1 | No CANDIDATE, review task, WAIT, IGNORE, STOP, or TRANSFER is reachable without a durable assessment behind it. | `A1 …` | PASS |
-| B | Each reason decision leaves exactly one immutable `discovery.reason.transitioned` on the current assessment, fingerprint, and revision pair; a replayed request creates none. | `B …` | PASS |
+| B | Each reason decision — WAIT, IGNORE, and STOP alike — leaves exactly one immutable `discovery.reason.transitioned` on the current assessment, fingerprint, and revision pair; a replayed request creates none. | `B WAIT …`, `B IGNORE …`, `B STOP …` | PASS |
 | C | IGNORE and `WAIT/evidence_change` unlock only on new evidence; `WAIT/deadline` unlocks on the deadline or on new evidence. A restart is not an unlock. | `C …`, `C2 …` | PASS |
 | D | STOP changes no person, conversation, message, fact, permission, engagement, draft, approval, delivery, outcome, lesson, or run state. | `D …` | PASS |
 | E | Neither presentation surface exposes an internal field name, checked by field name. | `E …` | PASS |
@@ -31,9 +31,11 @@ intake state and is not a violation. What must hold is that no *decision* state 
 from it: a reason request with no assessment behind it is refused with
 `DISCOVERY_REASON_ASSESSMENT_STALE`, no review task exists, and no transition is written.
 
-**B.** One `discovery.reason` request is replayed under the same `request_id`. Exactly one
-transition survives, and it names the current assessment id, the current evidence fingerprint,
-and `result_revision === basis_revision + 1` equal to the current situation revision.
+**B.** Run once per decision in a table-driven loop, so no decision can be quietly left out. One
+`discovery.reason` request is replayed under the same `request_id`. Exactly one transition
+survives; it names the decision, the current assessment id, the current evidence fingerprint,
+`result_revision === basis_revision + 1` equal to the current situation revision, a reason
+string, and the wait it was actually given — or `null` for the decisions that take none.
 
 **C.** Unlock conditions are read back from the reason-state surface rather than inferred from
 code, and a restart is exercised explicitly. A re-assessment on the same evidence is refused
