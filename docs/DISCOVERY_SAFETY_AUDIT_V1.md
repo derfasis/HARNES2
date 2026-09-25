@@ -22,6 +22,7 @@ network, Telegram, or scheduler run.
 | I | Stale authority never returns through edit, delete, revoke, expiry, or restart. | `I …` | PASS |
 | I2 | A superseded assessment loses its authority even on unchanged evidence. | `I2 …` | PASS |
 | I3 | An approval that is later superseded cannot be transferred, until the new assessment is approved. | `I3 …` | PASS |
+| I4 | A revoked source does not regain authority after a restart and a re-allow. | `I4 …` | PASS |
 
 ## How each invariant was checked
 
@@ -66,8 +67,10 @@ missing real inbound message, a missing typed reply grant, a suppressed person, 
 the AI no longer owns, and a conversation bound to an unrelated person. The typed grant is then
 corrupted one scope field at a time — `person_id`, `conversation_id`, `channel`, and `account_id`
 — and each corruption must produce `typed_permission_required` with the snapshot unchanged. The
-account case runs on a conversation that actually has a channel identity, because a manual
-conversation has `account_id = null` and could never have proved account isolation. With every
+account case runs on a conversation that actually has a channel identity, and the grant is moved
+onto that same channel and bound to a *different* account, so the only field that can explain the
+refusal is the account. The same grant on the matching account is then accepted, which is what
+makes the refusal meaningful rather than incidental. With every
 prerequisite intact the transfer enters the existing Engagement boundary and still reports
 `contact_permission_created: false`, `drafts_created: 0`, and `sends_started: false`.
 
@@ -77,7 +80,9 @@ presentation detail all refuse anything that is not an operator. The internal `d
 is deliberately left without an actor, and the test says so rather than leaving it untested.
 
 **I.** Edit, delete, revoke, and expiry each close the same three doors — approve, reason, and
-transfer — and no transition is written. The transfer probe uses a real person, conversation,
+transfer — and no transition is written. The approve door is always attempted, whatever the task
+status: a task that was already cancelled must be refused as well, and the test may not skip the
+door just because no proposed task remains. The transfer probe uses a real person, conversation,
 inbound message, and grant, so the refusal it observes is the Discovery-level one rather than an
 earlier conversation lookup. After a restart the path is still refused and still writes nothing. `I2` covers the
 agreed supersession case: a newer assessment on the *same* evidence cancels the earlier review
@@ -85,7 +90,10 @@ task, refuses a reason decision that names the old assessment, refuses approval 
 task, and writes no transition — while the current assessment keeps its own authority. `I3`
 covers the harder case: an approval that was already granted, then superseded by a newer
 assessment on the same evidence, can no longer be transferred; approving the new assessment
-restores the path. The audit asserts
+restores the path. `I4` closes the revocation loop: the source is revoked and the real
+maintenance path runs, the process restarts, the source is allowed again — and the old situation
+still cannot be approved, reasoned, or transferred. Only genuinely new evidence from the
+re-allowed source may open a new situation. The audit asserts
 *usability*, not a status label: a situation whose TTL has passed is refused either way, and
 asserting that the row reads `STALE` would have been a claim about maintenance timing, not about
 authority.

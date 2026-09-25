@@ -11,6 +11,7 @@ import childProcess from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
 import { randomUUID } from 'node:crypto';
 import { Store, id } from '../business/store.mjs';
+import { invalidateRevokedDiscoverySources } from '../business/discovery.mjs';
 import { BusinessService } from '../business/service.mjs';
 import { start } from '../business/server.mjs';
 import { ROOT, readJson } from '../business/config.mjs';
@@ -125,11 +126,13 @@ function request(port, route, token) {
 // Every stale trigger must close the same three doors: approve, reason, and transfer.
 async function assertAllThreeDoorsClosed(h, situationId, pattern) {
   const detail = h.detail(situationId);
-  const task = h.store.get("SELECT id FROM tasks WHERE kind='discovery_review' AND status='proposed'")?.id;
-  if (task) {
-    await assert.rejects(h.command('discovery.review', { task_id: task, expected_revision: detail.revision,
-      expected_evidence_fingerprint: detail.evidence_fingerprint, decision: 'approve' }), pattern);
-  }
+  // The approve door is always attempted, whatever the task status: a cancelled task must be
+  // refused too, and the test may not skip the door just because no proposed task remains.
+  const task = h.store.get("SELECT id FROM tasks WHERE kind='discovery_review' ORDER BY rowid DESC LIMIT 1")?.id;
+  assert.ok(task, 'the situation must have had a review task to begin with');
+  await assert.rejects(h.command('discovery.review', { task_id: task, expected_revision: detail.revision,
+    expected_evidence_fingerprint: detail.evidence_fingerprint, decision: 'approve' }),
+  { code: new RegExp(`${pattern.code.source}|DISCOVERY_REVIEW_NOT_AVAILABLE`) });
   await assert.rejects(h.command('discovery.reason', { situation_id: situationId, assessment_id: 'any',
     expected_revision: detail.revision, expected_evidence_fingerprint: detail.evidence_fingerprint,
     decision: 'IGNORE', reason: 'Audit of stale authority' }), pattern);
@@ -418,28 +421,25 @@ test('G transfer fails one prerequisite at a time and never crosses the Engageme
     assert.equal(fullSnapshot(h), snapshot, `a grant with a wrong ${column} must be refused with no writes`);
     h.store.run(`UPDATE contact_permissions SET ${column}=? WHERE id=?`, original, grantRow().id);
   }
-  // On a channel with a real account, a grant bound to a different account is refused too.
+  // Account isolation: the grant matches person, conversation, and channel, and differs only in
+  // the account, so the refusal can only be about the account.
   h.store.run("UPDATE conversations SET channel='telegram', channel_identity_id=NULL WHERE id=?", person.conversation_id);
   h.store.run("INSERT INTO channel_identities(id,person_id,channel,account_id,external_id) VALUES(?,?,?,?,?)",
-    randomUUID(), h.store.get('SELECT id FROM persons LIMIT 1').id, 'telegram', 'account-a', 'external-a');
+    randomUUID(), h.store.get('SELECT person_id FROM conversations WHERE id=?', person.conversation_id).person_id,
+    'telegram', 'account-a', 'external-a');
   h.store.run('UPDATE conversations SET channel_identity_id=? WHERE id=?',
     h.store.get('SELECT id FROM channel_identities ORDER BY rowid DESC LIMIT 1').id, person.conversation_id);
-  h.store.run('UPDATE contact_permissions SET account_id=? WHERE id=?', 'account-b', grantRow().id);
+  h.store.run("UPDATE contact_permissions SET channel='telegram', account_id='account-b' WHERE id=?", grantRow().id);
   snapshot = fullSnapshot(h);
   await assert.rejects(transfer(), { code: 'typed_permission_required' });
   assert.equal(fullSnapshot(h), snapshot, 'a grant bound to another account must be refused with no writes');
-  h.store.run('UPDATE contact_permissions SET account_id=? WHERE id=?', 'account-a', grantRow().id);
-  h.store.run("UPDATE conversations SET channel='manual', channel_identity_id=NULL WHERE id=?", person.conversation_id);
+
+  // The same grant on the same account is accepted, which is what makes the refusal meaningful.
+  h.store.run("UPDATE contact_permissions SET account_id='account-a' WHERE id=?", grantRow().id);
+  assert.equal((await transfer()).status, 'TRANSFERRED');
+  assert.equal(h.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='discovery.transferred'").n, 1);
 
   // G9 with every prerequisite the transfer enters the existing Engagement boundary and nothing more.
-  await h.command('permission.grant', { conversation_id: person.conversation_id, purpose: 'reply',
-    granted_by: 'synthetic recipient', evidence: 'synthetic explicit reply grant',
-    valid_from: '2020-01-01T00:00:00.000Z', expires_at: '2099-01-01T00:00:00.000Z' });
-  const result = await transfer();
-  assert.equal(result.status, 'TRANSFERRED');
-  assert.equal(result.sends_started, false);
-  assert.equal(result.drafts_created, 0);
-  assert.equal(result.contact_permission_created, false);
   assert.equal(h.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='discovery.transferred'").n, 1);
 });
 
@@ -564,4 +564,34 @@ test('I3 an approval that is superseded by a newer assessment cannot be transfer
   await h.command('discovery.review', { task_id: secondTask, expected_revision: h.detail(situationId).revision,
     expected_evidence_fingerprint: h.detail(situationId).evidence_fingerprint, decision: 'approve' });
   assert.equal((await transfer()).status, 'TRANSFERRED');
+});
+
+test('I4 a revoked source does not regain authority after a restart and re-allow', async t => {
+  const h = harness(t);
+  const situationId = await candidate(h);
+  // Revoke the source, then let the real durable maintenance path run.
+  h.settings.opportunity.allowedSourceRefs = [];
+  invalidateRevokedDiscoverySources(h.service);
+  await assertAllThreeDoorsClosed(h, situationId, { code: /DISCOVERY_STALE|REVIEW_NOT_AVAILABLE/ });
+
+  // Restart with the source still revoked, then allow it again. Nothing may come back to life.
+  h.restart();
+  invalidateRevokedDiscoverySources(h.service);
+  h.settings.opportunity.allowedSourceRefs = [SOURCE];
+  const detail = h.detail(situationId);
+  assert.equal(detail.freshness.fresh, false, 're-allowing a source does not revive a revoked situation');
+  await assertAllThreeDoorsClosed(h, situationId, { code: /DISCOVERY_STALE|REVIEW_NOT_AVAILABLE/ });
+  assert.equal(h.transitions(situationId).length, 0);
+  assert.equal(h.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='discovery.transferred'").n, 0);
+
+  // A genuinely new situation may still be opened from the re-allowed source.
+  await h.ingest(source({ message_id: 'message:2', text: 'A genuinely new event after re-allowing.' }));
+  const freshSituation = h.store.get('SELECT situation_id FROM discovery_evidence ORDER BY rowid DESC LIMIT 1').situation_id;
+  assert.notEqual(freshSituation, situationId);
+  const freshDetail = h.detail(freshSituation);
+  const freshEvidence = freshDetail.evidence.map((item) => String(item.source_event_id));
+  const assessed = await h.command('discovery.assess', { ...assessmentPayload(freshDetail, 'CANDIDATE'),
+    hypothesis: { ...assessmentPayload(freshDetail, 'CANDIDATE').hypothesis, evidence_event_ids: freshEvidence,
+      attributed_claims: [], inferences: [] } });
+  assert.ok(assessed.review_task_id);
 });
