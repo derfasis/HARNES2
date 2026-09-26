@@ -171,7 +171,8 @@ test('4D the transport reuses the existing worker and adds no second one', () =>
 
 test('4D an unready runtime is refused before the ledger spends a call', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harnes2-eval-ready-'));
-  const input = { input_id: 'd4-generation-v0', live_proof: false, cases: [stagedCase] };
+  const input = { input_id: 'd4-generation-v0', live_proof: false, prompt_ref: 'prompt-7',
+    cases: [stagedCase] };
   const problems = readiness({ ...RUNTIME, baseUrl: 'http://proxy.example/v1' }, WITH_CREDENTIAL);
   assert.ok(problems.includes('base_url_must_be_https_or_localhost_http'));
   let calls = 0;
@@ -223,7 +224,8 @@ print(json.dumps({
 
 test('4D the canonical entrypoint cannot be used without the readiness check', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harnes2-entry-'));
-  const input = { input_id: 'd4-generation-v0', live_proof: false, cases: [stagedCase] };
+  const input = { input_id: 'd4-generation-v0', live_proof: false, prompt_ref: 'prompt-7',
+    cases: [stagedCase] };
   const result = await runWithTransport({ runtime: { ...RUNTIME, baseUrl: 'http://proxy.example/v1' },
     environment: { ...WITH_CREDENTIAL, HARNES_OWNER_APPROVED_MODEL_CALLS: 'yes' }, directory, input,
     spawnFn: () => { throw new Error('the worker must never start'); } });
@@ -237,7 +239,8 @@ test('4D the canonical entrypoint cannot be used without the readiness check', a
 
 test('4D the canonical path runs end to end in the directory it was given', async () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harnes2-eval-e2e-'));
-  const input = { input_id: 'd4-generation-v0', live_proof: false, cases: [stagedCase] };
+  const input = { input_id: 'd4-generation-v0', live_proof: false, prompt_ref: 'prompt-7',
+    cases: [stagedCase] };
   const environment = { ...WITH_CREDENTIAL, HARNES_OWNER_APPROVED_MODEL_CALLS: 'yes' };
   let calls = 0;
   const serving = fakeSpawn(() => JSON.stringify({ completed: true,

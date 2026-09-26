@@ -166,6 +166,8 @@ export function validateCorpus(corpus) {
   if (corpus.live_proof !== false) problems.push({ at: 'corpus', rule: 'live_proof_must_be_false' });
   if (!Array.isArray(corpus.cases)) problems.push({ at: 'corpus', rule: 'cases_must_be_array' });
   else {
+    // Every corpus is validated case by case; the offline claims are checked on top of that, not
+    // instead of it.
     const seen = new Set();
     for (const item of corpus.cases) {
       const id = item?.case_id;
@@ -173,6 +175,20 @@ export function validateCorpus(corpus) {
       problems.push(...validateCase(item, id ?? 'case'));
     }
     problems.push(...schemaProblems('corpus', corpus, 'corpus.'));
+    if (corpus.proof_level === 'offline_human_eval') {
+      // A finished evaluation claims real material, real model output and a named generation. Each
+      // part of that claim is checked here, so no other code path can produce one that is not true.
+      if (corpus.cases.length === 0) problems.push({ at: 'corpus', rule: 'offline_eval_requires_cases' });
+      if (!corpus.generation || typeof corpus.generation !== 'object')
+        problems.push({ at: 'corpus', rule: 'offline_eval_requires_a_generation_identity' });
+      for (const item of corpus.cases) {
+        if (item?.provenance?.kind !== 'anonymized_real'
+          || !/^prov_[A-Za-z0-9._-]+$/.test(item.provenance.provenance_claim_ref ?? ''))
+          problems.push({ at: item?.case_id ?? 'case', rule: 'offline_eval_case_must_be_anonymized_real_with_a_provenance_claim' });
+        if (item?.model_output === null || item?.model_output === undefined)
+          problems.push({ at: item?.case_id ?? 'case', rule: 'offline_eval_case_requires_a_model_output' });
+      }
+    }
   }
   return problems;
 }

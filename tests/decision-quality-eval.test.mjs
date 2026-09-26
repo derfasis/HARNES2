@@ -206,7 +206,8 @@ test('4D0 every report metric must be derivable from the case results', () => {
 
 test('4D0 case ids must be unique in the corpus and in the report', () => {
   const duplicated = { corpus_id: 'decision-quality-eval-v0', proof_level: 'offline_human_eval',
-    live_proof: false, cases: [realCase(), realCase()] };
+    live_proof: false, generation: { model_id: 'm', model_version: '1', prompt_ref: 'p',
+      prompt_digest: 'a'.repeat(64) }, cases: [realCase(), realCase()] };
   assert.ok(validateCorpus(duplicated).map((e) => e.rule).includes('case_id_must_be_unique'));
   const report = validReport();
   report.case_results = [report.case_results[0], { ...report.case_results[0] }];

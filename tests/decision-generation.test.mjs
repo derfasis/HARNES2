@@ -32,8 +32,9 @@ const stagedCase = (over = {}) => ({
   offer: 'Synthetic offer', operator_goal: 'Assess usefulness.', known_unknowns: ['Цена не подтверждена.'],
   ...over });
 
+// A non-empty generation input must name its prompt: the guard fires before any call is spent.
 const stagedInput = (cases = [stagedCase()], mutate = {}) => ({
-  input_id: 'd4-generation-v0', live_proof: false, cases, ...mutate });
+  input_id: 'd4-generation-v0', live_proof: false, prompt_ref: 'prompt-7', cases, ...mutate });
 
 const response = (over = {}) => ({ raw: JSON.stringify(validOutput()), model_id: 'runtime-model',
   model_version: 'runtime-2026-02', ...over });
