@@ -137,6 +137,22 @@ reads them, finds every case done, and makes no call at all.
 Four outcomes, four exit codes: `2` refused at the gate, `1` invalid input, `3` nothing to do, `0`
 generated.
 
+## The transport
+
+`generation/transport.mjs` is a thin adapter over the **existing** isolated worker
+(`scripts/situation_router_worker.py`). It adds no model logic and no second worker. It builds the
+envelope — the frozen prompt plus the staged case, with `tools: []`, because this evaluation has no
+business surface and a case can never reach a person — and passes model credentials through
+explicitly rather than inheriting the ambient Telegram, Codex, or Hermes environment.
+
+It requires the worker to **state which model answered**. Today's worker reports completion and
+usage but not the served identity, so the transport returns a refusal naming exactly that gap
+instead of filling the identity in from configuration. The finished corpus is only attributable to a
+model if that model named itself.
+
+Nothing here calls a model on its own. It is reached through `runGeneration()`, which refuses
+until the owner authorises model calls.
+
 ## Running the validator
 
 ```
