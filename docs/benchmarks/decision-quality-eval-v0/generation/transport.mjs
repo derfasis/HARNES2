@@ -60,9 +60,20 @@ export const transportProblems = (runtime = {}, environment = process.env) => {
     const value = runtime[key];
     if (!Number.isInteger(value) || value < low || value > high) problems.push(`runtime_${key}_must_be_an_integer_between_${low}_and_${high}`);
   }
-  if (!Object.values(environment).some((value) => typeof value === 'string' && value.length > 0
-    && ['PARTNER_MODEL_API_KEY', 'PARTNER_MODEL_API_KEY_SECONDARY', 'PARTNER_MODEL_API_KEY_TERTIARY'].some((key) => value === environment[key] && value.length > 0)))
-    problems.push('no_model_credential_is_configured');
+  // The worker's credential loader requires the primary key; the others are only extra fallbacks.
+  if (typeof environment.PARTNER_MODEL_API_KEY !== 'string' || environment.PARTNER_MODEL_API_KEY.length === 0)
+    problems.push('no_primary_model_credential_is_configured');
+  const baseUrl = runtime.baseUrl;
+  if (typeof baseUrl === 'string' && baseUrl.length > 0) {
+    let parsed = null;
+    try { parsed = new URL(baseUrl); } catch { problems.push('base_url_must_be_a_url'); }
+    if (parsed) {
+      if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && ['127.0.0.1', 'localhost', '::1'].includes(parsed.hostname)))
+        problems.push('base_url_must_be_https_or_localhost_http');
+      if (parsed.username || parsed.password) problems.push('base_url_must_not_carry_credentials');
+      if (parsed.search || parsed.hash) problems.push('base_url_must_not_carry_a_query_or_fragment');
+    }
+  }
   return problems;
 };
 
@@ -87,6 +98,10 @@ export const callOnce = ({ python = PYTHON, worker = WORKER, envelope, environme
 });
 
 // The contract the evaluation needs: the runtime text plus the identity it reported.
+// The readiness of the runtime, evaluated before generation so an unready runtime cannot spend a
+// call from the ledger.
+export const readiness = (runtime = {}, environment = process.env) => transportProblems(runtime, environment);
+
 export const createTransport = ({ runtime = {}, runId, python, worker, environment = process.env,
   cwd = path.join(ROOT, 'data', 'runtime'), spawnFn = spawn } = {}) => async ({ prompt, staged }) => {
   const problems = transportProblems(runtime, environment);

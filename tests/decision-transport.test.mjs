@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ROOT } from '../business/config.mjs';
-import { ENVELOPE_KEYS, buildEnvelope, childEnvironment, createTransport, transportProblems }
+import { ENVELOPE_KEYS, buildEnvelope, childEnvironment, createTransport, readiness, transportProblems }
   from '../docs/benchmarks/decision-quality-eval-v0/generation/transport.mjs';
 
 const RUNTIME = { model: 'configured-model', provider: 'configured-provider', apiMode: 'chat',
@@ -16,6 +16,7 @@ const WITH_CREDENTIAL = { PARTNER_MODEL_API_KEY: 'key' };
 
 const stagedCase = {
   case_id: 'case-1',
+  provenance: { kind: 'sanitized_fixture' },
   situation: { situation_id: 'sit-1', goal_text: 'Assess usefulness.', allowed_channels: ['public'] },
   subject: { author_id: 'user-02' },
   messages: [{ source_event_id: 'ev-1', author_id: 'user-02', version: 1, channel: 'public',
@@ -48,8 +49,24 @@ test('4D the transport refuses to call a runtime that is not actually ready', ()
     ['timeoutSeconds', 1], ['timeoutSeconds', 99999], ['maxOutputTokens', 'many']])
     assert.ok(transportProblems({ ...RUNTIME, [key]: value }, WITH_CREDENTIAL)
       .some((problem) => problem.startsWith(`runtime_${key}_must_be`)), `${key}=${value}`);
-  // A runtime with no model credential would spend an attempt and answer nothing.
-  assert.ok(transportProblems(RUNTIME, {}).includes('no_model_credential_is_configured'));
+  // The worker's credential loader requires the primary key specifically.
+  assert.ok(transportProblems(RUNTIME, {}).includes('no_primary_model_credential_is_configured'));
+  assert.ok(transportProblems(RUNTIME, { PARTNER_MODEL_API_KEY_SECONDARY: 'k' })
+    .includes('no_primary_model_credential_is_configured'));
+  assert.deepEqual(transportProblems(RUNTIME, { PARTNER_MODEL_API_KEY: 'k' }), []);
+  // The base URL follows the same rule the configuration uses.
+  for (const [url, expected] of [
+    ['https://proxy.example/v1', undefined],
+    ['http://127.0.0.1:8080/v1', undefined],
+    ['http://proxy.example/v1', 'base_url_must_be_https_or_localhost_http'],
+    ['https://user:pw@proxy.example/v1', 'base_url_must_not_carry_credentials'],
+    ['https://proxy.example/v1?k=1', 'base_url_must_not_carry_a_query_or_fragment'],
+    ['not a url', 'base_url_must_be_a_url'],
+  ]) {
+    const problems = transportProblems({ ...RUNTIME, baseUrl: url }, WITH_CREDENTIAL);
+    if (expected) assert.ok(problems.includes(expected), `${url} -> ${problems.join(',')}`);
+    else assert.deepEqual(problems, [], url);
+  }
 });
 
 test('4D the envelope matches what the real worker actually reads', () => {
@@ -122,6 +139,10 @@ test('4D the worker reports a served model identity and never one taken from con
   const body = worker.slice(worker.indexOf('def served_identity'), worker.indexOf('def main'));
   assert.ok(!body.includes('envelope'), 'the identity may not come from the envelope configuration');
   assert.ok(!body.includes('cfg'), 'the identity may not come from cfg');
+  // The agent object carries the configured name, so consulting it would let configuration
+  // impersonate a served model.
+  assert.ok(!/for source in \(result, agent\)/.test(worker), 'the agent object must not be an identity source');
+  assert.match(worker, /sources = \[result\]/);
   const py = fs.readFileSync(path.join(ROOT, 'scripts', 'situation_router_worker.py'), 'utf8');
   assert.ok(!/model_identity.*envelope\["model"\]/.test(py), 'no fallback to the configured model');
 });
@@ -134,4 +155,24 @@ test('4D the transport reuses the existing worker and adds no second one', () =>
   assert.deepEqual(added, [], 'no Python is introduced by the transport');
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'harnes2-transport-'));
   fs.rmSync(temp, { recursive: true, force: true });
+});
+
+test('4D an unready runtime is refused before the ledger spends a call', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harnes2-eval-ready-'));
+  const input = { input_id: 'd4-generation-v0', live_proof: false, cases: [stagedCase] };
+  const problems = readiness({ ...RUNTIME, baseUrl: 'http://proxy.example/v1' }, WITH_CREDENTIAL);
+  assert.ok(problems.includes('base_url_must_be_https_or_localhost_http'));
+  let calls = 0;
+  const { runGeneration, readLedger } = await import('../docs/benchmarks/decision-quality-eval-v0/generation/run.mjs');
+  const { preflight } = await import('../docs/benchmarks/decision-quality-eval-v0/generation/staging.mjs');
+  assert.deepEqual(preflight(input), [], 'the fixture itself must be structurally valid');
+  const result = await runGeneration({ input, environment: { ...WITH_CREDENTIAL,
+    HARNES_OWNER_APPROVED_MODEL_CALLS: 'yes' }, directory, readiness: problems,
+    callModel: async () => { calls += 1; return { raw: '{}', model_id: 'm', model_version: '1' }; } });
+  assert.equal(result.exit, 2, 'an unready runtime is a refusal, not an invalid corpus');
+  assert.deepEqual(result.reasons, ['model_runtime_is_not_ready']);
+  assert.equal(calls, 0, 'no call is made');
+  assert.equal(readLedger(directory).calls, 0, 'the ledger is untouched');
+  assert.equal(fs.existsSync(path.join(directory, 'attempts.json')), false);
+  fs.rmSync(directory, { recursive: true, force: true });
 });

@@ -125,8 +125,10 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // Reviewed Stage 4D extension: the worker also reports the model identity the model service
     // actually served, read from the run result, the agent, or its last response. It is never
     // derived from the configured model name, and it is null with a reason when the runtime
-    // exposes nothing usable. The evaluation corpus is attributed to a model or to nothing.
-    "scripts/situation_router_worker.py": "8be4a6b4703cd5d3730f3a9641da13563f2e42de",
+    // exposes nothing usable. Provider-returned data only: the agent object's own model
+    // attribute is the configured name, and trusting it would let configuration impersonate a
+    // served model. The evaluation corpus is attributed to a model or to nothing.
+    "scripts/situation_router_worker.py": "1ad7e1dbcf887559aaa612ca3425d14fe2b1ab10",
     // Reviewed extension: invalidate read-only source checkpoints on process recovery.
     // textBlobHash normalizes CRLF, so this is the LF-normalized R7 blob hash.
     "business/store.mjs": "0f173b662506808a76766c12bc38d3e14b026865",

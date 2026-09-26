@@ -79,30 +79,26 @@ def worker_failure_cause(result):
     return None
 
 
-def served_identity(result, agent):
+def served_identity(result):
     """What the model service actually said it served.
 
-    Never derived from the configured model name: a corpus attributed to a model it did not use is
-    worse than no corpus. Returns (identity, reason) where identity is None when the runtime
-    exposes nothing usable.
+    Read only from provider-returned data: the run result and any response metadata it carries.
+    The agent object is deliberately not consulted, because its `model` attribute is the
+    configured name — trusting it would let a configuration masquerade as a served model.
+    Returns (identity, reason); identity is None when nothing usable was returned.
     """
-    for source in (result, agent):
+    sources = [result]
+    for key in ("last_response", "response", "response_meta", "metadata"):
+        nested = result.get(key) if isinstance(result, dict) else None
+        if isinstance(nested, dict):
+            sources.append(nested)
+    for source in sources:
         for key in ("served_model", "model_id", "model"):
-            value = getattr(source, key, None) if not isinstance(source, dict) else source.get(key)
+            value = source.get(key)
             if isinstance(value, str) and value.strip():
-                version = None
-                for version_key in ("model_version", "version"):
-                    candidate = getattr(source, version_key, None) if not isinstance(source, dict) else source.get(version_key)
-                    if isinstance(candidate, str) and candidate.strip():
-                        version = candidate.strip()
-                        break
-                return {"model_id": value.strip(), "model_version": version}, None
-        response = getattr(source, "last_response", None) or (source.get("last_response") if isinstance(source, dict) else None)
-        if isinstance(response, dict):
-            for key in ("model", "model_id", "served_model"):
-                value = response.get(key)
-                if isinstance(value, str) and value.strip():
-                    return {"model_id": value.strip(), "model_version": response.get("version")}, None
+                version = source.get("model_version") or source.get("version")
+                return {"model_id": value.strip(),
+                        "model_version": version if isinstance(version, str) and version.strip() else None}, None
     return None, "runtime_did_not_expose_a_served_model_identity"
 
 
@@ -160,7 +156,7 @@ def main():
             message["content"] for message in raw_messages
             if isinstance(message, dict) and message.get("role") == "assistant" and message.get("content")
         ]
-        identity, identity_reason = served_identity(result, agent)
+        identity, identity_reason = served_identity(result)
         output = {
             "schema_version": 1,
             "situation_id": envelope["situation_id"],
