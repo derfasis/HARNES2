@@ -199,15 +199,29 @@ which cases, who the subject is, which message is the anchor, and whether the co
 matters at all all arrive selected in the input. Guessing them here would build a second router
 without any of the review the first one gets.
 
+It runs in a strict order, and each step can only narrow what the next one sees: validate the raw
+source completely, build the per-case maps, sanitise **every** model-visible string, apply the
+declared replacements, scan the whole result, run the generation preflight, and only then call it a
+success.
+
 It removes what it can recognise without being told — addresses, links, phone numbers, handles,
-external account and message ids — including a real name written inside the message text, which is
-still the person. Placeholders are one stable name per literal within a case: two different
+external account and message ids — and that includes the offer, the goal, the operator goal and the
+known unknowns, not only the message text.
+
+A name is not one string. Russian, Ukrainian and Croatian inflect it, so the source declares the
+forms a person appears in and every form maps to the same placeholder. Matching only the canonical
+form would leave the declined case of a name sitting in the text for the model to read. Placeholders are one stable name per literal within a case: two different
 addresses never collapse into one placeholder, and the same address always keeps the same one.
 It also applies the semantic replacements the source declared. It does not guess whether a sum or a city
 matters to the decision; that is a judgement about the material, and it belongs to whoever holds
-it. Nothing is defaulted either: a missing channel, direction, version, goal, offer or permitted
-channel is a refusal, because a default would be a decision this code has no standing to make — and
-a wrong `allowed_channels` would widen what the model may ever propose.
+it. Nothing is defaulted either. A missing case id, message id, channel, direction, version, text,
+time, goal, offer, operator goal, permitted channel or unknown is a refusal, and an unknown value
+in an enum is a refusal too. Inventing `case_0`, turning a missing message id into a fresh
+`[MESSAGE_1_1]`, defaulting `known_unknowns` to `[]` — each of those would be a decision this code
+has no standing to make, and a wrong `allowed_channels` would widen what the model may propose.
+
+Provenance is decided, not defaulted: `real` requires its claim, `synthetic` is a fixture, and any
+other kind is refused rather than quietly treated as a fixture.
 
 A known literal that survives the conversion refuses the whole result, and a **real** source
 without a provenance claim is refused rather than quietly relabelled as a fixture. Relabelling real
