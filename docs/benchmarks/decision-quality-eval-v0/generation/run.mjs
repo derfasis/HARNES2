@@ -10,8 +10,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { completedOutputs, generationGate, loadInput, outputProblems, parseRaw, plan, preflight,
-  promptDigest } from './staging.mjs';
+import { completedOutputs, generationGate, loadInput, mixedIdentities, outputProblems, parseRaw, plan,
+  preflight, promptDigest, stagedCaseDigest } from './staging.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const OUTPUTS_DIR = path.join(HERE, 'outputs');
@@ -55,6 +55,10 @@ export async function runGeneration({
     planned: 0, generated: 0, refused: 0, results: [] };
   if (!gate.allowed) return { exit: EXIT.refused, summary, reasons: gate.reasons };
   if (problems.length > 0) return { exit: EXIT.invalid, summary, problems };
+  // Artefacts from more than one model describe more than one evaluation, whatever the plan says.
+  const mixed = mixedIdentities(done);
+  if (mixed) return { exit: EXIT.invalid, summary,
+    problems: [{ at: 'outputs', rule: `stored_artefacts_span_several_models:${mixed.join(',')}` }] };
   if (typeof callModel !== 'function')
     return { exit: EXIT.refused, summary,
       reasons: ['no_model_transport_supplied_the_call_is_injected_not_implicit'] };
@@ -83,7 +87,10 @@ export async function runGeneration({
       continue;
     }
     runIdentity ??= { model_id: identity.model_id, model_version: identity.model_version };
-    store(item.case_id, { raw: identity.raw, output: parsed, prompt_sha256: summary.prompt_sha256,
+    // `raw` is the only stored truth. The parsed object is derived on demand, so a hand-edited
+    // `output` field can never disagree with the text the model actually produced.
+    store(item.case_id, { raw: identity.raw, prompt_sha256: summary.prompt_sha256,
+      staged_case_sha256: stagedCaseDigest(staged),
       model_id: identity.model_id, model_version: identity.model_version });
     summary.generated += 1;
     summary.results.push({ case_id: item.case_id, accepted: true, problems: [] });

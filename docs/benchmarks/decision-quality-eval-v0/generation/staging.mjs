@@ -26,6 +26,11 @@ export const CONTRACT = read('input.schema.json');
 
 export const promptDigest = () => crypto.createHash('sha256')
   .update(fs.readFileSync(PROMPT_PATH, 'utf8')).digest('hex');
+
+// The exact staged case a generation answered. If any part of the case changes — the offer, the
+// goal, a known unknown — the stored answer is an answer to a different question and is not complete.
+export const stagedCaseDigest = (stagedCase) => crypto.createHash('sha256')
+  .update(JSON.stringify(stagedCase)).digest('hex');
 export const loadInput = () => JSON.parse(fs.readFileSync(INPUT_PATH, 'utf8'));
 
 // Hard ceiling on how many model calls one evaluation may spend, whatever the operator says.
@@ -208,12 +213,20 @@ export const completedOutputs = (input, artefacts, digest = promptDigest()) => {
     if (!staged) continue;
     if (!artefact || typeof artefact !== 'object') continue;
     if (artefact.prompt_sha256 !== digest) continue;
+    if (artefact.staged_case_sha256 !== stagedCaseDigest(staged)) continue;
     if (typeof artefact.model_id !== 'string' || !artefact.model_id
       || typeof artefact.model_version !== 'string' || !artefact.model_version) continue;
     if (outputProblems(artefact.raw, staged).length > 0) continue;
     completed.set(caseId, { model_id: artefact.model_id, model_version: artefact.model_version });
   }
   return completed;
+};
+
+// One evaluation, one model. Artefacts left behind by different runs are refused outright rather
+// than quietly reported as finished work under no single identity.
+export const mixedIdentities = (completed) => {
+  const identities = new Set([...completed.values()].map((value) => `${value.model_id}@${value.model_version}`));
+  return identities.size > 1 ? [...identities] : null;
 };
 
 // The staged input is immutable, so completion lives in the persisted outputs.

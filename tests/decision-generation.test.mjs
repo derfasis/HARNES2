@@ -8,7 +8,8 @@ import path from 'node:path';
 import childProcess from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { BINDINGS, MAX_CALLS, checkCaseGraph, checkPromptInputAgreement, completedOutputs, generationGate,
-  loadInput, outputProblems, parseRaw, plan, preflight, promptDigest, INPUT_PATH, PROMPT_PATH }
+  loadInput, mixedIdentities, outputProblems, parseRaw, plan, preflight, promptDigest, stagedCaseDigest,
+  INPUT_PATH, PROMPT_PATH }
   from '../docs/benchmarks/decision-quality-eval-v0/generation/staging.mjs';
 import { EXIT, fileStore, identityProblems, readArtefacts, runGeneration }
   from '../docs/benchmarks/decision-quality-eval-v0/generation/run.mjs';
@@ -283,7 +284,8 @@ test('4D a stored artefact counts as complete only if it is ours, current, and s
   const input = stagedInput();
   const staged = stagedCase();
   const artefact = (over = {}) => ({ raw: JSON.stringify(validOutput()), prompt_sha256: promptDigest(),
-    model_id: 'runtime-model', model_version: 'runtime-2026-02', ...over });
+    staged_case_sha256: stagedCaseDigest(stagedCase()), model_id: 'runtime-model',
+    model_version: 'runtime-2026-02', ...over });
   assert.deepEqual([...completedOutputs(input, { 'case-1': artefact() }).keys()], ['case-1']);
   // An older prompt means the artefact answers a different question.
   assert.equal(completedOutputs(input, { 'case-1': artefact({ prompt_sha256: 'stale' }) }).size, 0);
@@ -296,6 +298,34 @@ test('4D a stored artefact counts as complete only if it is ours, current, and s
   assert.equal(completedOutputs(input, { 'case-1': tampered }).size, 0);
   assert.equal(completedOutputs(input, { 'unknown-case': artefact() }).size, 0);
   assert.equal(staged.case_id, 'case-1');
+  // An answer to a different question is not an answer to this one.
+  const changed = stagedInput([stagedCase({ offer: 'Другое предложение' })]);
+  assert.equal(completedOutputs(changed, { 'case-1': artefact() }).size, 0,
+    'changing the offer invalidates the stored answer');
+  const changedGoal = stagedInput([stagedCase({ operator_goal: 'Другая цель' })]);
+  assert.equal(completedOutputs(changedGoal, { 'case-1': artefact() }).size, 0);
+  const missing = artefact();
+  delete missing.staged_case_sha256;
+  assert.equal(completedOutputs(input, { 'case-1': missing }).size, 0);
+});
+
+test('4D stored artefacts from more than one model are refused, not reported as finished', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harnes2-eval-mixed-'));
+  const artefacts = { 'case-1': { raw: JSON.stringify(validOutput()), prompt_sha256: promptDigest(),
+      staged_case_sha256: stagedCaseDigest(stagedCase()), model_id: 'a', model_version: '1' } };
+  const second = stagedCase({ case_id: 'case-2' });
+  artefacts['case-2'] = { raw: JSON.stringify(validOutput()), prompt_sha256: promptDigest(),
+    staged_case_sha256: stagedCaseDigest(second), model_id: 'b', model_version: '9' };
+  assert.deepEqual(mixedIdentities(completedOutputs(stagedInput([stagedCase(), second]), artefacts)),
+    ['a@1', 'b@9']);
+  // The mixed artefacts have to actually be on disk, because that is where a real rerun looks.
+  const store = fileStore(directory);
+  for (const [caseId, artefact] of Object.entries(artefacts)) store(caseId, artefact);
+  const result = await runGeneration({ input: stagedInput([stagedCase(), second]), environment: OPEN,
+    directory, store, callModel: async () => response() });
+  assert.equal(result.exit, EXIT.invalid, 'a mixed evaluation is a structural refusal');
+  assert.ok(result.problems.some((problem) => problem.rule.includes('span_several_models')));
+  fs.rmSync(directory, { recursive: true, force: true });
 });
 
 test('4D one evaluation is frozen to a single model, and a second one is refused', async () => {
