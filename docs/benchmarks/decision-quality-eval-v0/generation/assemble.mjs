@@ -117,7 +117,10 @@ export function assembleCorpus({ input, artefacts = {}, reviews = {}, adjudicati
         problems.push(`${caseId}:a_model_may_not_stand_in_for_a_human_reviewer`);
       if (typeof adjudication.reason !== 'string' || !adjudication.reason)
         problems.push(`${caseId}:adjudication_reason_is_required`);
-      problems.push(...tagProblems(adjudication.failure_tags, `${caseId}:adjudication`));
+      // The adjudicator resolves axes and explains why. Tags belong to the two human reviewers, and
+      // widening that here would put a third party's vocabulary into the case's own union.
+      if (adjudication.failure_tags !== undefined)
+        problems.push(`${caseId}:adjudication_does_not_carry_failure_tags`);
     }
 
     identities.set(`${artefact.model_id}@${artefact.model_version}`, true);
@@ -143,8 +146,7 @@ export function assembleCorpus({ input, artefacts = {}, reviews = {}, adjudicati
       ...(adjudication ? { adjudication: { reviewer: adjudication.reviewer,
         final_axes: adjudication.final_axes, reason: adjudication.reason } } : {}),
       final_axes: published.axes,
-      failure_tags: uniqueTags(first.failure_tags, second.failure_tags,
-        adjudication?.failure_tags),
+      failure_tags: uniqueTags(first.failure_tags, second.failure_tags),
     });
   }
 
