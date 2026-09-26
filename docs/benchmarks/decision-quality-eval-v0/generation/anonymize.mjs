@@ -132,8 +132,12 @@ export function convert(input = {}) {
   // point here is guarded, so a broken source produces findings rather than an exception.
   let source, provenance, sensitive_literals = [];
   try {
-    ({ source, provenance, sensitive_literals = [] } = input ?? {});
+    ({ source, provenance } = input ?? {});
+    if (input && 'sensitive_literals' in input) sensitive_literals = input.sensitive_literals;
   } catch { return refused(['a_source_is_required']); }
+  if (sensitive_literals === undefined) sensitive_literals = [];
+  if (!Array.isArray(sensitive_literals) || sensitive_literals.some((value) => !isText(value)))
+    return refused(['sensitive_literals_must_be_a_list_of_strings']);
   let problems;
   try { problems = validate({ source, provenance }); }
   catch (error) { return refused([`the_source_is_not_something_we_can_read:${error?.name ?? 'error'}`]); }
@@ -148,7 +152,6 @@ export function convert(input = {}) {
     const at = item.case_id, salt = index + 1;
     const people = table('PERSON', salt), messages = table('MESSAGE', salt);
     const secrets = Object.fromEntries(MECHANICAL.map((entry) => [entry.kind, table(entry.kind, salt)]));
-    const appliedReplacements = new Set();
     // Every literal that identifies a person, in every form the source says it takes.
     // The union of every form of every person, rebuilt from the source that validation approved.
     const identities = new Map();
@@ -159,16 +162,18 @@ export function convert(input = {}) {
     for (const forms of identities.values()) for (const form of forms) removed.push(form);
 
     // 3. One sanitiser for every string the model will see, wherever it lives.
+    // One order for every form of every person, longest first. Sorting per person would let a
+    // short form consume part of a longer one: "Ann" turning "Anna" into "[PERSON_A]a".
+    const orderedForms = [...identities.entries()]
+      .flatMap(([author, forms]) => forms.map((form) => ({ form, author })))
+      .sort((a, b) => b.form.length - a.form.length);
     const sanitize = (value) => {
       if (!isText(value)) return value;
       let text = value;
-      for (const [author, forms] of identities) {
-        const stand_in = people.apply(author);
-        for (const form of [...forms].sort((a, b) => b.length - a.length)) {
-          if (!text.includes(form)) continue;
-          text = text.split(form).join(stand_in);
-          applied.push(`${at}:PERSON`);
-        }
+      for (const { form, author } of orderedForms) {
+        if (!text.includes(form)) continue;
+        text = text.split(form).join(people.apply(author));
+        applied.push(`${at}:PERSON`);
       }
       for (const entry of MECHANICAL) {
         for (const match of text.match(entry.pattern) ?? []) {
@@ -180,13 +185,15 @@ export function convert(input = {}) {
     };
     // 4. Declared semantic replacements, applied to text that was already sanitised.
     const replacements = item.replacements ?? [];
+    const matches = new Map();
     const withReplacements = (value) => {
       let text = sanitize(value);
       for (const rule of replacements) {
         const pattern = new RegExp(escapeRegExp(rule.match), 'g');
-        if (!pattern.test(text)) continue;
+        const found = text.match(pattern) ?? [];
+        matches.set(rule.replacement, (matches.get(rule.replacement) ?? 0) + found.length);
+        if (!found.length) continue;
         text = text.replace(pattern, rule.replacement);
-        declaredReplacements.add(`${at}:${rule.replacement}`);
       }
       return text;
     };
@@ -204,6 +211,15 @@ export function convert(input = {}) {
       is_anchor: message.source_event_id === item.anchor_source_event_id,
     }));
     applied.push(`${at}:MESSAGE`);
+    // A source that declared a replacement and then spelled it differently meant something to be
+    // removed. Silently shipping the original text would undo the instruction it just gave.
+    for (const rule of replacements) {
+      if (!(matches.get(rule.replacement) > 0)) {
+        problems.push(`${at}:a_declared_replacement_matched_nothing:${rule.replacement}`);
+        return;
+      }
+      declaredReplacements.add(`${at}:${rule.replacement}`);
+    }
 
     staged.push({ case_id: at,
       provenance: kind === 'real'
@@ -217,6 +233,9 @@ export function convert(input = {}) {
       operator_goal: withReplacements(item.operator_goal),
       known_unknowns: item.known_unknowns.map((entry) => withReplacements(entry)) });
   });
+
+  // A case that failed while being converted is not a case, and an empty result is not a success.
+  if (problems.length) return refused(problems);
 
   const staged_input = { input_id: isText(source.input_id) ? source.input_id : 'd4-generation-v0',
     live_proof: false, prompt_ref: source.prompt_ref, cases: staged };

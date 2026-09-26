@@ -250,11 +250,59 @@ test('4D a declared replacement is only reported as applied when it matched', ()
   provenance: real });
   assert.ok(matched.audit.declared.some((entry) => entry.includes('[HIGH_VALUE_AMOUNT]')));
 
-  // The source declared one thing and the text says another: nothing was replaced, and the audit
-  // must not claim otherwise.
+  // The source declared one thing and the text says another. A typo there would otherwise ship a
+  // case with the very amount it was asked to remove.
   const unmatched = convert({ source: source({ cases: [conversation({
     replacements: [{ match: '18 000 EUR', replacement: '[HIGH_VALUE_AMOUNT]' }] })] }), provenance: real });
-  assert.deepEqual(unmatched.problems, []);
-  assert.equal(unmatched.audit.declared.length, 0,
-    'a replacement that matched nothing is not reported as applied');
+  assert.equal(unmatched.input, null);
+  assert.ok(unmatched.problems.some((entry) => entry.includes('a_declared_replacement_matched_nothing')));
+});
+
+test('4D one long form is never eaten by a shorter one', () => {
+  // "Ann" is a form of Anna and also a prefix of the other person's name. Ordering the forms per
+  // person would replace "Ann" first and leave "abel" behind; one global longest-first list cannot.
+  const { input, problems } = convert({ source: source({ cases: [conversation({
+    subject_author: 'Anna', subject_aliases: ['Anna', 'Ann'], anchor_source_event_id: 'm-2',
+    messages: [message({ author: 'Annabel', author_aliases: ['Annabel'], text: 'Annabel и Anna вместе.' }),
+      message({ source_event_id: 'm-2', author: 'Anna', author_aliases: ['Anna', 'Ann'],
+        reply_to_id: 'm-1' })] })] }), provenance: real });
+  assert.deepEqual(problems, [], JSON.stringify(problems));
+  const text = input.cases[0].messages[0].text;
+  assert.ok(!text.includes('Annabel'), 'the longest form is replaced first');
+  assert.ok(!text.includes('Anna'), 'and the shorter form of the other person too');
+  assert.ok(!text.includes('abel'), 'nothing survives as a fragment of a name');
+  const placeholders = text.match(/\[PERSON_\d+_\d+\]/g) ?? [];
+  assert.equal(placeholders.length, 2, 'two people, two placeholders');
+  assert.equal(new Set(placeholders).size, 2, 'and they are not the same person');
+  assert.equal(input.cases[0].subject.author_id, input.cases[0].messages[1].author_id,
+    'both forms of Anna belong to the same person');
+});
+
+test('4D two people may not both claim one form', () => {
+  const { input, problems } = convert({ source: source({ cases: [conversation({
+    subject_author: 'Anna', subject_aliases: ['Anna', 'Ann'], anchor_source_event_id: 'm-2',
+    messages: [message({ author: 'Ann', author_aliases: ['Ann', 'Anna'], text: 'Anna и Ann.' }),
+      message({ source_event_id: 'm-2', author: 'Anna', author_aliases: ['Anna', 'Ann'],
+        reply_to_id: 'm-1' })] })] }), provenance: real });
+  assert.equal(input, null, 'a source that contradicts itself converts to nothing');
+  assert.ok(problems.some((problem) => problem.includes('two_people_claim_the_same_form')));
+});
+
+test('4D sensitive literals are validated before they are used', () => {
+  for (const literals of [123, [{}, 'abc'], ['ok', 7], { a: 1 }, true]) {
+    const result = convert({ source: source(), provenance: real, sensitive_literals: literals });
+    assert.equal(result.input, null, JSON.stringify(literals));
+    assert.ok(result.problems.includes('sensitive_literals_must_be_a_list_of_strings'));
+  }
+  const absent = convert({ source: source(), provenance: real });
+  assert.deepEqual(absent.problems, [], 'an absent list is empty, not a failure');
+  const harmless = convert({ source: source(), provenance: real, sensitive_literals: ['Ирина Ковальчук'] });
+  assert.deepEqual(harmless.problems, [], 'a declared literal that is gone is not a leak');
+  assert.ok(!visible(harmless.input).includes('Ирина Ковальчук'));
+  // A literal the converter has no rule for survives conversion, and the leak scan says so.
+  const surviving = convert({ source: source({ cases: [conversation({
+    offer: 'Пакет Sigma с промокодом FRIDAY42' })] }), provenance: real,
+    sensitive_literals: ['промокодом FRIDAY42'] });
+  assert.equal(surviving.input, null, 'a literal that survived refuses the result');
+  assert.ok(surviving.problems[0].startsWith('the_anonymised_case_still_contains_source_material'));
 });
