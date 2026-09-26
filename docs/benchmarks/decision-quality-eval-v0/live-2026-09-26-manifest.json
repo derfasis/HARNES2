@@ -1,0 +1,176 @@
+{
+  "run_id": "live-ddX-2026-09-26-b0",
+  "source_dir": "gen-BMWy75",
+  "generated": 18,
+  "calls": 20,
+  "decisions": {
+    "IGNORE": 7,
+    "PUBLIC_REPLY": 8,
+    "WAIT": 3
+  },
+  "cases": [
+    {
+      "case_id": "live-ddX-000",
+      "decision": "IGNORE",
+      "confidence": 0.82,
+      "model_id": "claude-sonnet-4-6",
+      "model_version": "claude-sonnet-4-6",
+      "staged_case_sha256": "508e7f3b4516103fc58a21bd4ccc7531a523f491bd0eb42c35d0eb79ec4df674",
+      "artefact_sha256": "243085ae8150ab6551351d11b68c946f055d1287460d6209ef5932091c97f72f"
+    },
+    {
+      "case_id": "live-ddX-001",
+      "decision": "IGNORE",
+      "confidence": 0.82,
+      "model_id": "claude-sonnet-4-6",
+      "model_version": "claude-sonnet-4-6",
+      "staged_case_sha256": "9f8bf1fc56bc0bc78038b32bd3119de60c81896db0bd7f6f09cc6b513373b208",
+      "artefact_sha256": "1fb8daffde3d3dede0231c8c915bb167b83b55449f4e09d3cfa93f119ad4bdce"
+    },
+    {
+      "case_id": "live-ddX-002",
+      "decision": "IGNORE",
+      "confidence": 0.85,
+      "model_id": "claude-sonnet-4-6",
+      "model_version": "claude-sonnet-4-6",
+      "staged_case_sha256": "b62eab30a161f176871268b8684b1cea0f83a50e0c336f998ff3c01b68151550",
+      "artefact_sha256": "9817364ea1802f86fd51a07b3b281c34925f3bcbddd9aca6442412af2d9f942b"
+    },
+    {
+      "case_id": "live-ddX-003",
+      "decision": "IGNORE",
+      "confidence": 0.82,
+      "model_id": "claude-sonnet-4-6",
+      "model_version": "claude-sonnet-4-6",
+      "staged_case_sha256": "31a8a8cfb77084c32267f7b46c660521c5afa4c4eb8dadfebf93aa1646678661",
+      "artefact_sha256": "72fbd492e00be1c630b377bebf56b10c2f2bc60bd43051f118dd02fb240e1c7a"
+    },
+    {
+      "case_id": "live-ddX-004",
+      "decision": "IGNORE",
+      "confidence": 0.92,
+      "model_id": "claude-sonnet-4-6",
+      "model_version": "claude-sonnet-4-6",
+      "staged_case_sha256": "47e5ad69eb254106576dd50cd682fe2f18ea21586295a15741a7708e6a8bdcef",
+      "artefact_sha256": "d877195551b592fc5545c1eae8f7ed65995559cb80aa8fea29e3f1ccaea67d66"
+    },
+    {
+      "case_id": "live-ddX-005",
+      "decision": "PUBLIC_REPLY",
+      "confidence": 0.52,
+      "model_id": "claude-sonnet-4-6",
+      "model_version": "claude-sonnet-4-6",
+      "staged_case_sha256": "05d5fc5ac9a5833bd4531e5bc95d76a3c610470d548dd215204096919a05fb7d",
+      "artefact_sha256": "77338b0182d8712ece708fe41736c7d56bb4a3928beac5e8739c2a2b0f818c41"
+    },
+    {
+      "case_id": "live-ddX-006",
+      "decision": "IGNORE",
+      "confidence": 0.82,
+      "model_id": "claude-sonnet-4-6",
+      "model_version": "claude-sonnet-4-6",
+      "staged_case_sha256": "e0bce555a82f23bc82c13577634fba4f25d1e301326a486451db5278488a76f4",
+      "artefact_sha256": "4ff3d2894c32228c532c09ab4d3f1aab697e03076ed74e4126ffb078cd079f42"
+    },
+    {
+      "case_id": "live-ddX-007",
+      "decision": "IGNORE",
+      "confidence": 0.85,
+      "model_id": "claude-sonnet-4-6",
+      "model_version": "claude-sonnet-4-6",
+      "staged_case_sha256": "6459a95de6bf9f715312223a45c259d9ad8df1476ffc9f8a0a983dbdf6d66f65",
+      "artefact_sha256": "3dc1fb1342f4eedf48897a11c3542145c337d0d1b5ef6db1602fbd1f4f067ea7"
+    },
+    {
+      "case_id": "live-ddX-008",
+      "decision": "PUBLIC_REPLY",
+      "confidence": 0.42,
+      "model_id": "claude-sonnet-4-6",
+      "model_version": "claude-sonnet-4-6",
+      "staged_case_sha256": "49420800cd63bbefe98723b974c08c6f19d9cd9d31269652bf6ea9af672a4a76",
+      "artefact_sha256": "58e265bbda450c4d8901001a539afabfe792476a84b48eccfee8917707904bd1"
+    },
+    {
+      "case_id": "live-ddX-009",
+      "decision": "PUBLIC_REPLY",
+      "confidence": 0.72,
+      "model_id": "claude-sonnet-4-6",
+      "model_version": "claude-sonnet-4-6",
+      "staged_case_sha256": "ba010637beec6cb64ef62018f1bbd138be4f6494057cb634a02ae2b2fbf0b3c6",
+      "artefact_sha256": "b40731d826f43a5ca35d725d30ff448050744e7e3be87836956370e571384656"
+    },
+    {
+      "case_id": "live-ddX-010",
+      "decision": "PUBLIC_REPLY",
+      "confidence": 0.38,
+      "model_id": "claude-sonnet-4-6",
+      "model_version": "claude-sonnet-4-6",
+      "staged_case_sha256": "2d0f3c80773c591659dcb7ae65891078c9b86e33f7291163f86f3f72162d1bac",
+      "artefact_sha256": "c959aa8846e2b1cec7b0872bff14034b1285419212b435ab6565db1f8af0fd89"
+    },
+    {
+      "case_id": "live-ddX-011",
+      "decision": "PUBLIC_REPLY",
+      "confidence": 0.38,
+      "model_id": "claude-sonnet-4-6",
+      "model_version": "claude-sonnet-4-6",
+      "staged_case_sha256": "22396941ca82c21197f5241086f06e6068e266e801ff4d0cf835243797de6b28",
+      "artefact_sha256": "bba5af7553685682e7aeb5b3e61210589a3a0f3084761ed7b2778afdeba52e2f"
+    },
+    {
+      "case_id": "live-ddX-012",
+      "decision": "PUBLIC_REPLY",
+      "confidence": 0.45,
+      "model_id": "claude-sonnet-4-6",
+      "model_version": "claude-sonnet-4-6",
+      "staged_case_sha256": "652a15caa77aaa21f6b1d3c24ee42f7d1e52c721470f89e7c63cbb8960233baf",
+      "artefact_sha256": "e575f37d988f1e83c56978ac453cf43b1629ea14a2b9c67a079cfcabcebc881a"
+    },
+    {
+      "case_id": "live-ddX-014",
+      "decision": "PUBLIC_REPLY",
+      "confidence": 0.62,
+      "model_id": "claude-sonnet-4-6",
+      "model_version": "claude-sonnet-4-6",
+      "staged_case_sha256": "d25080e24bc719fbe2f1368878e7c1b5361955b3ad7c73e2e7c11de0f16a2cb9",
+      "artefact_sha256": "6dc7fdad201a7214a47ca824c107902851e118739d72466dcd7c832fda7df15e"
+    },
+    {
+      "case_id": "live-ddX-015",
+      "decision": "WAIT",
+      "confidence": 0.35,
+      "model_id": "claude-sonnet-4-6",
+      "model_version": "claude-sonnet-4-6",
+      "staged_case_sha256": "fa2832968dfb6980f2b644fa53c6006c3412c75deee4277dba2681ba736b18f2",
+      "artefact_sha256": "21e2aaf9d17bdb23f354bec49eff54073e72f288b5bb4cf789df502581e921dd"
+    },
+    {
+      "case_id": "live-ddX-016",
+      "decision": "PUBLIC_REPLY",
+      "confidence": 0.62,
+      "model_id": "claude-sonnet-4-6",
+      "model_version": "claude-sonnet-4-6",
+      "staged_case_sha256": "2bb49f4b0289cd011aa5fb357b32b40c1b5786a3ee674d3ac34e63296fd76751",
+      "artefact_sha256": "99fbcac534727ed39d48553c219196eb22bb7e450dd70a972373a0e74bf157a3"
+    },
+    {
+      "case_id": "live-ddX-018",
+      "decision": "WAIT",
+      "confidence": 0.35,
+      "model_id": "claude-sonnet-4-6",
+      "model_version": "claude-sonnet-4-6",
+      "staged_case_sha256": "7bb6aa0c81bd1dbbca18f09ea635722c9e2bdbf1694652df0198d344062a5ea7",
+      "artefact_sha256": "80cd646bbcaf5e3d322f9057e8fda11810c037eec2b2ed6b0d6fe7c5d8b5a05f"
+    },
+    {
+      "case_id": "live-ddX-019",
+      "decision": "WAIT",
+      "confidence": 0.3,
+      "model_id": "claude-sonnet-4-6",
+      "model_version": "claude-sonnet-4-6",
+      "staged_case_sha256": "241d9628cf08b40874f7d070fbc8f1d73232f325920d8ee79652a06e65781e04",
+      "artefact_sha256": "8136094099206f409e6486bfd3ee0d9a63df8822f209030bca9a2f157d0d386d"
+    }
+  ],
+  "note": "Derived decisions only. No message text, no person identifiers, no model output bodies."
+}
