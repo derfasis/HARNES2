@@ -10,8 +10,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { completedOutputs, generationGate, loadInput, mixedIdentities, outputProblems, parseRaw, plan,
-  preflight, promptDigest, stagedCaseDigest } from './staging.mjs';
+import { MAX_CALLS, completedOutputs, generationGate, loadInput, mixedIdentities, outputProblems,
+  parseRaw, plan, preflight, promptDigest, stagedCaseDigest } from './staging.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const OUTPUTS_DIR = path.join(HERE, 'outputs');
@@ -39,24 +39,48 @@ export const readArtefacts = (directory = OUTPUTS_DIR) => {
   const artefacts = {};
   if (!fs.existsSync(directory)) return artefacts;
   for (const name of fs.readdirSync(directory)) {
-    if (!name.endsWith('.json')) continue;
+    // The ledger is bookkeeping, not a generated artefact.
+    if (!name.endsWith('.json') || name === LEDGER_FILE) continue;
     try { artefacts[name.slice(0, -5)] = JSON.parse(fs.readFileSync(path.join(directory, name), 'utf8')); }
     catch { artefacts[name.slice(0, -5)] = null; }
   }
   return artefacts;
 };
 
+// A call ledger that survives a run. A ceiling over stored outputs is not a ceiling over calls:
+// a refused output stores nothing, and an uncounted rerun would quietly double the spend.
+export const LEDGER_FILE = 'attempts.json';
+export const readLedger = (directory = OUTPUTS_DIR) => {
+  const file = path.join(directory, LEDGER_FILE);
+  if (!fs.existsSync(file)) return { calls: 0, by_case: {} };
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); }
+  catch { return { calls: 0, by_case: {} }; }
+};
+export const writeLedger = (directory, ledger) => {
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(path.join(directory, LEDGER_FILE), JSON.stringify(ledger, null, 2));
+};
+
 export async function runGeneration({
   input = loadInput(), callModel, environment = process.env, directory = OUTPUTS_DIR,
-  store = fileStore(directory), gate = generationGate(environment, input), problems = preflight(input),
-  done = completedOutputs(input, readArtefacts(directory)),
+  store = fileStore(directory),
+  // The gate and the preflight run first, on purpose: persisted state is only read once the
+  // staged corpus is known to be sound, because validating an artefact against a broken case
+  // would reach into fields that do not exist.
+  gate = null, problems = null, done = null, ledger = null,
 } = {}) {
+  const effectiveGate = gate ?? generationGate(environment, input);
+  const effectiveProblems = problems ?? preflight(input);
   const summary = { stage: 'generation', prompt_sha256: promptDigest(), live_proof: false,
     planned: 0, generated: 0, refused: 0, results: [] };
-  if (!gate.allowed) return { exit: EXIT.refused, summary, reasons: gate.reasons };
-  if (problems.length > 0) return { exit: EXIT.invalid, summary, problems };
+  if (!effectiveGate.allowed) return { exit: EXIT.refused, summary, reasons: effectiveGate.reasons };
+  if (effectiveProblems.length > 0) return { exit: EXIT.invalid, summary, problems: effectiveProblems };
+  const completed = done ?? completedOutputs(input, readArtefacts(directory));
+  const attempts = ledger ?? readLedger(directory);
+  summary.calls_made = 0;
+  summary.calls_budget = MAX_CALLS;
   // Artefacts from more than one model describe more than one evaluation, whatever the plan says.
-  const mixed = mixedIdentities(done);
+  const mixed = mixedIdentities(completed);
   if (mixed) return { exit: EXIT.invalid, summary,
     problems: [{ at: 'outputs', rule: `stored_artefacts_span_several_models:${mixed.join(',')}` }] };
   if (typeof callModel !== 'function')
@@ -66,14 +90,21 @@ export async function runGeneration({
   // One evaluation, one model. The identity is frozen by whatever was already accepted, and if
   // nothing is stored yet, by the first accepted call. A later case from another model is refused
   // and written nowhere, because a corpus that mixes models cannot be attributed to any of them.
-  const frozen = done instanceof Map && done.size > 0 ? [...done.values()][0] : null;
-  const todo = plan(input, done);
+  const frozen = completed.size > 0 ? [...completed.values()][0] : null;
+  // The budget counts every call the runtime was asked to make, refused ones included.
+  if (attempts.calls >= MAX_CALLS) return { exit: EXIT.refused, summary,
+    reasons: ['model_call_ceiling_reached_no_further_calls_will_be_made'] };
+  const todo = plan(input, completed);
   summary.planned = todo.length;
   let runIdentity = frozen ?? null;
   for (const item of todo) {
     const staged = input.cases.find((entry) => entry.case_id === item.case_id);
+    attempts.calls += 1;
+    attempts.by_case[item.case_id] = (attempts.by_case[item.case_id] ?? 0) + 1;
+    summary.calls_made += 1;
     const response = await callModel({ prompt: fs.readFileSync(path.join(HERE, 'prompt.md'), 'utf8'),
       case: item, staged });
+    writeLedger(directory, attempts);
     const identity = response && typeof response === 'object' && !Array.isArray(response) ? response : {};
     const { parsed, problems: parseProblems } = parseRaw(identity.raw);
     const failures = [...identityProblems(identity), ...parseProblems,
@@ -97,6 +128,8 @@ export async function runGeneration({
   }
   summary.model_id = runIdentity?.model_id ?? null;
   summary.model_version = runIdentity?.model_version ?? null;
+  summary.calls_total = attempts.calls;
+  writeLedger(directory, attempts);
   return { exit: summary.generated > 0 ? EXIT.done : EXIT.nothing_to_do, summary };
 }
 

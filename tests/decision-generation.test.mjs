@@ -11,7 +11,7 @@ import { BINDINGS, MAX_CALLS, checkCaseGraph, checkPromptInputAgreement, complet
   loadInput, mixedIdentities, outputProblems, parseRaw, plan, preflight, promptDigest, stagedCaseDigest,
   INPUT_PATH, PROMPT_PATH }
   from '../docs/benchmarks/decision-quality-eval-v0/generation/staging.mjs';
-import { EXIT, fileStore, identityProblems, readArtefacts, runGeneration }
+import { EXIT, fileStore, identityProblems, readArtefacts, readLedger, runGeneration }
   from '../docs/benchmarks/decision-quality-eval-v0/generation/run.mjs';
 
 const GENERATION = fileURLToPath(new URL('../docs/benchmarks/decision-quality-eval-v0/generation/', import.meta.url));
@@ -200,6 +200,7 @@ test('4D one staged case runs end to end on a stubbed call, and a rerun has noth
   assert.equal(written.model_id, 'runtime-model', 'the identity comes from the runtime');
   assert.equal(written.model_version, 'runtime-2026-02');
   assert.deepEqual(Object.keys(readArtefacts(directory)), ['case-1']);
+  assert.equal(readLedger(directory).calls, 1, 'the call is counted even when it succeeds');
 
   // A rerun is idempotent because completion is read from the stored outputs, not from input.
   const rerun = await runGeneration({ input, environment: OPEN, directory, callModel: stub });
@@ -211,7 +212,8 @@ test('4D one staged case runs end to end on a stubbed call, and a rerun has noth
     callModel: async () => response({ raw: JSON.stringify({ foo: 'bar' }) }) });
   assert.equal(refused.exit, EXIT.nothing_to_do);
   assert.equal(refused.summary.planned, 0, 'the case is already complete, so nothing is retried');
-  assert.equal(fs.readdirSync(directory).length, 1, 'a refused output is written nowhere');
+  assert.deepEqual(Object.keys(readArtefacts(directory)), ['case-1'],
+    'a refused output is written nowhere');
 
   const noTransport = await runGeneration({ input, environment: OPEN, directory });
   assert.equal(noTransport.exit, EXIT.refused);
@@ -364,7 +366,8 @@ test('4D a malformed transport is a refusal, never an exception', async () => {
     assert.ok(result.summary.results[0].problems.includes('raw_must_be_the_text_the_runtime_returned')
       || result.summary.results[0].problems.includes('output_is_not_json'), JSON.stringify(malformed));
   }
-  assert.equal(fs.readdirSync(directory).length, 0, 'nothing is stored from a malformed transport');
+  assert.deepEqual(Object.keys(readArtefacts(directory)), [], 'no case is stored from a malformed transport');
+  assert.ok(readLedger(directory).calls > 0, 'the attempt is still counted');
   assert.deepEqual(parseRaw('{"a":1}').problems, []);
   assert.deepEqual(parseRaw(5).problems, ['raw_must_be_the_text_the_runtime_returned']);
   fs.rmSync(directory, { recursive: true, force: true });
@@ -372,3 +375,41 @@ test('4D a malformed transport is a refusal, never an exception', async () => {
 
 const caseOutput = (item) => validOutput({ next_action: { ...validOutput().next_action,
   situation_id: item.situation_id } });
+
+test('4D the call ceiling counts refused calls too, and survives a rerun', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harnes2-eval-ceiling-'));
+  const input = stagedInput();
+  let calls = 0;
+  // Every call returns something unusable, so nothing is ever stored and a naive ceiling over
+  // stored outputs would keep spending on every rerun.
+  const failing = async () => { calls += 1; return response({ raw: JSON.stringify({ foo: 'bar' }) }); };
+  // Each round spends exactly one call on the same unfinished case, until the budget is gone.
+  for (let round = 0; round < MAX_CALLS + 1; round += 1) {
+    const result = await runGeneration({ input, environment: OPEN, directory, callModel: failing });
+    if (result.exit === EXIT.refused) break;
+    assert.equal(result.exit, EXIT.nothing_to_do, String(result.exit));
+  }
+  assert.equal(calls, MAX_CALLS, 'the budget is spent, not the number of stored outputs');
+  const ledger = readLedger(directory);
+  assert.equal(ledger.calls, MAX_CALLS, 'a refused call is still a call');
+  assert.ok(ledger.by_case['case-1'] > 1, 'repeated attempts are recorded');
+  const afterBudget = await runGeneration({ input, environment: OPEN, directory, callModel: failing });
+  assert.equal(afterBudget.exit, EXIT.refused);
+  assert.deepEqual(afterBudget.reasons, ['model_call_ceiling_reached_no_further_calls_will_be_made']);
+  assert.equal(calls, MAX_CALLS, 'not one further call is made');
+  fs.rmSync(directory, { recursive: true, force: true });
+});
+
+test('4D a broken corpus is refused before any stored artefact is even looked at', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harnes2-eval-order-'));
+  // An artefact for a case that no longer parses: validating it would reach into missing fields.
+  const store = fileStore(directory);
+  store('case-1', { raw: '{}', prompt_sha256: promptDigest(), model_id: 'm', model_version: '1' });
+  const broken = { ...stagedInput(), cases: [{ case_id: 'case-1' }] };
+  let calls = 0;
+  const result = await runGeneration({ input: broken, environment: OPEN, directory,
+    callModel: async () => { calls += 1; return response(); } });
+  assert.equal(result.exit, EXIT.invalid, 'the preflight speaks first');
+  assert.equal(calls, 0, 'nothing is called, and nothing throws');
+  fs.rmSync(directory, { recursive: true, force: true });
+});
