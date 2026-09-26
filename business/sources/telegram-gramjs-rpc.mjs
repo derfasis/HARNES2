@@ -8,12 +8,11 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { NewMessage } = require('telegram/events/NewMessage');
-const { UpdateConnectionState } = require('telegram/network');
 const { Api } = require('telegram');
 const bigInt = require('big-integer');
 
 export class GramjsSourceRpc {
-  #client; #service; #sourceId; #handler = null; #faultHandler = null; #closed = false;
+  #client; #service; #sourceId; #handler = null; #closed = false;
 
   constructor(client, service, sourceId) {
     if (!client || typeof client.invoke !== 'function' || typeof client.addEventHandler !== 'function')
@@ -25,14 +24,16 @@ export class GramjsSourceRpc {
 
   // Raw updates, exactly as the SDK delivers them. Filtering is the reader's job: it is written
   // against these very classes and decides what a permitted delta is.
-  subscribe(onUpdate, onFault) {
+  //
+  // There is deliberately no fault subscription. The SDK's connection-state event is not one of
+  // its update builders, and registering it crashes the dispatch loop; the reader already treats
+  // a failing read as a transport fault and invalidates itself, which is the same outcome.
+  subscribe(onUpdate) {
     if (this.#handler) return;
     this.#handler = event => { if (!this.#closed) onUpdate(event); };
-    this.#faultHandler = () => { if (!this.#closed && typeof onFault === 'function') onFault(); };
     // nofilter: service messages and non-message updates must reach the reader too, because it is
     // the reader that knows which of them carry a cursor.
     this.#client.addEventHandler(this.#handler, new NewMessage({ incoming: true, nofilter: true }));
-    this.#client.addEventHandler(this.#faultHandler, new UpdateConnectionState());
   }
 
   async invokeRead(request) { return this.#client.invoke(request); }
@@ -45,7 +46,6 @@ export class GramjsSourceRpc {
     if (this.#closed) return;
     this.#closed = true;
     if (this.#handler) { this.#client.removeEventHandler(this.#handler); this.#handler = null; }
-    if (this.#faultHandler) { this.#client.removeEventHandler(this.#faultHandler); this.#faultHandler = null; }
   }
 
   // The policy carries the bare channel id, and the SDK only recognises a channel when the peer is
