@@ -88,8 +88,15 @@ class ServedIdentityTests(unittest.TestCase):
         from agent import turn_response_intake  # noqa: F401  (the module the hook lives in)
 
         original_has, original_invoke = lifecycle.has_hook, lifecycle.invoke_hook
-        calls = []
-        lifecycle.has_hook, lifecycle.invoke_hook = original_has, original_invoke
+        # The counter goes underneath the collector, not over it: the collector captures the
+        # dispatcher at install time, so only a wrapper placed first is one it will delegate to.
+        reached = []
+
+        def counting_invoke(name, *a, **k):
+            reached.append(name)
+            return original_invoke(name, *a, **k)
+
+        lifecycle.has_hook, lifecycle.invoke_hook = original_has, counting_invoke
         lifecycle._harnes_identity_collector = False
         try:
             seen = collect_response_models()
@@ -98,17 +105,24 @@ class ServedIdentityTests(unittest.TestCase):
             self.assertTrue(lifecycle.has_hook("post_api_request"))
             self.assertFalse(lifecycle.has_hook("some_other_hook"))
 
-            calls.append(lifecycle.invoke_hook("post_api_request", response_model="served-model",
-                                                usage={"total_tokens": 5}, assistant_content_chars=12,
-                                                base_url="https://example.invalid", model="configured-model"))
+            lifecycle.invoke_hook("post_api_request", response_model="served-model",
+                                      usage={"total_tokens": 5}, assistant_content_chars=12,
+                                      base_url="https://example.invalid", model="configured-model")
             self.assertEqual(seen, ["served-model"])
             # Nothing but the model name, and never the configured one the runtime also passes.
             for value in seen:
                 self.assertNotIn("example.invalid", value)
                 self.assertNotIn("configured-model", value)
-            # Unrelated hooks keep their own behaviour rather than being swallowed by the wrapper.
-            lifecycle.has_hook("some_other_hook")
-            self.assertNotIn("served-model", seen[1:])
+            # An unrelated hook must still reach the original dispatcher. Comparing return values
+            # is not enough, because an unregistered hook returns nothing either way; what matters
+            # is that the original was called, so it is wrapped and counted.
+            reached = []
+            lifecycle.invoke_hook("some_other_hook", task_id="t1")
+            self.assertEqual(reached, ["some_other_hook"],
+                             "a foreign hook must be forwarded to the original dispatcher")
+            self.assertFalse(lifecycle.has_hook("some_other_hook"),
+                             "only post_api_request may be force-enabled")
+            self.assertEqual(seen, ["served-model"], "a foreign hook must not record a model")
         finally:
             lifecycle.has_hook, lifecycle.invoke_hook = original_has, original_invoke
             for name in ("_harnes_identity_collector", "_harnes_response_models"):
