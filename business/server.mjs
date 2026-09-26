@@ -69,7 +69,11 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
   ensure(service.partner(), 'partnerId не совпадает с профилем', 500);
   const operatorToken = randomBytes(32).toString('hex'), mcpToken = randomBytes(32).toString('hex'), runTokens = new Map();
   const telegram = config.telegram.transport === 'mtproto' ? new MtprotoTelegramChannel(service) : new TelegramChannel(service);
-  const runtime = new HermesAdapter(service,runTokens), scheduler = new Scheduler(service,runtime,telegram);
+  const runtime = new HermesAdapter(service,runTokens);
+  // The scheduler polls whatever readers the channel established. Without this the list is empty
+  // and the automatic pipeline never reads, whatever the configuration says.
+  const scheduler = new Scheduler(service,runtime,telegram,[]);
+  telegram.onSourcesReady = readers => { scheduler.sourceReaders = readers ?? []; };
   let shuttingDown = false;
   const server = http.createServer(async (req,res) => {
     const send = (code,value) => { res.writeHead(code, {'Content-Type':'application/json; charset=utf-8'}); res.end(JSON.stringify(value)); };
@@ -162,10 +166,10 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
   console.log(`Digital AI Partner: http://127.0.0.1:${config.server.port}`);
   console.log(`Hermes ${runtimeReadiness(config).ready ? 'enabled' : 'waiting for model configuration'}; Telegram ${config.telegram.enabled ? 'enabled' : 'disabled'}.`);
   const close = async () => {
-    if (shuttingDown) return; shuttingDown=true; scheduler.stop();telegram.stop();
+    if (shuttingDown) return; shuttingDown=true; scheduler.stop(); const stopped=telegram.stop();
     server.closeIdleConnections(); const closed = new Promise(resolve=>server.close(resolve));
     while (scheduler.busy || telegram.polling) await new Promise(resolve=>setTimeout(resolve,50));
-    await closed; store.close();
+    await closed; await stopped; store.close();
   };
   for (const signal of ['SIGINT','SIGTERM']) process.once(signal,()=>close().then(()=>process.exit(0)));
   return {server,store,service,close};
