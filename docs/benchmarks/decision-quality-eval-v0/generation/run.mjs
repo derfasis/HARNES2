@@ -78,6 +78,9 @@ export const writeLedger = (directory, ledger) => {
 export async function runGeneration({
   input = loadInput(), callModel, environment = process.env, directory = OUTPUTS_DIR,
   store = fileStore(directory),
+  // Supplied by the transport so an unready runtime is refused before the ledger moves. Without
+  // it the caller has not said anything about readiness, and a call is charged per attempt.
+  readiness = null,
   // The gate and the preflight run first, on purpose: persisted state is only read once the
   // staged corpus is known to be sound, because validating an artefact against a broken case
   // would reach into fields that do not exist.
@@ -89,6 +92,12 @@ export async function runGeneration({
     planned: 0, generated: 0, refused: 0, results: [] };
   if (!effectiveGate.allowed) return { exit: EXIT.refused, summary, reasons: effectiveGate.reasons };
   if (effectiveProblems.length > 0) return { exit: EXIT.invalid, summary, problems: effectiveProblems };
+  // An unready runtime is refused here, before the ledger moves, because a call is charged per
+  // attempt and a worker that cannot answer is still a spend.
+  if (readiness && readiness.length > 0) {
+    summary.readiness_problems = readiness;
+    return { exit: EXIT.refused, summary, reasons: ['model_runtime_is_not_ready'] };
+  }
   if (effectiveGate.allowed && !effectiveProblems.length) {
     const early = ledger ?? readLedger(directory);
     if (early.corrupted) return { exit: EXIT.invalid, summary,

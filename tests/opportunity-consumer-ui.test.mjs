@@ -122,7 +122,15 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // draft.target_id to subject_id for every draft (live 11c mismatch fix).
     "business/opportunity-projection.mjs": "a5e9ac19202e6c7831f9b0bc4e8f76e7579742fb",
     "contracts/opportunity-projection.schema.json": "b53a1a7b05d89de66858f3e59bb14940918d1c96",
-    "scripts/situation_router_worker.py": "717a960ab4c3b92148afae084cd998bfeaaade86",
+    // Reviewed Stage 4D extension: the worker also reports the model identity the model service
+    // actually served, read from the run result, the agent, or its last response. It is never
+    // derived from the configured model name, and it is null with a reason when the runtime
+    // exposes nothing usable. Provider-returned data only: the agent object's own model
+    // attribute is the configured name, and trusting it would let configuration impersonate a
+    // served model. Only fields with a provider origin are read: the pinned build copies the
+    // configured name into result["model"], and that is configuration wearing a provider's name.
+    // The evaluation corpus is attributed to a model or to nothing.
+    "scripts/situation_router_worker.py": "91316b72a9d92bdded8f6584f4353817ece9d51c",
     // Reviewed extension: invalidate read-only source checkpoints on process recovery.
     // textBlobHash normalizes CRLF, so this is the LF-normalized R7 blob hash.
     "business/store.mjs": "0f173b662506808a76766c12bc38d3e14b026865",
