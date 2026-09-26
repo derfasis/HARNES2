@@ -158,10 +158,18 @@ envelope — the frozen prompt as the worker's system prompt plus the staged cas
 business surface and a case can never reach a person — and passes model credentials through
 explicitly rather than inheriting the ambient Telegram, Codex, or Hermes environment.
 
-It requires the worker to **state which model answered**. Today's worker reports completion and
-usage but not the served identity, so the transport returns a refusal naming exactly that gap
-instead of filling the identity in from configuration. The finished corpus is only attributable to a
-model if that model named itself.
+It requires the worker to **state which model answered**, and the name is taken only from the
+provider's own response. The pinned runtime does not carry a provider response into its final
+result, so the worker wraps the `post_api_request` lifecycle dispatch and records
+`response_model` from it. Usage, message text, request and response bodies and the endpoint travel
+in the same payload and none of them are read.
+
+Two rules keep this honest. The configured model is never used as the served one, in either field,
+and a run that reached more than one model is refused outright rather than resolved by guessing
+which of them served. When the provider exposes only one canonical served-model token and no
+separate version, **both `model_id` and `model_version` carry that same token**. That is the
+strongest identity the provider exposed, not a version reconstructed from anything: a corpus
+attributed to a model that did not name itself is worse than no corpus at all.
 
 Nothing here calls a model on its own. `runWithTransport()` is the one entry point: it evaluates
 readiness, wires the transport, and only then runs generation, so a caller cannot plug a transport

@@ -134,7 +134,11 @@ def served_identity(result, response_models=()):
     if len(distinct) > 1:
         return None, f"several_models_served_this_run:{'|'.join(distinct)}"
     if distinct:
-        return {"model_id": distinct[0], "model_version": None}, None
+        # A provider that exposes one canonical served-model token has said everything it is
+        # willing to say about identity. Repeating that token in the version field is the
+        # strongest identity the provider gave, not a version we made up; the configured model and
+        # the agent's own name are never used for either field.
+        return {"model_id": distinct[0], "model_version": distinct[0]}, None
     if not isinstance(result, dict):
         return None, "runtime_did_not_expose_a_served_model_identity"
     for container in ("last_response", "provider_response", "response_meta", "metadata"):

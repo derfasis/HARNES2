@@ -3,7 +3,8 @@
 import json
 import unittest
 
-from scripts.situation_router_worker import classify_provider_failure, served_identity
+from scripts.situation_router_worker import (classify_provider_failure, collect_response_models,
+                                        served_identity)
 
 
 class SituationRouterFailureCauseTests(unittest.TestCase):
@@ -45,8 +46,6 @@ class SituationRouterFailureCauseTests(unittest.TestCase):
         self.assertIsNone(cause["http_status"])
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class ServedIdentityTests(unittest.TestCase):
@@ -54,7 +53,9 @@ class ServedIdentityTests(unittest.TestCase):
 
     def test_a_single_served_model_is_taken_from_the_provider_response(self):
         identity, reason = served_identity({"model": "configured-model"}, ["served-model"])
-        self.assertEqual(identity, {"model_id": "served-model", "model_version": None})
+        # One canonical provider token: both fields carry it. That is the strongest identity the
+        # provider exposed, not a version derived from configuration.
+        self.assertEqual(identity, {"model_id": "served-model", "model_version": "served-model"})
         self.assertIsNone(reason)
 
     def test_the_configured_model_is_never_used_as_the_served_one(self):
@@ -71,7 +72,7 @@ class ServedIdentityTests(unittest.TestCase):
 
     def test_the_same_model_several_times_is_one_model(self):
         identity, reason = served_identity({}, ["served-model", "served-model"])
-        self.assertEqual(identity, {"model_id": "served-model", "model_version": None})
+        self.assertEqual(identity, {"model_id": "served-model", "model_version": "served-model"})
         self.assertIsNone(reason)
 
     def test_blank_names_do_not_count_as_served(self):
@@ -79,27 +80,46 @@ class ServedIdentityTests(unittest.TestCase):
         self.assertIsNone(identity)
         self.assertEqual(reason, "runtime_did_not_expose_a_served_model_identity")
 
-    def test_the_collector_reads_only_the_response_model(self):
-        # The hook payload carries usage, message text and the request body. Only the model name
-        # may be kept, or the corpus inherits whatever the hook happened to hand over.
-        seen = []
+    def test_the_collector_wraps_the_real_lifecycle_dispatch(self):
+        # This drives collect_response_models itself. A test that repeats the narrowing by hand
+        # would stay green while the actual wrapper was broken, which is the whole point of the
+        # seam being worth pinning.
+        import hermes_cli.lifecycle as lifecycle
+        from agent import turn_response_intake  # noqa: F401  (the module the hook lives in)
 
-        class FakeLifecycle:
-            pass
+        original_has, original_invoke = lifecycle.has_hook, lifecycle.invoke_hook
+        calls = []
+        lifecycle.has_hook, lifecycle.invoke_hook = original_has, original_invoke
+        lifecycle._harnes_identity_collector = False
+        try:
+            seen = collect_response_models()
+            # A read-only run has no plugins registered, so the SDK skips the hook entirely. The
+            # collector has to make post_api_request visible or the payload is never dispatched.
+            self.assertTrue(lifecycle.has_hook("post_api_request"))
+            self.assertFalse(lifecycle.has_hook("some_other_hook"))
 
-        captured = {}
+            calls.append(lifecycle.invoke_hook("post_api_request", response_model="served-model",
+                                                usage={"total_tokens": 5}, assistant_content_chars=12,
+                                                base_url="https://example.invalid", model="configured-model"))
+            self.assertEqual(seen, ["served-model"])
+            # Nothing but the model name, and never the configured one the runtime also passes.
+            for value in seen:
+                self.assertNotIn("example.invalid", value)
+                self.assertNotIn("configured-model", value)
+            # Unrelated hooks keep their own behaviour rather than being swallowed by the wrapper.
+            lifecycle.has_hook("some_other_hook")
+            self.assertNotIn("served-model", seen[1:])
+        finally:
+            lifecycle.has_hook, lifecycle.invoke_hook = original_has, original_invoke
+            for name in ("_harnes_identity_collector", "_harnes_response_models"):
+                if hasattr(lifecycle, name):
+                    delattr(lifecycle, name)
 
-        def fake_invoke(hook_name, **kwargs):
-            captured.update(kwargs)
-            if hook_name == "post_api_request":
-                name = kwargs.get("response_model")
-                if isinstance(name, str) and name.strip():
-                    seen.append(name.strip())
-            return []
+    def test_a_run_with_no_collected_model_still_refuses(self):
+        identity, reason = served_identity({"model": "configured-model"}, [])
+        self.assertIsNone(identity)
+        self.assertEqual(reason, "runtime_did_not_expose_a_served_model_identity")
 
-        # Exercise the same narrowing the collector performs, against a realistic hook payload.
-        payload = {"response_model": "served-model", "usage": {"total_tokens": 5},
-                   "assistant_content_chars": 12, "base_url": "https://example.invalid"}
-        fake_invoke("post_api_request", **payload)
-        self.assertEqual(seen, ["served-model"])
-        self.assertNotIn("https://example.invalid", seen)
+
+if __name__ == "__main__":
+    unittest.main()

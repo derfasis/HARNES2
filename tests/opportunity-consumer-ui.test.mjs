@@ -133,7 +133,7 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // Reviewed extension: the worker now records the served model name from the provider response,
 // which the pinned runtime only exposes through its post_api_request lifecycle hook. The
 // configured model is still never used, and a run that reached two models is refused outright.
-    "scripts/situation_router_worker.py": "a561222dd3e564f8f4ab55f9e181164a8c064ce4",
+    "scripts/situation_router_worker.py": "29453f5084a80d040ac1e1e776fcd87fdeec5d3a",
     // Reviewed extension: invalidate read-only source checkpoints on process recovery.
     // textBlobHash normalizes CRLF, so this is the LF-normalized R7 blob hash.
     "business/store.mjs": "0f173b662506808a76766c12bc38d3e14b026865",
