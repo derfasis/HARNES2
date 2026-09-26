@@ -188,3 +188,73 @@ test('4D a secret that survives refuses the result, and the audit stays a sideca
   for (const kind of ['EMAIL', 'PERSON', 'MESSAGE'])
     assert.ok(good.audit.applied.some((entry) => entry.endsWith(`:${kind}`)), kind);
 });
+
+test('4D every person declares their forms, not only the subject', () => {
+  const missing = convert({ source: source({ cases: [conversation({
+    messages: [message({ author_aliases: undefined }),
+      message({ source_event_id: 'm-2', author: IRINA[0], author_aliases: IRINA, reply_to_id: 'm-1' })] })] }),
+  provenance: real });
+  assert.equal(missing.input, null);
+  assert.ok(missing.problems.some((entry) => entry.includes('must_list_the_forms_of_every_person')));
+  // The inflected form of a non-subject is gone when the source declared it.
+  const declared = convert({ source: source({ cases: [conversation({
+    messages: [message({ text: `${OLEG[1]} позвали` }),
+      message({ source_event_id: 'm-2', author: IRINA[0], author_aliases: IRINA, reply_to_id: 'm-1' })] })] }),
+  provenance: real });
+  assert.deepEqual(declared.problems, []);
+  assert.ok(!declared.input.cases[0].messages[0].text.includes(OLEG[1]));
+});
+
+test('4D the forms of one person are the union, and two people may not claim one form', () => {
+  // Oleg speaks in both messages and the subject appears only in the second, so the subject is
+  // still the anchor's author. The point of the case is the union of one person's forms.
+  const split = convert({ source: source({ cases: [conversation({
+    subject_author: OLEG[0], subject_aliases: OLEG, anchor_source_event_id: 'm-2',
+    messages: [message({ author_aliases: [OLEG[0]] }),
+      message({ source_event_id: 'm-2', author: OLEG[0], author_aliases: OLEG, reply_to_id: 'm-1', text: OLEG[1] })] })] }),
+  provenance: real });
+  assert.deepEqual(split.problems, [], JSON.stringify(split.problems));
+  assert.ok(!split.input.cases[0].messages[1].text.includes(OLEG[1]),
+    'a form declared only on a later message still applies');
+  assert.equal(split.input.cases[0].messages[1].author_id, split.input.cases[0].subject.author_id);
+
+  const collision = convert({ source: source({ cases: [conversation({
+    subject_author: OLEG[0], subject_aliases: [OLEG[0], 'Саша'], anchor_source_event_id: 'm-2',
+    messages: [message({ author: IRINA[0], author_aliases: [...IRINA, 'Саша'] }),
+      message({ source_event_id: 'm-2', author: IRINA[0], author_aliases: IRINA, reply_to_id: 'm-1' })] })] }),
+  provenance: real });
+  assert.equal(collision.input, null);
+  assert.ok(collision.problems.some((entry) => entry.includes('two_people_claim_the_same_form')));
+});
+
+test('4D a malformed source is refused, never an exception', () => {
+  const cases = [undefined, null, {}, { source: 'broken' },
+    { source: { cases: 'not a list', prompt_ref: 'p' } },
+    { source: { cases: [{ case_id: 'c' }], prompt_ref: 'p' } },
+    { source: { cases: [conversation({ replacements: 'nope' })], prompt_ref: 'p' } },
+    { source: { cases: [conversation({ messages: [{ source_event_id: 7 }] })], prompt_ref: 'p' } },
+    { source: { cases: [conversation({ messages: 'text' })], prompt_ref: 'p' } },
+    { source: { cases: [conversation()], prompt_ref: 'p' }, provenance: { kind: ['real'] } },
+    { source: { cases: [conversation()], prompt_ref: 'p' }, provenance: 7 }];
+  for (const payload of cases) {
+    let result;
+    assert.doesNotThrow(() => { result = convert(payload); }, JSON.stringify(payload));
+    assert.equal(result.input, null, JSON.stringify(payload));
+    assert.ok(result.problems.length > 0, JSON.stringify(payload));
+  }
+});
+
+test('4D a declared replacement is only reported as applied when it matched', () => {
+  const matched = convert({ source: source({ cases: [conversation({
+    replacements: [{ match: 'сколько стоит участие', replacement: '[HIGH_VALUE_AMOUNT]' }] })] }),
+  provenance: real });
+  assert.ok(matched.audit.declared.some((entry) => entry.includes('[HIGH_VALUE_AMOUNT]')));
+
+  // The source declared one thing and the text says another: nothing was replaced, and the audit
+  // must not claim otherwise.
+  const unmatched = convert({ source: source({ cases: [conversation({
+    replacements: [{ match: '18 000 EUR', replacement: '[HIGH_VALUE_AMOUNT]' }] })] }), provenance: real });
+  assert.deepEqual(unmatched.problems, []);
+  assert.equal(unmatched.audit.declared.length, 0,
+    'a replacement that matched nothing is not reported as applied');
+});

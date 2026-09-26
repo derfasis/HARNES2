@@ -209,8 +209,14 @@ external account and message ids — and that includes the offer, the goal, the 
 known unknowns, not only the message text.
 
 A name is not one string. Russian, Ukrainian and Croatian inflect it, so the source declares the
-forms a person appears in and every form maps to the same placeholder. Matching only the canonical
-form would leave the declined case of a name sitting in the text for the model to read. Placeholders are one stable name per literal within a case: two different
+forms **every** person appears in — not only the subject — and the converter takes the union of those
+forms across every message a person speaks in. Matching only the canonical form would leave the
+declined case of a name sitting in the text for the model to read. Two people claiming the same
+form is a contradiction in the source, and it is refused rather than silently assigned.
+
+The converter never throws. A source it cannot read produces findings, not an exception, because a
+validator that crashes on the shape it is meant to judge is not a validator. A replacement the
+source declared is reported as applied only when it actually matched something. Placeholders are one stable name per literal within a case: two different
 addresses never collapse into one placeholder, and the same address always keeps the same one.
 It also applies the semantic replacements the source declared. It does not guess whether a sum or a city
 matters to the decision; that is a judgement about the material, and it belongs to whoever holds

@@ -100,21 +100,47 @@ function validate({ source, provenance }) {
       if (message?.reply_to_id !== undefined && message?.reply_to_id !== null
         && !isText(message.reply_to_id)) problems.push(`${at}:a_reply_id_must_be_text_or_absent`);
     }
-    // People, with the forms the source says they appear in.
-    if (isText(item?.subject_author)) {
-      if (!Array.isArray(item?.subject_aliases)) problems.push(`${at}:the_source_must_list_the_forms_of_every_person`);
-      for (const alias of item?.subject_aliases ?? [])
-        if (!isText(alias)) problems.push(`${at}:a_person_alias_must_be_text`);
-    } else problems.push(`${at}:the_source_must_choose_the_subject`);
+    // People, with every form the source says they appear in. This is required of the subject and
+    // of every other author: "the canonical form is enough" is exactly the guess that lets a
+    // declined case of a name survive.
+    if (!isText(item?.subject_author)) { problems.push(`${at}:the_source_must_choose_the_subject`); return; }
+    if (!Array.isArray(item.subject_aliases)) { problems.push(`${at}:the_source_must_list_the_forms_of_every_person`); return; }
+    const people = new Map();
+    const declare = (author, aliases) => {
+      if (!isText(author)) { problems.push(`${at}:every_message_needs_its_author`); return; }
+      if (!Array.isArray(aliases)) { problems.push(`${at}:the_source_must_list_the_forms_of_every_person`); return; }
+      for (const alias of aliases) if (!isText(alias)) problems.push(`${at}:a_person_alias_must_be_text`);
+      // One person may appear many times; the forms are the union, not whoever spoke first.
+      people.set(author, [...new Set([...(people.get(author) ?? []), author, ...aliases])]);
+    };
+    declare(item.subject_author, item.subject_aliases);
+    for (const message of item.messages) declare(message.author, message.author_aliases);
+    // One word claimed by two people is a contradiction in the source, not a choice to make here.
+    const owner = new Map();
+    for (const [author, forms] of people) for (const form of forms) {
+      if (owner.has(form) && owner.get(form) !== author) {
+        problems.push(`${at}:two_people_claim_the_same_form:${form}`);
+      }
+      owner.set(form, author);
+    }
   });
   return problems;
 }
 
-export function convert({ source, provenance, sensitive_literals = [] } = {}) {
-  const problems = validate({ source, provenance });
+export function convert(input = {}) {
+  // A validator that can crash on the shape it is meant to judge is not a validator. Every entry
+  // point here is guarded, so a broken source produces findings rather than an exception.
+  let source, provenance, sensitive_literals = [];
+  try {
+    ({ source, provenance, sensitive_literals = [] } = input ?? {});
+  } catch { return refused(['a_source_is_required']); }
+  let problems;
+  try { problems = validate({ source, provenance }); }
+  catch (error) { return refused([`the_source_is_not_something_we_can_read:${error?.name ?? 'error'}`]); }
   if (problems.length) return refused(problems);
 
   const applied = [], declared = [], removed = [];
+  const declaredReplacements = new Set();
   const staged = [];
   const kind = provenance.kind;
 
@@ -122,15 +148,15 @@ export function convert({ source, provenance, sensitive_literals = [] } = {}) {
     const at = item.case_id, salt = index + 1;
     const people = table('PERSON', salt), messages = table('MESSAGE', salt);
     const secrets = Object.fromEntries(MECHANICAL.map((entry) => [entry.kind, table(entry.kind, salt)]));
+    const appliedReplacements = new Set();
     // Every literal that identifies a person, in every form the source says it takes.
+    // The union of every form of every person, rebuilt from the source that validation approved.
     const identities = new Map();
-    const add = (author, aliases) => {
-      if (!identities.has(author)) identities.set(author, [author, ...(aliases ?? [])]);
-      for (const alias of aliases ?? []) removed.push(alias);
-      return author;
-    };
-    add(item.subject_author, item.subject_aliases);
-    for (const message of item.messages) add(message.author, message.author_aliases ?? [message.author]);
+    const remember = (author, aliases) =>
+      identities.set(author, [...new Set([...(identities.get(author) ?? []), author, ...aliases])]);
+    remember(item.subject_author, item.subject_aliases);
+    for (const message of item.messages) remember(message.author, message.author_aliases);
+    for (const forms of identities.values()) for (const form of forms) removed.push(form);
 
     // 3. One sanitiser for every string the model will see, wherever it lives.
     const sanitize = (value) => {
@@ -156,7 +182,12 @@ export function convert({ source, provenance, sensitive_literals = [] } = {}) {
     const replacements = item.replacements ?? [];
     const withReplacements = (value) => {
       let text = sanitize(value);
-      for (const rule of replacements) text = text.replace(new RegExp(escapeRegExp(rule.match), 'g'), rule.replacement);
+      for (const rule of replacements) {
+        const pattern = new RegExp(escapeRegExp(rule.match), 'g');
+        if (!pattern.test(text)) continue;
+        text = text.replace(pattern, rule.replacement);
+        declaredReplacements.add(`${at}:${rule.replacement}`);
+      }
       return text;
     };
 
@@ -173,7 +204,6 @@ export function convert({ source, provenance, sensitive_literals = [] } = {}) {
       is_anchor: message.source_event_id === item.anchor_source_event_id,
     }));
     applied.push(`${at}:MESSAGE`);
-    for (const rule of replacements) declared.push(`${at}:${rule.replacement}`);
 
     staged.push({ case_id: at,
       provenance: kind === 'real'
@@ -188,13 +218,13 @@ export function convert({ source, provenance, sensitive_literals = [] } = {}) {
       known_unknowns: item.known_unknowns.map((entry) => withReplacements(entry)) });
   });
 
-  const input = { input_id: source.input_id ?? 'd4-generation-v0', live_proof: false,
-    prompt_ref: source.prompt_ref, cases: staged };
-  if (kind === 'real' && provenance.egress_authorisation_ref)
-    input.egress_authorisation_ref = provenance.egress_authorisation_ref;
+  const staged_input = { input_id: isText(source.input_id) ? source.input_id : 'd4-generation-v0',
+    live_proof: false, prompt_ref: source.prompt_ref, cases: staged };
+  if (kind === 'real' && isText(provenance.egress_authorisation_ref))
+    staged_input.egress_authorisation_ref = provenance.egress_authorisation_ref;
 
   // 5. Nothing the source handed us may still be visible, in any form it declared.
-  const visible = JSON.stringify(input);
+  const visible = JSON.stringify(staged_input);
   const candidates = [...new Set([...sensitive_literals, ...removed,
     ...source.cases.flatMap((item) => [item.subject_author, ...item.messages.map((message) => message.author),
       ...item.messages.map((message) => String(message.source_event_id)),
@@ -203,7 +233,7 @@ export function convert({ source, provenance, sensitive_literals = [] } = {}) {
       ...item.messages.flatMap((message) => message.author_aliases ?? [])])])]
     .filter((literal) => isText(literal));
   const leaked = candidates.filter((literal) => visible.includes(literal));
-  for (const item of input.cases) {
+  for (const item of staged_input.cases) {
     const strings = [item.offer, item.operator_goal, item.situation.goal_text, ...item.known_unknowns,
       ...item.messages.map((message) => message.text), ...item.messages.map((message) => message.created_at)];
     for (const value of strings) for (const entry of MECHANICAL)
@@ -213,9 +243,12 @@ export function convert({ source, provenance, sensitive_literals = [] } = {}) {
   if (leaked.length) return refused([`the_anonymised_case_still_contains_source_material:${[...new Set(leaked)].join('|')}`]);
 
   // 6. The staging contract decides whether this is a case at all.
-  const checks = preflight(input);
+  let checks;
+  try { checks = preflight(staged_input); }
+  catch (error) { return refused([`the_staged_case_could_not_be_validated:${error?.name ?? 'error'}`]); }
   if (checks.length) return refused(checks);
 
-  return { input, problems: [], audit: audit({ applied, declared, source_kind: kind,
+  declared.push(...declaredReplacements);
+  return { input: staged_input, problems: [], audit: audit({ applied, declared, source_kind: kind,
     provenance_claim_ref: provenance.provenance_claim_ref ?? null, sensitive_literals_checked: candidates.length }) };
 }
