@@ -258,6 +258,47 @@ test('4D a declared replacement is only reported as applied when it matched', ()
   assert.ok(unmatched.problems.some((entry) => entry.includes('a_declared_replacement_matched_nothing')));
 });
 
+test('4D a replacement that lives only in the offer is still applied and not refused', () => {
+  // The rule has to be judged after every model-visible field has been through it. Checking while
+  // the messages were still the last field to be read refuses an offer that matched perfectly well.
+  for (const [field, value] of [['offer', 'Пакет Sigma 18 000 EUR'],
+    ['operator_goal', 'Оценить пакет за 18 000 EUR'],
+    ['goal_text', 'Оценить предложение на 18 000 EUR']]) {
+    const { input, problems } = convert({ source: source({ cases: [conversation({
+      [field]: value, replacements: [{ match: '18 000 EUR', replacement: '[HIGH_VALUE_AMOUNT]' }] })] }),
+      provenance: real });
+    assert.deepEqual(problems, [], `${field}: ${JSON.stringify(problems)}`);
+    assert.ok(JSON.stringify(input).includes('[HIGH_VALUE_AMOUNT]'), `${field} is replaced`);
+    assert.equal(input.cases[0].offer.includes('18 000 EUR'), false);
+  }
+  // known_unknowns travels through the same sanitiser and must behave the same way.
+  const unknown = convert({ source: source({ cases: [conversation({
+    known_unknowns: ['Цена 18 000 EUR не подтверждена.'],
+    replacements: [{ match: '18 000 EUR', replacement: '[HIGH_VALUE_AMOUNT]' }] })] }), provenance: real });
+  assert.deepEqual(unknown.problems, [], JSON.stringify(unknown.problems));
+  assert.equal(unknown.input.cases[0].known_unknowns[0].includes('18 000 EUR'), false);
+});
+
+test('4D two rules sharing one replacement label are counted separately', () => {
+  // Counting by label let a rule that matched nothing inherit the count of a sibling that matched,
+  // so a typo in the second rule shipped the case with the text it was told to remove.
+  const messages = [message({ text: 'цена 18 000 EUR' }),
+    message({ source_event_id: 'm-2', author: IRINA[0], author_aliases: IRINA, reply_to_id: 'm-1' })];
+  const shared = convert({ source: source({ cases: [conversation({
+    messages, offer: 'Пакет Sigma без второй суммы',
+    replacements: [{ match: '18 000 EUR', replacement: '[MONEY]' },
+      { match: '30 000 EUR', replacement: '[MONEY]' }] })] }), provenance: real });
+  assert.equal(shared.input, null, 'the second rule matched nothing and must refuse');
+  assert.ok(shared.problems.some((entry) => entry.includes('a_declared_replacement_matched_nothing')));
+  // Both rules matching is still a success, even though they share one label.
+  const both = convert({ source: source({ cases: [conversation({
+    messages, offer: 'Пакет Sigma и 30 000 EUR',
+    replacements: [{ match: '18 000 EUR', replacement: '[MONEY]' },
+      { match: '30 000 EUR', replacement: '[MONEY]' }] })] }), provenance: real });
+  assert.deepEqual(both.problems, [], JSON.stringify(both.problems));
+  assert.equal(both.input.cases[0].offer.includes('30 000 EUR'), false);
+});
+
 test('4D one long form is never eaten by a shorter one', () => {
   // "Ann" is a form of Anna and also a prefix of the other person's name. Ordering the forms per
   // person would replace "Ann" first and leave "abel" behind; one global longest-first list cannot.

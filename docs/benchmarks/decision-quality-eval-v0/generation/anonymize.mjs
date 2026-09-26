@@ -185,13 +185,15 @@ export function convert(input = {}) {
     };
     // 4. Declared semantic replacements, applied to text that was already sanitised.
     const replacements = item.replacements ?? [];
+    // Counted per rule, never per replacement label: two rules may share one label, and a rule
+    // that matched nothing must not inherit its sibling's count.
     const matches = new Map();
     const withReplacements = (value) => {
       let text = sanitize(value);
-      for (const rule of replacements) {
+      for (const [index, rule] of replacements.entries()) {
         const pattern = new RegExp(escapeRegExp(rule.match), 'g');
         const found = text.match(pattern) ?? [];
-        matches.set(rule.replacement, (matches.get(rule.replacement) ?? 0) + found.length);
+        matches.set(index, (matches.get(index) ?? 0) + found.length);
         if (!found.length) continue;
         text = text.replace(pattern, rule.replacement);
       }
@@ -211,15 +213,6 @@ export function convert(input = {}) {
       is_anchor: message.source_event_id === item.anchor_source_event_id,
     }));
     applied.push(`${at}:MESSAGE`);
-    // A source that declared a replacement and then spelled it differently meant something to be
-    // removed. Silently shipping the original text would undo the instruction it just gave.
-    for (const rule of replacements) {
-      if (!(matches.get(rule.replacement) > 0)) {
-        problems.push(`${at}:a_declared_replacement_matched_nothing:${rule.replacement}`);
-        return;
-      }
-      declaredReplacements.add(`${at}:${rule.replacement}`);
-    }
 
     staged.push({ case_id: at,
       provenance: kind === 'real'
@@ -232,6 +225,18 @@ export function convert(input = {}) {
       offer: withReplacements(item.offer),
       operator_goal: withReplacements(item.operator_goal),
       known_unknowns: item.known_unknowns.map((entry) => withReplacements(entry)) });
+
+    // A source that declared a replacement and then spelled it differently meant something to be
+    // removed. Silently shipping the original text would undo the instruction it just gave. This
+    // runs only after every model-visible field above has been through withReplacements, or a
+    // replacement that lives in the offer alone would be reported as having matched nothing.
+    for (const [index, rule] of replacements.entries()) {
+      if (!(matches.get(index) > 0)) {
+        problems.push(`${at}:a_declared_replacement_matched_nothing:${rule.replacement}`);
+        return;
+      }
+      declaredReplacements.add(`${at}:${rule.replacement}`);
+    }
   });
 
   // A case that failed while being converted is not a case, and an empty result is not a success.
