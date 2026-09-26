@@ -386,3 +386,21 @@ test('4D sensitive literals are validated before they are used', () => {
   assert.equal(surviving.input, null, 'a literal that survived refuses the result');
   assert.ok(surviving.problems[0].startsWith('the_anonymised_case_still_contains_source_material'));
 });
+
+// KNOWN GAP, documented and deliberately not asserted as fixed here.
+//
+// Real Telegram material showed that provenance_claim_ref and egress_authorisation_ref are the
+// only fields the source fills in that the model can read, and nothing scanned them: a claim ref
+// built from a real message id or a real chat id travels into the staged input untouched.
+//
+// The obvious fix, scanning those two fields as substrings, trades this for the false positive the
+// rest of this file exists to prevent: a note reading "owner-note-1" collides with a real message
+// id of "1". Making the pointer opaque by contract is the alternative, and it is a contract change
+// with fixture churn, so it is a decision for review rather than something to slip in here.
+test('4D the provenance pointer is currently an ungoverned path into the model', () => {
+  const result = convert({ source: source(),
+    provenance: { ...real, provenance_claim_ref: 'prov_ev_m-1' } });
+  assert.notEqual(result.input, null,
+    'this asserts the gap still exists; close it with a reviewed contract, not a substring scan');
+  assert.equal(result.input.cases[0].provenance.provenance_claim_ref, 'prov_ev_m-1');
+});
