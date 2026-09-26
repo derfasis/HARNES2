@@ -7,7 +7,7 @@ import { id } from './store.mjs';
 import { now } from './errors.mjs';
 
 export class Scheduler {
-  constructor(service, runtime, telegram, sourceReaders = []) { this.sourceReaders = sourceReaders; this.service = service; this.runtime = runtime; this.telegram = telegram; this.busy = false; this.stopped = false; this.lastReason = null; this.activeRun = null; }
+  constructor(service, runtime, telegram, sourceReaders = []) { this.sourceReaders = sourceReaders; this.service = service; this.runtime = runtime; this.telegram = telegram; this.busy = false; this.stopped = false; this.lastReason = null; this.activeRun = null; this.readersAbsentReported = false; }
   start() { this.timer = setInterval(() => this.tick().catch(() => { this.lastReason = 'Ошибка обработки очереди; подробности в журнале запуска'; }), this.service.config.scheduler.tickSeconds * 1000); }
   status() { return { enabled: this.service.config.scheduler.enabled, busy: this.busy, active_run: this.activeRun, reason: this.lastReason, model: runtimeReadiness(this.service.config) }; }
   async tick() {
@@ -16,6 +16,30 @@ export class Scheduler {
     try {
       const cfg = this.service.config;
       if (cfg.opportunity?.automatic) {
+        // A source that is configured but has no reader is not a quiet source. The poll loop
+        // below skips it, it sits at its last confirmed cursor forever, and every other signal
+        // keeps saying the transport is fine: the process answers, the connection is up, and
+        // nothing throws. This happened live — the reader failed to start after a reconnect, and
+        // the source froze for an hour looking healthy.
+        //
+        // The test is per source, not per list length. Two configured sources with one reader
+        // alive is one dead source, and a system that only counted readers would call that fine.
+        const configured = (cfg.opportunity?.telegramSources ?? []).map((policy) => policy.sourceId);
+        const active = new Set(this.sourceReaders.map((entry) => entry.sourceId));
+        const missing = configured.filter((sourceId) => !active.has(sourceId));
+        const readersAbsent = missing.length > 0;
+        // Numbers and a code, never a source id and never the message behind the failure.
+        this.lastReadersAbsentCause = typeof this.telegram?.lastSourceCode === 'string'
+          && /^[A-Z][A-Z0-9_]{1,63}$/.test(this.telegram.lastSourceCode)
+          ? this.telegram.lastSourceCode : 'SOURCE_READER_BOOTSTRAP_FAILED';
+        if (readersAbsent && !this.readersAbsentReported) {
+          this.readersAbsentReported = true;
+          try { await this.service.exclusive(() => this.service.store.transaction(
+            () => this.service.store.event(cfg.partnerId, null, 'source.telegram.readers_absent',
+              'system', { configured_sources: configured.length, active_readers: active.size,
+                missing_readers: missing.length, cause_code: this.lastReadersAbsentCause }))); }
+          catch { /* Telemetry must never stop the queue. */ }
+        } else if (!readersAbsent) this.readersAbsentReported = false;
         // Empty by default. Only a trusted bootstrap can supply narrowed read-only
         // transport capabilities. Reuse this tick, never the private-chat adapter.
         let sourceReadFailed=false, sourceReadFailure=null;
@@ -47,7 +71,10 @@ export class Scheduler {
           catch { this.lastReason = 'Discovery reconciliation failed; source truth remains durable'; }
         }
         const result = await processSourceOpportunity(this.service, this.runtime);
-        this.lastReason = sourceReadFailed?`source_read_failed:${sourceReadFailure?.code ?? 'UNCLASSIFIED'}`:result.disposition; return;
+        // No reader outranks every other reason: a source nobody is reading makes whatever the
+        // opportunity pass reports about that source worth nothing.
+        this.lastReason = readersAbsent ? `source_readers_absent:${this.lastReadersAbsentCause ?? 'SOURCE_READER_BOOTSTRAP_FAILED'}`
+          : sourceReadFailed?`source_read_failed:${sourceReadFailure?.code ?? 'UNCLASSIFIED'}`:result.disposition; return;
       }
       if (cfg.discovery?.enabled === true) {
         try { await this.service.reconcileDiscovery(); }
