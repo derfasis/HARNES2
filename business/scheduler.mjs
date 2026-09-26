@@ -2,6 +2,7 @@ import { contextFor } from './context.mjs';
 import { runtimeReadiness, usageAccounting } from './config.mjs';
 import { processSourceOpportunity } from './opportunity-pipeline.mjs';
 import { pollTelegramSource } from './sources/telegram-readonly.mjs';
+import { sourceCheckpoint } from './source-ingestion.mjs';
 import { id } from './store.mjs';
 import { now } from './errors.mjs';
 
@@ -17,17 +18,30 @@ export class Scheduler {
       if (cfg.opportunity?.automatic) {
         // Empty by default. Only a trusted bootstrap can supply narrowed read-only
         // transport capabilities. Reuse this tick, never the private-chat adapter.
-        let sourceReadFailed=false;
+        let sourceReadFailed=false, sourceReadFailure=null;
         for (const { sourceId, transport } of this.sourceReaders) {
           try { await pollTelegramSource(this.service, sourceId, transport); }
-          catch { sourceReadFailed=true; }
+          catch (error) {
+            // A poll that fails silently is a source that can end up blocked with no evidence
+            // left behind, which is exactly what happened live. Record the class of failure, the
+            // cursor it read at and the checkpoint's own state, and nothing else: no message
+            // text, no provider payload, no stack, no credentials.
+            sourceReadFailed=true;
+            const state=sourceCheckpoint(this.service, sourceId);
+            sourceReadFailure={ source_id:sourceId,
+              code:String(error?.code ?? 'UNCLASSIFIED').slice(0,80),
+              checkpoint_pts:state?.pts ?? null, phase:state?.phase ?? null, reason:state?.reason ?? null };
+            try { await this.service.exclusive(() => this.service.store.transaction(
+              () => this.service.store.event(cfg.partnerId, null, 'source.telegram.poll.failed', 'system', sourceReadFailure))); }
+            catch { /* Telemetry must never stop the queue. */ }
+          }
         }
         if (cfg.discovery?.enabled === true) {
           try { await this.service.reconcileDiscovery(); }
           catch { this.lastReason = 'Discovery reconciliation failed; source truth remains durable'; }
         }
         const result = await processSourceOpportunity(this.service, this.runtime);
-        this.lastReason = sourceReadFailed?'source_read_failed':result.disposition; return;
+        this.lastReason = sourceReadFailed?`source_read_failed:${sourceReadFailure?.code ?? 'UNCLASSIFIED'}`:result.disposition; return;
       }
       if (cfg.discovery?.enabled === true) {
         try { await this.service.reconcileDiscovery(); }

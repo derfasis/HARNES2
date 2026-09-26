@@ -13,6 +13,12 @@ const RECOVERY_REQUEST = 'source.telegram.recovery.requested';
 const RECOVERY_FINISHED = 'source.telegram.recovery.finished';
 export const TELEGRAM_RECONCILIATION = 'telegram-reconciliation-v1';
 export const TELEGRAM_COUNTERLESS = 'telegram-reconciliation-v2';
+// A message time may sit marginally ahead of the local clock: senders and the server drift by
+// seconds, and a live group produced a message stamped fifteen seconds in the future, which
+// refused the whole poll. A bounded tolerance absorbs that without admitting any time at all, and
+// it is deliberately its own number rather than a source policy: a lag budget says how old evidence
+// may be, this says how far ahead of us a sender's clock may read.
+export const CLOCK_SKEW_TOLERANCE_MS = 30000;
 const MAX_PTS = 2147483647;
 const INTEGRITY = 'INTEGRITY_RECONCILIATION_REQUIRED';
 const integrityErrors = new Set(['TELEGRAM_PTS_COLLISION','SOURCE_VERSION_COLLISION','TELEGRAM_AUTHOR_IDENTITY_CHANGED',
@@ -100,7 +106,7 @@ function deleted(service,p,messageId) {
 }
 function timestamp(seconds) {
   check(integer(seconds), 'INVALID_TELEGRAM_TIME');
-  check(seconds * 1000 <= Date.now(),'TELEGRAM_CLOCK_SKEW');
+  check(seconds * 1000 <= Date.now() + CLOCK_SKEW_TOLERANCE_MS,'TELEGRAM_CLOCK_SKEW');
   return new Date(seconds * 1000).toISOString();
 }
 function peer(value) {
