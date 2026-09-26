@@ -46,57 +46,59 @@ test('the tolerance is not a source policy: a lag budget does not widen it', () 
 });
 
 test('poll telemetry survives a corrupt checkpoint and refuses to record a free-form code', async () => {
-  // A poll failure is reported by reading the checkpoint, and a corrupt checkpoint is exactly the
-  // kind of state a poll fails on. Telemetry that throws there would abort the tick it reports on,
-  // and a code copied from an exception could carry provider payload into durable storage.
+  // Two separate promises are under test. Reading the checkpoint can itself fail on a corrupt row,
+  // and telemetry that throws while reporting a failure would abort the tick it reports about. And
+  // a code copied verbatim off an exception can carry a provider message into durable storage.
   const { Scheduler } = await import('../business/scheduler.mjs');
   const { Store } = await import('../business/store.mjs');
   const { BusinessService } = await import('../business/service.mjs');
   const { loadConfig } = await import('../business/config.mjs');
   const { digest } = await import('../business/source-ingestion.mjs');
-  // The automatic branch is the one that polls, and it is guarded, so the fixture has to stand in
-  // the state a live read-only run actually runs in.
+  const { bootstrapTelegramSource } = await import('../business/sources/telegram-readonly.mjs');
+  const os = await import('node:os'); const fs = await import('node:fs'); const path = await import('node:path');
   const loaded = loadConfig();
+  // The automatic branch is the one that polls, and it is guarded, so the fixture stands in the
+  // state a live read-only run is actually in, and declares its own source rather than borrowing
+  // whatever local config happens to say.
   const cfg = { ...loaded, opportunity: { ...loaded.opportunity, automatic: true },
     runtime: { ...loaded.runtime, enabled: false },
     telegram: { ...loaded.telegram, enabled: true, liveSending: false } };
-  // The fixture declares its own source rather than borrowing whatever local config happens to
-  // say, so the test means the same thing on a developer machine and in CI.
   const sourceId = 'telegram:channel:100';
   cfg.opportunity.telegramSources = [{ accountId: '999', channelId: '100', sourceId,
     sourceKind: 'sanitized_fixture', processingBasis: 'Invented offline test only', maxLagSeconds: 120 }];
   cfg.opportunity.allowedSourceRefs = [sourceId];
-  const os = await import('node:os');
-  const fs = await import('node:fs');
-  const path = await import('node:path');
-  for (const [label, thrown, expected] of [
-    // A corrupt checkpoint breaks the poll itself with a parse error that carries no code, so the
-    // recorded class is UNCLASSIFIED. What matters is that telemetry still survives the read.
-    ['a corrupt checkpoint row', Error('bad json'), 'UNCLASSIFIED'],
-    ['a free-form provider message', Object.assign(Error('auth key sk-live-abcdef provider said no'),
-      { code: 'provider said no: sk-live-abcdef' }), 'UNCLASSIFIED'],
-    ['no code at all', Error('plain failure'), 'UNCLASSIFIED'],
+
+  for (const [label, thrown, expected, corrupt] of [
+    // The checkpoint itself is unreadable, so reading it inside telemetry fails too.
+    ['a corrupt checkpoint row', Error('bad json'), 'UNCLASSIFIED', true],
+    // A well-formed checkpoint, so the failure class itself is what is being recorded.
+    ['a free-form provider code', Object.assign(Error('auth key sk-live-abcdef provider said no'),
+      { code: 'provider said no: sk-live-abcdef' }), 'UNCLASSIFIED', false],
+    ['no code at all', Error('plain failure'), 'UNCLASSIFIED', false],
   ]) {
-    // Its own database per case: telemetry accumulates by design, and a shared file would make
-    // the count depend on how many times the suite had been run before.
-    const store = new Store(fs.mkdtempSync(path.join(os.tmpdir(), 'harnes2-poll-fail-')));
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harnes2-poll-fail-'));
+    const store = new Store(directory);
     const service = new BusinessService(store, cfg);
+    if (corrupt) {
+      store.run("INSERT OR REPLACE INTO channel_offsets(channel,account_id,cursor) VALUES(?,?,?)",
+        'telegram-source-v0', digest([cfg.partnerId, sourceId]), '{not json');
+    } else {
+      await bootstrapTelegramSource(service, sourceId, { pts: 10, history: [] });
+    }
     const scheduler = new Scheduler(service, { close() {} },
       { readiness: () => ({ enabled: false, live_sending: false, connected: false, configured: false }) },
       [{ sourceId, transport: { readDifference: async () => { throw thrown; } } }]);
-    // Corrupt the checkpoint first, so reading it inside telemetry fails too.
-    // Corrupt the very row sourceCheckpoint reads, so the read inside telemetry fails too.
-    store.run("INSERT OR REPLACE INTO channel_offsets(channel,account_id,cursor) VALUES(?,?,?)",
-      'telegram-source-v0', digest([cfg.partnerId, sourceId]), '{not json');
     await scheduler.tick();
     const rows = store.all("SELECT payload_json FROM events WHERE kind='source.telegram.poll.failed'");
-    assert.equal(rows.length, 1, `${label}: the failure is still recorded`);
+    assert.equal(rows.length, 1, `${label}: the failure is recorded, not swallowed`);
     const payload = JSON.parse(rows[0].payload_json);
     assert.equal(payload.code, expected, `${label}: only a code-shaped value is recorded`);
-    assert.equal(payload.checkpoint_pts, null, `${label}: an unreadable checkpoint is reported as null`);
-    assert.equal(scheduler.busy, false, `${label}: the tick completed`);
+    assert.equal(scheduler.busy, false, `${label}: the tick finished`);
     assert.doesNotMatch(rows[0].payload_json, /sk-live-abcdef/, `${label}: no provider payload is stored`);
+    if (corrupt) assert.equal(payload.checkpoint_pts, null, `${label}: an unreadable checkpoint reads as null`);
+    else assert.equal(payload.checkpoint_pts, 10, `${label}: a readable checkpoint is reported`);
+    assert.equal(scheduler.lastReason, `source_read_failed:${expected}`, `${label}: the class reaches the operator`);
     store.close();
-    fs.rmSync(store.directory ?? '', { recursive: true, force: true });
+    fs.rmSync(directory, { recursive: true, force: true });
   }
 });
