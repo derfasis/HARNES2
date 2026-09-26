@@ -166,10 +166,10 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
   console.log(`Digital AI Partner: http://127.0.0.1:${config.server.port}`);
   console.log(`Hermes ${runtimeReadiness(config).ready ? 'enabled' : 'waiting for model configuration'}; Telegram ${config.telegram.enabled ? 'enabled' : 'disabled'}.`);
   const close = async () => {
-    if (shuttingDown) return; shuttingDown=true; scheduler.stop();telegram.stop();
+    if (shuttingDown) return; shuttingDown=true; scheduler.stop(); const stopped=telegram.stop();
     server.closeIdleConnections(); const closed = new Promise(resolve=>server.close(resolve));
     while (scheduler.busy || telegram.polling) await new Promise(resolve=>setTimeout(resolve,50));
-    await closed; store.close();
+    await closed; await stopped; store.close();
   };
   for (const signal of ['SIGINT','SIGTERM']) process.once(signal,()=>close().then(()=>process.exit(0)));
   return {server,store,service,close};

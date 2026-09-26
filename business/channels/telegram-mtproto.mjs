@@ -210,9 +210,12 @@ export class MtprotoTelegramChannel {
     });
   }
 
-  stop() {
+  // Resolves once the readers are released and the connection they borrowed is gone, so a
+  // shutdown can wait for this before closing the store.
+  async stop() {
     this.stopped = true;
     this.connected = false;
-    if (this.client) void this.client.disconnect().catch(() => {});
+    await this.stopSourceReaders().catch(() => {});
+    try { await this.client?.disconnect(); } catch { /* A closing connection needs no report. */ }
   }
 }

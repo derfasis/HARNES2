@@ -144,7 +144,7 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // Reviewed R8 extension: the channel now bootstraps read-only public sources over the client
     // it already owns, and releases them without disconnecting that client. No send path changed;
     // sendApproved still requires liveSending and is untouched.
-    "business/channels/telegram-mtproto.mjs": "58b3321cdd0b6cbd66d01902a3d312953e00c036",
+    "business/channels/telegram-mtproto.mjs": "ea830de4d2d32b97a32b42956e27b4e5613f146b",
     "benchmarks/situation-router/README.md": "0da57bf3fcb53bbec5713f6a44c48654b16270b8",
     "benchmarks/situation-router/control-v1.json": "2c6265460c6ae6cc1de9b25fa978ba25d0e66236",
     "benchmarks/situation-router/synthetic/case-01-ignore.json": "f9fe79537ac036e32bbb547961901190b3f08007",
