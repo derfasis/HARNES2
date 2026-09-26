@@ -192,6 +192,51 @@ A model may not be one of the two reviewers, and the adjudicator is held to the 
 assembler cannot *prove* a person is a person — it can only refuse the identities it can see are a
 machine, and that limit is written down here rather than implied away.
 
+## Anonymisation
+
+`generation/anonymize.mjs` turns a permitted conversation into a staged case, and decides nothing:
+which cases, who the subject is, which message is the anchor, and whether the conversation
+matters at all all arrive selected in the input. Guessing them here would build a second router
+without any of the review the first one gets.
+
+It runs in a strict order, and each step can only narrow what the next one sees: validate the raw
+source completely, build the per-case maps, sanitise **every** model-visible string, apply the
+declared replacements, scan the whole result, run the generation preflight, and only then call it a
+success.
+
+It removes what it can recognise without being told — addresses, links, phone numbers, handles,
+external account and message ids — and that includes the offer, the goal, the operator goal and the
+known unknowns, not only the message text.
+
+A name is not one string. Russian, Ukrainian and Croatian inflect it, so the source declares the
+forms **every** person appears in — not only the subject — and the converter takes the union of those
+forms across every message a person speaks in. Matching only the canonical form would leave the
+declined case of a name sitting in the text for the model to read. Two people claiming the same
+form is a contradiction in the source, and it is refused rather than silently assigned.
+
+The converter never throws. A source it cannot read produces findings, not an exception, because a
+validator that crashes on the shape it is meant to judge is not a validator. A replacement the
+source declared is reported as applied only when it actually matched something. Placeholders are one stable name per literal within a case: two different
+addresses never collapse into one placeholder, and the same address always keeps the same one.
+It also applies the semantic replacements the source declared. It does not guess whether a sum or a city
+matters to the decision; that is a judgement about the material, and it belongs to whoever holds
+it. Nothing is defaulted either. A missing case id, message id, channel, direction, version, text,
+time, goal, offer, operator goal, permitted channel or unknown is a refusal, and an unknown value
+in an enum is a refusal too. Inventing `case_0`, turning a missing message id into a fresh
+`[MESSAGE_1_1]`, defaulting `known_unknowns` to `[]` — each of those would be a decision this code
+has no standing to make, and a wrong `allowed_channels` would widen what the model may propose.
+
+Provenance is decided, not defaulted: `real` requires its claim, `synthetic` is a fixture, and any
+other kind is refused rather than quietly treated as a fixture.
+
+A known literal that survives the conversion refuses the whole result, and a **real** source
+without a provenance claim is refused rather than quietly relabelled as a fixture. Relabelling real
+material would make the finished corpus claim something that is not true.
+
+The audit is returned as a sidecar, never as fields smuggled into the staging input, so the staging
+schema stays exactly as narrow as it is. The result is only a success after it also passes the
+generation preflight.
+
 ## Running the validator
 
 ```
