@@ -12,3 +12,7 @@ __pycache__/
 *.log
 runtime/hermes-agent/
 !runtime/README.md
+# A generation run's outputs and its refusal sidecar belong to the run, not to the repository:
+# artefacts are model answers to real conversations, and the sidecar is a record of what was
+# refused. A run belongs in a directory of its own, which is where the real one was made.
+docs/benchmarks/decision-quality-eval-v0/generation/outputs/

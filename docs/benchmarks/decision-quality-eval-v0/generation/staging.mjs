@@ -272,3 +272,55 @@ export const outputProblems = (raw, stagedCase) => {
   const { parsed, problems } = parseRaw(raw);
   return problems.length ? problems : checkOutput(parsed, stagedCase);
 };
+
+// What kind of value a model wrote, without the value. A refusal is recorded, and a record that
+// held the offending text would make the sidecar a second copy of the answer — the thing the
+// refusal exists to avoid storing.
+export const structuralType = (value) => {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'array';
+  if (typeof value === 'number') return Number.isInteger(value) ? 'integer' : 'number';
+  return typeof value;
+};
+
+// The value a JSON pointer names. A pointer to something that is not there resolves to undefined,
+// which is the right answer: the key was missing, and `undefined` says so without guessing.
+const resolvePointer = (root, pointer) => {
+  if (pointer === '') return root;
+  let node = root;
+  for (const step of pointer.split('/').slice(1)) {
+    if (node === null || typeof node !== 'object') return undefined;
+    const key = step.replace(/~1/g, '/').replace(/~0/g, '~');
+    node = Array.isArray(node) ? node[Number(key)] : node[key];
+  }
+  return node;
+};
+
+// The first structural violation of the output shape, reduced to the fields a diagnostic may hold.
+// Ajv's own error objects also carry `data` — the model's text — and `parentSchema`; neither is read
+// here beyond the type name, so nothing of the answer survives into the record. The type is read
+// back out of the parsed answer at the pointer rather than from the error, because a failure
+// inside a `$ref` leaves the error's own copy of the value unset and would report the wrong thing.
+// Null when the answer failed for any other reason, or when it did not fail at all.
+export function shapeErrorOf(raw) {
+  const { parsed, problems } = parseRaw(raw);
+  if (problems.length) return null;
+  if (validateOutputShape(parsed)) return null;
+  const [error] = validateOutputShape.errors ?? [];
+  if (!error) return null;
+  const pointer = typeof error.instancePath === 'string' ? error.instancePath : '';
+  const name = (value) => (typeof value === 'string' && /^[A-Za-z0-9_-]{1,40}$/.test(value)
+    ? value : null);
+  const path = (value) => (typeof value === 'string' && /^[A-Za-z0-9_.\-[\]$/#]{0,120}$/.test(value)
+    ? value : '');
+  return {
+    instance_path: path(pointer),
+    schema_path: path(error.schemaPath),
+    keyword: name(error.keyword),
+    expected_type: name(error.params?.type),
+    // Only a type failure has a type that arrived. A missing key is not an object that was the
+    // wrong type, and reporting the container's type as if it were the offender's would point a
+    // reader at the wrong place.
+    actual_type: error.keyword === 'type' ? structuralType(resolvePointer(parsed, pointer)) : null,
+  };
+}
