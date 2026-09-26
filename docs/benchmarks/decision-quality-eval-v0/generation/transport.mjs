@@ -47,11 +47,22 @@ export const buildEnvelope = ({ prompt, staged, runId = randomUUID(), runtime })
     offer: staged.offer, operator_goal: staged.operator_goal, known_unknowns: staged.known_unknowns },
 });
 
-export const transportProblems = (runtime = {}) => {
+// Everything the worker will use, checked before a process is started. An obviously unready
+// runtime must not cost an attempt: the call ledger counts it whether or not it was sensible.
+export const LIMITS = { maxOutputTokens: [128, 16000], timeoutSeconds: [10, 1800] };
+
+export const transportProblems = (runtime = {}, environment = process.env) => {
   const problems = [];
-  for (const key of ['model', 'provider', 'baseUrl']) {
+  for (const key of ['model', 'provider', 'baseUrl', 'apiMode']) {
     if (typeof runtime[key] !== 'string' || runtime[key].length === 0) problems.push(`runtime_config_is_missing_${key}`);
   }
+  for (const [key, [low, high]] of Object.entries(LIMITS)) {
+    const value = runtime[key];
+    if (!Number.isInteger(value) || value < low || value > high) problems.push(`runtime_${key}_must_be_an_integer_between_${low}_and_${high}`);
+  }
+  if (!Object.values(environment).some((value) => typeof value === 'string' && value.length > 0
+    && ['PARTNER_MODEL_API_KEY', 'PARTNER_MODEL_API_KEY_SECONDARY', 'PARTNER_MODEL_API_KEY_TERTIARY'].some((key) => value === environment[key] && value.length > 0)))
+    problems.push('no_model_credential_is_configured');
   return problems;
 };
 
@@ -78,26 +89,27 @@ export const callOnce = ({ python = PYTHON, worker = WORKER, envelope, environme
 // The contract the evaluation needs: the runtime text plus the identity it reported.
 export const createTransport = ({ runtime = {}, runId, python, worker, environment = process.env,
   cwd = path.join(ROOT, 'data', 'runtime'), spawnFn = spawn } = {}) => async ({ prompt, staged }) => {
-  const problems = transportProblems(runtime);
+  const problems = transportProblems(runtime, environment);
   if (problems.length) return { raw: null, model_id: null, model_version: null, transport_problems: problems };
   const envelope = buildEnvelope({ prompt, staged, runId, runtime });
   const { parsed } = await callOnce({ python, worker, envelope, environment, cwd, spawnFn });
   if (!parsed?.completed) return { raw: parsed?.final_response ?? null, model_id: null, model_version: null,
     transport_problems: ['worker_reported_no_completed_response'] };
-  // The identity must come from the worker. It is not derived from configuration, and it is not
-  // guessed from the model name.
-  const modelId = parsed.model_id ?? parsed.modelId ?? null;
-  const modelVersion = parsed.model_version ?? parsed.modelVersion ?? null;
+  // The identity must come from the worker, which reads it from what the model service reported.
+  // It is not derived from configuration, and it is not guessed from the model name.
+  const identity = parsed.model_identity ?? {};
+  const modelId = identity.model_id ?? parsed.model_id ?? parsed.modelId ?? null;
+  const modelVersion = identity.model_version ?? parsed.model_version ?? parsed.modelVersion ?? null;
   if (typeof modelId !== 'string' || !modelId || typeof modelVersion !== 'string' || !modelVersion) {
     return { raw: parsed.final_response ?? null, model_id: modelId, model_version: modelVersion,
-      transport_problems: ['worker_did_not_report_which_model_answered'] };
+      transport_problems: [parsed.model_identity_reason ?? 'worker_did_not_report_which_model_answered'] };
   }
   return { raw: parsed.final_response, model_id: modelId, model_version: modelVersion };
 };
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const runtime = readJson(path.join(ROOT, 'config', 'local.example.json')).runtime ?? {};
-  const problems = transportProblems(runtime);
+  const problems = transportProblems(runtime, process.env);
   console.log(JSON.stringify({ transport: 'cli', worker: WORKER, python: PYTHON,
     runtime_problems: problems, live_proof: false, makes_no_call: true }, null, 2));
   if (problems.length) {

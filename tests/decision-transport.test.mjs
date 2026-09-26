@@ -12,6 +12,7 @@ import { ENVELOPE_KEYS, buildEnvelope, childEnvironment, createTransport, transp
 
 const RUNTIME = { model: 'configured-model', provider: 'configured-provider', apiMode: 'chat',
   baseUrl: 'https://example.invalid/v1', maxOutputTokens: 2000, timeoutSeconds: 30 };
+const WITH_CREDENTIAL = { PARTNER_MODEL_API_KEY: 'key' };
 
 const stagedCase = {
   case_id: 'case-1',
@@ -37,10 +38,18 @@ const fakeSpawn = (reply) => () => {
   return child;
 };
 
-test('4D the transport refuses to call a runtime that does not describe a model', () => {
-  assert.deepEqual(transportProblems(RUNTIME), []);
-  for (const key of ['model', 'provider', 'baseUrl'])
-    assert.ok(transportProblems({ ...RUNTIME, [key]: '' }).includes(`runtime_config_is_missing_${key}`));
+test('4D the transport refuses to call a runtime that is not actually ready', () => {
+  assert.deepEqual(transportProblems(RUNTIME, WITH_CREDENTIAL), []);
+  for (const key of ['model', 'provider', 'baseUrl', 'apiMode'])
+    assert.ok(transportProblems({ ...RUNTIME, [key]: '' }, WITH_CREDENTIAL)
+      .includes(`runtime_config_is_missing_${key}`));
+  // The worker uses these directly, so they are checked with the same bounds as the config.
+  for (const [key, value] of [['maxOutputTokens', 4], ['maxOutputTokens', 999999],
+    ['timeoutSeconds', 1], ['timeoutSeconds', 99999], ['maxOutputTokens', 'many']])
+    assert.ok(transportProblems({ ...RUNTIME, [key]: value }, WITH_CREDENTIAL)
+      .some((problem) => problem.startsWith(`runtime_${key}_must_be`)), `${key}=${value}`);
+  // A runtime with no model credential would spend an attempt and answer nothing.
+  assert.ok(transportProblems(RUNTIME, {}).includes('no_model_credential_is_configured'));
 });
 
 test('4D the envelope matches what the real worker actually reads', () => {
@@ -70,9 +79,9 @@ test('4D credentials are passed through explicitly, never inherited wholesale', 
 });
 
 test('4D a worker that states which model answered is passed through verbatim', async () => {
-  const transport = createTransport({ runtime: RUNTIME, runId: 'run-1', spawnFn: fakeSpawn((envelope) => JSON.stringify({
-    completed: true, final_response: '{"answer":1}', model_id: 'served-model', model_version: 'served-2026-02',
-  })) });
+  const transport = createTransport({ runtime: RUNTIME, runId: 'run-1', environment: WITH_CREDENTIAL,
+    spawnFn: fakeSpawn(() => JSON.stringify({ completed: true, final_response: '{"answer":1}',
+      model_identity: { model_id: 'served-model', model_version: 'served-2026-02' } })) });
   const answer = await transport({ prompt: 'PROMPT', staged: stagedCase });
   assert.equal(answer.model_id, 'served-model');
   assert.equal(answer.model_version, 'served-2026-02');
@@ -82,25 +91,39 @@ test('4D a worker that states which model answered is passed through verbatim', 
 
 test('4D a worker that cannot say which model answered is refused, not annotated', async () => {
   // This is today's worker: it reports completion and usage, but not the served identity.
-  const transport = createTransport({ runtime: RUNTIME, runId: 'run-1', spawnFn: fakeSpawn(JSON.stringify({
-    completed: true, final_response: '{"answer":1}', usage: { input_tokens: 10, output_tokens: 5 },
-  })) });
+  const transport = createTransport({ runtime: RUNTIME, runId: 'run-1', environment: WITH_CREDENTIAL,
+    spawnFn: fakeSpawn(JSON.stringify({ completed: true, final_response: '{"answer":1}',
+      model_identity: null, model_identity_reason: 'runtime_did_not_expose_a_served_model_identity',
+      usage: { input_tokens: 10, output_tokens: 5 } })) });
   const answer = await transport({ prompt: 'PROMPT', staged: stagedCase });
-  assert.deepEqual(answer.transport_problems, ['worker_did_not_report_which_model_answered']);
+  assert.deepEqual(answer.transport_problems, ['runtime_did_not_expose_a_served_model_identity']);
   assert.equal(answer.model_id, null);
 });
 
 test('4D a failed or unreadable worker is reported, never guessed at', async () => {
-  const incomplete = createTransport({ runtime: RUNTIME, runId: 'run-1',
+  const incomplete = createTransport({ runtime: RUNTIME, runId: 'run-1', environment: WITH_CREDENTIAL,
     spawnFn: fakeSpawn(JSON.stringify({ completed: false, error: 'rate_limit' })) });
   assert.deepEqual((await incomplete({ prompt: 'P', staged: stagedCase })).transport_problems,
     ['worker_reported_no_completed_response']);
-  const noisy = createTransport({ runtime: RUNTIME, runId: 'run-1', spawnFn: fakeSpawn('not json at all') });
+  const noisy = createTransport({ runtime: RUNTIME, runId: 'run-1', environment: WITH_CREDENTIAL,
+    spawnFn: fakeSpawn('not json at all') });
   await assert.rejects(noisy({ prompt: 'P', staged: stagedCase }), { message: 'worker_output_is_not_json' });
-  const unconfigured = createTransport({ runtime: {}, spawnFn: fakeSpawn('{}') });
+  const unconfigured = createTransport({ runtime: {}, environment: WITH_CREDENTIAL, spawnFn: fakeSpawn('{}') });
   const answer = await unconfigured({ prompt: 'P', staged: stagedCase });
   assert.ok(answer.transport_problems.includes('runtime_config_is_missing_model'));
   assert.equal(answer.raw, null);
+});
+
+test('4D the worker reports a served model identity and never one taken from configuration', () => {
+  const worker = fs.readFileSync(path.join(ROOT, 'scripts', 'situation_router_worker.py'), 'utf8');
+  assert.match(worker, /def served_identity/);
+  assert.match(worker, /"model_identity": identity/);
+  // The identity must be read from the result or the agent, never from the configured model name.
+  const body = worker.slice(worker.indexOf('def served_identity'), worker.indexOf('def main'));
+  assert.ok(!body.includes('envelope'), 'the identity may not come from the envelope configuration');
+  assert.ok(!body.includes('cfg'), 'the identity may not come from cfg');
+  const py = fs.readFileSync(path.join(ROOT, 'scripts', 'situation_router_worker.py'), 'utf8');
+  assert.ok(!/model_identity.*envelope\["model"\]/.test(py), 'no fallback to the configured model');
 });
 
 test('4D the transport reuses the existing worker and adds no second one', () => {

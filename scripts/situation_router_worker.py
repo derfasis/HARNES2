@@ -79,6 +79,33 @@ def worker_failure_cause(result):
     return None
 
 
+def served_identity(result, agent):
+    """What the model service actually said it served.
+
+    Never derived from the configured model name: a corpus attributed to a model it did not use is
+    worse than no corpus. Returns (identity, reason) where identity is None when the runtime
+    exposes nothing usable.
+    """
+    for source in (result, agent):
+        for key in ("served_model", "model_id", "model"):
+            value = getattr(source, key, None) if not isinstance(source, dict) else source.get(key)
+            if isinstance(value, str) and value.strip():
+                version = None
+                for version_key in ("model_version", "version"):
+                    candidate = getattr(source, version_key, None) if not isinstance(source, dict) else source.get(version_key)
+                    if isinstance(candidate, str) and candidate.strip():
+                        version = candidate.strip()
+                        break
+                return {"model_id": value.strip(), "model_version": version}, None
+        response = getattr(source, "last_response", None) or (source.get("last_response") if isinstance(source, dict) else None)
+        if isinstance(response, dict):
+            for key in ("model", "model_id", "served_model"):
+                value = response.get(key)
+                if isinstance(value, str) and value.strip():
+                    return {"model_id": value.strip(), "model_version": response.get("version")}, None
+    return None, "runtime_did_not_expose_a_served_model_identity"
+
+
 def main():
     envelope = json.load(sys.stdin)
     run_id = str(envelope["run_id"])
@@ -133,9 +160,12 @@ def main():
             message["content"] for message in raw_messages
             if isinstance(message, dict) and message.get("role") == "assistant" and message.get("content")
         ]
+        identity, identity_reason = served_identity(result, agent)
         output = {
             "schema_version": 1,
             "situation_id": envelope["situation_id"],
+            "model_identity": identity,
+            "model_identity_reason": identity_reason,
             "run_id": run_id,
             "completed": completed,
             "final_response": (result.get("final_response") or "") if completed else "",

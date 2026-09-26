@@ -140,8 +140,12 @@ generated.
 ## The transport
 
 `generation/transport.mjs` is a thin adapter over the **existing** isolated worker
-(`scripts/situation_router_worker.py`). It adds no model logic and no second worker. It builds the
-envelope — the frozen prompt plus the staged case, with `tools: []`, because this evaluation has no
+(`scripts/situation_router_worker.py`). It adds no model logic and no second worker. The runtime itself is checked before anything is started: model, provider, base URL, api mode, the
+output-token and timeout bounds the worker actually uses, and the presence of a model credential.
+An obviously unready runtime must not cost an attempt from the call ledger.
+
+It builds the
+envelope — the frozen prompt as the worker's system prompt plus the staged case, with `tools: []`, because this evaluation has no
 business surface and a case can never reach a person — and passes model credentials through
 explicitly rather than inheriting the ambient Telegram, Codex, or Hermes environment.
 
