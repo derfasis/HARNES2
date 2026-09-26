@@ -27,9 +27,15 @@ export class Scheduler {
             // cursor it read at and the checkpoint's own state, and nothing else: no message
             // text, no provider payload, no stack, no credentials.
             sourceReadFailed=true;
-            const state=sourceCheckpoint(this.service, sourceId);
-            sourceReadFailure={ source_id:sourceId,
-              code:String(error?.code ?? 'UNCLASSIFIED').slice(0,80),
+            // Reading the checkpoint can itself fail on a corrupt row, and telemetry that throws
+            // while reporting a failure would abort the very tick it is reporting about.
+            let state=null;
+            try { state=sourceCheckpoint(this.service, sourceId); } catch { state=null; }
+            const raw=String(error?.code ?? '');
+            // Only something shaped like a code is recorded. Anything else could be a provider
+            // message carrying payload, and this lands in durable storage.
+            const code=/^[A-Za-z0-9_.:-]{1,80}$/.test(raw) ? raw : 'UNCLASSIFIED';
+            sourceReadFailure={ source_id:sourceId, code,
               checkpoint_pts:state?.pts ?? null, phase:state?.phase ?? null, reason:state?.reason ?? null };
             try { await this.service.exclusive(() => this.service.store.transaction(
               () => this.service.store.event(cfg.partnerId, null, 'source.telegram.poll.failed', 'system', sourceReadFailure))); }
