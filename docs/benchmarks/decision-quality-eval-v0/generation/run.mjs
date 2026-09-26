@@ -50,11 +50,25 @@ export const readArtefacts = (directory = OUTPUTS_DIR) => {
 // A call ledger that survives a run. A ceiling over stored outputs is not a ceiling over calls:
 // a refused output stores nothing, and an uncounted rerun would quietly double the spend.
 export const LEDGER_FILE = 'attempts.json';
+// A ledger that cannot be read is not an empty ledger. Failing open here would hand the
+// evaluation a fresh budget every time the file is damaged, which is the opposite of a ceiling.
 export const readLedger = (directory = OUTPUTS_DIR) => {
   const file = path.join(directory, LEDGER_FILE);
   if (!fs.existsSync(file)) return { calls: 0, by_case: {} };
-  try { return JSON.parse(fs.readFileSync(file, 'utf8')); }
-  catch { return { calls: 0, by_case: {} }; }
+  let parsed;
+  try { parsed = JSON.parse(fs.readFileSync(file, 'utf8')); }
+  catch { return { corrupted: 'ledger_is_not_json' }; }
+  const problems = [];
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) problems.push('ledger_must_be_an_object');
+  else {
+    if (!Number.isInteger(parsed.calls) || parsed.calls < 0 || parsed.calls > MAX_CALLS)
+      problems.push('ledger_calls_must_be_an_integer_within_the_ceiling');
+    if (!parsed.by_case || typeof parsed.by_case !== 'object' || Array.isArray(parsed.by_case))
+      problems.push('ledger_by_case_must_be_an_object');
+    else for (const [key, value] of Object.entries(parsed.by_case))
+      if (!Number.isInteger(value) || value < 0) problems.push(`ledger_by_case_${key}_must_be_a_count`);
+  }
+  return problems.length ? { corrupted: problems[0] } : parsed;
 };
 export const writeLedger = (directory, ledger) => {
   fs.mkdirSync(directory, { recursive: true });
@@ -75,6 +89,11 @@ export async function runGeneration({
     planned: 0, generated: 0, refused: 0, results: [] };
   if (!effectiveGate.allowed) return { exit: EXIT.refused, summary, reasons: effectiveGate.reasons };
   if (effectiveProblems.length > 0) return { exit: EXIT.invalid, summary, problems: effectiveProblems };
+  if (effectiveGate.allowed && !effectiveProblems.length) {
+    const early = ledger ?? readLedger(directory);
+    if (early.corrupted) return { exit: EXIT.invalid, summary,
+      problems: [{ at: LEDGER_FILE, rule: `corrupted_ledger_never_restores_the_budget:${early.corrupted}` }] };
+  }
   const completed = done ?? completedOutputs(input, readArtefacts(directory));
   const attempts = ledger ?? readLedger(directory);
   summary.calls_made = 0;
@@ -91,20 +110,31 @@ export async function runGeneration({
   // nothing is stored yet, by the first accepted call. A later case from another model is refused
   // and written nowhere, because a corpus that mixes models cannot be attributed to any of them.
   const frozen = completed.size > 0 ? [...completed.values()][0] : null;
-  // The budget counts every call the runtime was asked to make, refused ones included.
+  // The budget counts every call the runtime was asked to make, refused ones included, and the
+  // plan is trimmed to what is left: a plan one longer than the remaining budget must not overshoot.
   if (attempts.calls >= MAX_CALLS) return { exit: EXIT.refused, summary,
     reasons: ['model_call_ceiling_reached_no_further_calls_will_be_made'] };
-  const todo = plan(input, completed);
+  const todo = plan(input, completed).slice(0, Math.max(0, MAX_CALLS - attempts.calls));
   summary.planned = todo.length;
   let runIdentity = frozen ?? null;
   for (const item of todo) {
     const staged = input.cases.find((entry) => entry.case_id === item.case_id);
+    // The attempt is persisted before the call, so a transport that dies mid-flight still costs.
     attempts.calls += 1;
     attempts.by_case[item.case_id] = (attempts.by_case[item.case_id] ?? 0) + 1;
     summary.calls_made += 1;
-    const response = await callModel({ prompt: fs.readFileSync(path.join(HERE, 'prompt.md'), 'utf8'),
-      case: item, staged });
     writeLedger(directory, attempts);
+    let response;
+    try {
+      response = await callModel({ prompt: fs.readFileSync(path.join(HERE, 'prompt.md'), 'utf8'),
+        case: item, staged });
+    } catch (error) {
+      // A transport that throws is a refusal of this case, not a reason to lose the whole run.
+      summary.refused += 1;
+      summary.results.push({ case_id: item.case_id, accepted: false,
+        problems: [`model_transport_call_failed:${error?.message ?? 'unknown'}`] });
+      continue;
+    }
     const identity = response && typeof response === 'object' && !Array.isArray(response) ? response : {};
     const { parsed, problems: parseProblems } = parseRaw(identity.raw);
     const failures = [...identityProblems(identity), ...parseProblems,

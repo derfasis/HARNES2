@@ -413,3 +413,53 @@ test('4D a broken corpus is refused before any stored artefact is even looked at
   assert.equal(calls, 0, 'nothing is called, and nothing throws');
   fs.rmSync(directory, { recursive: true, force: true });
 });
+
+test('4D the budget is checked per call, so a plan one longer than the remainder cannot overshoot', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harnes2-eval-overshoot-'));
+  const input = stagedInput([stagedCase({ case_id: 'case-1' }), stagedCase({ case_id: 'case-2' })]);
+  const store = fileStore(directory);
+  fs.writeFileSync(path.join(directory, 'attempts.json'),
+    JSON.stringify({ calls: MAX_CALLS - 1, by_case: { 'case-1': MAX_CALLS - 1 } }));
+  let calls = 0;
+  const result = await runGeneration({ input, environment: OPEN, directory, store,
+    callModel: async ({ case: item }) => { calls += 1; return response({ raw: JSON.stringify(caseOutput(item)) }); } });
+  assert.equal(calls, 1, 'only one call fits in the remaining budget');
+  assert.equal(result.summary.planned, 1, 'the plan is trimmed to what the budget allows');
+  assert.equal(readLedger(directory).calls, MAX_CALLS, 'the budget is now exactly spent');
+  fs.rmSync(directory, { recursive: true, force: true });
+});
+
+test('4D a transport that throws still costs a call, and does not lose the run', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harnes2-eval-throw-'));
+  const input = stagedInput([stagedCase({ case_id: 'case-1' }), stagedCase({ case_id: 'case-2' })]);
+  const result = await runGeneration({ input, environment: OPEN, directory,
+    callModel: async ({ case: item }) => {
+      if (item.case_id === 'case-1') throw new Error('proxy unreachable');
+      return response({ raw: JSON.stringify(caseOutput(item)) });
+    } });
+  assert.equal(result.summary.generated, 1, 'the second case still ran');
+  assert.equal(result.summary.refused, 1);
+  assert.ok(result.summary.results[0].problems[0].startsWith('model_transport_call_failed:'));
+  const ledger = readLedger(directory);
+  assert.equal(ledger.calls, 2, 'the thrown attempt was persisted before the call');
+  assert.equal(ledger.by_case['case-1'], 1);
+  fs.rmSync(directory, { recursive: true, force: true });
+});
+
+test('4D a corrupted ledger is a structural refusal, never a fresh budget', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harnes2-eval-corrupt-'));
+  const ledgerPath = path.join(directory, 'attempts.json');
+  for (const broken of ['{ not json', JSON.stringify({ calls: 'many', by_case: {} }),
+    JSON.stringify({ calls: MAX_CALLS + 5, by_case: {} }), JSON.stringify({ calls: 1, by_case: 'nope' }),
+    JSON.stringify({ calls: 1, by_case: { 'case-1': -3 } }), JSON.stringify([])]) {
+    fs.writeFileSync(ledgerPath, broken);
+    assert.ok(readLedger(directory).corrupted, `${broken} must be refused`);
+    let calls = 0;
+    const result = await runGeneration({ input: stagedInput(), environment: OPEN, directory,
+      store: fileStore(directory), callModel: async () => { calls += 1; return response(); } });
+    assert.equal(result.exit, EXIT.invalid, broken);
+    assert.ok(result.problems[0].rule.includes('corrupted_ledger_never_restores_the_budget'));
+    assert.equal(calls, 0, 'a damaged ledger must not buy another 24 calls');
+  }
+  fs.rmSync(directory, { recursive: true, force: true });
+});
