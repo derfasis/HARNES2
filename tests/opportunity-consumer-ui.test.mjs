@@ -141,7 +141,10 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // Hermes empty-response ladder can actually re-enter the loop after an empty response.
     "business/runtime.mjs": "4ec5cbf6c587e1bae0382785a90d240c9fb1718e",
     "business/channels/telegram.mjs": "1b4de6dc8c8465bed237375bd6295ab4dbfa2eda",
-    "business/channels/telegram-mtproto.mjs": "e30171ab2a8bf83ba5cbc63de22c025288f99e01",
+    // Reviewed R8 extension: the channel now bootstraps read-only public sources over the client
+    // it already owns, and releases them without disconnecting that client. No send path changed;
+    // sendApproved still requires liveSending and is untouched.
+    "business/channels/telegram-mtproto.mjs": "58b3321cdd0b6cbd66d01902a3d312953e00c036",
     "benchmarks/situation-router/README.md": "0da57bf3fcb53bbec5713f6a44c48654b16270b8",
     "benchmarks/situation-router/control-v1.json": "2c6265460c6ae6cc1de9b25fa978ba25d0e66236",
     "benchmarks/situation-router/synthetic/case-01-ignore.json": "f9fe79537ac036e32bbb547961901190b3f08007",

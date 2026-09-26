@@ -69,7 +69,11 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
   ensure(service.partner(), 'partnerId не совпадает с профилем', 500);
   const operatorToken = randomBytes(32).toString('hex'), mcpToken = randomBytes(32).toString('hex'), runTokens = new Map();
   const telegram = config.telegram.transport === 'mtproto' ? new MtprotoTelegramChannel(service) : new TelegramChannel(service);
-  const runtime = new HermesAdapter(service,runTokens), scheduler = new Scheduler(service,runtime,telegram);
+  const runtime = new HermesAdapter(service,runTokens);
+  // The scheduler polls whatever readers the channel established. Without this the list is empty
+  // and the automatic pipeline never reads, whatever the configuration says.
+  const scheduler = new Scheduler(service,runtime,telegram,[]);
+  telegram.onSourcesReady = readers => { scheduler.sourceReaders = readers ?? []; };
   let shuttingDown = false;
   const server = http.createServer(async (req,res) => {
     const send = (code,value) => { res.writeHead(code, {'Content-Type':'application/json; charset=utf-8'}); res.end(JSON.stringify(value)); };

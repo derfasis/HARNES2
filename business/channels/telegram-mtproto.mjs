@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import { createRequire } from 'node:module';
 import { id } from '../store.mjs';
 import { AppError, ensure, now } from '../errors.mjs';
+import { TelegramPublicSourceReader } from '../sources/telegram-public-reader.mjs';
+import { GramjsSourceRpc } from '../sources/telegram-gramjs-rpc.mjs';
 
 const require = createRequire(import.meta.url);
 const { TelegramClient } = require('telegram');
@@ -19,6 +21,8 @@ export class MtprotoTelegramChannel {
     this.lastError = null;
     this.lastEvent = null;
     this.peerEntities = new Map();
+    this.sourceReaders = [];
+    this.lastSourceError = null;
   }
 
   sessionString() {
@@ -74,6 +78,34 @@ export class MtprotoTelegramChannel {
     this.client.addEventHandler(event => this.handleIncoming(event).catch(error => { this.lastError = error.message; }), new NewMessage({ incoming: true }));
     this.connected = true;
     this.lastError = null;
+    // Read-only sources borrow this connection rather than opening their own: a second
+    // TelegramClient would be a second session, and the channel stays the connection's owner.
+    await this.startSourceReaders().catch(error => { this.lastSourceError = error.message; });
+  }
+
+  // Lifecycle is fixed: connected, account verified, peer resolved, reader constructed, baselined,
+  // then handed to the scheduler. A source that cannot be started never blocks the connection.
+  async startSourceReaders() {
+    const policies = this.service.config.opportunity?.telegramSources ?? [];
+    this.sourceReaders = [];
+    for (const policy of policies) {
+      if (policy.accountId !== this.accountId) {
+        this.lastSourceError = `source ${policy.sourceId} belongs to another account`;
+        continue;
+      }
+      const rpc = new GramjsSourceRpc(this.client, this.service, policy.sourceId);
+      const peer = await rpc.resolveInputChannel(policy.channelId);
+      const reader = new TelegramPublicSourceReader(this.service, policy.sourceId, rpc, peer, null, { joinedPeer: true });
+      await reader.bootstrap();
+      this.sourceReaders.push({ sourceId: policy.sourceId, transport: reader });
+    }
+    if (typeof this.onSourcesReady === 'function') this.onSourcesReady(this.sourceReaders);
+  }
+
+  // Releasing a reader must not disconnect the shared client; the channel owns the connection.
+  async stopSourceReaders() {
+    for (const entry of this.sourceReaders ?? []) await entry.transport.close().catch(() => {});
+    this.sourceReaders = [];
   }
 
   async handleIncoming(event) {
