@@ -7,12 +7,11 @@
 import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
-const { NewMessage } = require('telegram/events/NewMessage');
 const { Api } = require('telegram');
 const bigInt = require('big-integer');
 
 export class GramjsSourceRpc {
-  #client; #service; #sourceId; #handler = null; #closed = false;
+  #client; #service; #sourceId; #handler = null; #builder = null; #closed = false;
 
   constructor(client, service, sourceId) {
     if (!client || typeof client.invoke !== 'function' || typeof client.addEventHandler !== 'function')
@@ -25,15 +24,24 @@ export class GramjsSourceRpc {
   // Raw updates, exactly as the SDK delivers them. Filtering is the reader's job: it is written
   // against these very classes and decides what a permitted delta is.
   //
+  // A builder that returns the update untouched is required. The SDK's own NewMessage builder
+  // wraps the update in an event, and the reader is written against Api.Updates, Api.UpdateShort
+  // and the Api.Update* family, so a wrapped event would silently never match. Polling would still
+  // work, which is what makes this the kind of break a test cannot see.
+  //
   // There is deliberately no fault subscription. The SDK's connection-state event is not one of
   // its update builders, and registering it crashes the dispatch loop; the reader already treats
   // a failing read as a transport fault and invalidates itself, which is the same outcome.
   subscribe(onUpdate) {
-    if (this.#handler) return;
+    if (this.#builder) return;
+    this.#builder = {
+      resolved: true,
+      async resolve() {},
+      async filter(update) { return update; },
+      build(update) { return update; },
+    };
     this.#handler = event => { if (!this.#closed) onUpdate(event); };
-    // nofilter: service messages and non-message updates must reach the reader too, because it is
-    // the reader that knows which of them carry a cursor.
-    this.#client.addEventHandler(this.#handler, new NewMessage({ incoming: true, nofilter: true }));
+    this.#client.addEventHandler(this.#handler, this.#builder);
   }
 
   async invokeRead(request) { return this.#client.invoke(request); }
