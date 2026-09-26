@@ -46,6 +46,17 @@ export function validateTelegramSources(config) {
   }
   return sources;
 }
+// The startup half of the automatic boundary. It must agree with automaticBoundary in
+// source-ingestion.mjs: the loader refuses to start on a combination the pipeline would have
+// accepted. A read-only reader may run with automatic on, because it is how permitted material
+// reaches the pipeline and it cannot send. Agent runs and live sending are still refused, here at
+// startup, before anything connects.
+export function checkAutomaticPrerequisite(config) {
+  if (config.opportunity?.automatic === true
+    && (config.runtime.enabled !== false || config.telegram.liveSending !== false))
+    throw new Error('Automatic opportunity prerequisite requires the runtime disabled and live sending off.');
+  return config;
+}
 export function loadConfig() {
   const file = path.join(ROOT, 'config/local.json');
   const cfg = merge(readJson(path.join(ROOT, 'config/default.json')), fs.existsSync(file) ? readJson(file) : {});
@@ -75,8 +86,11 @@ export function loadConfig() {
   if (typeof cfg.opportunity?.automatic !== 'boolean') throw new Error('Invalid opportunity.automatic');
   validateAllowedSourceRefs(cfg);
   validateTelegramSources(cfg);
-  if (cfg.opportunity.automatic && (cfg.runtime.enabled !== false || cfg.telegram.enabled !== false || cfg.telegram.liveSending !== false))
-    throw new Error('Automatic opportunity prerequisite requires runtime and Telegram disabled.');
+  // This must agree with automaticBoundary, or the application refuses to start on a combination
+  // the pipeline would have accepted. A read-only reader may run with automatic on: it is how
+  // permitted material reaches the pipeline and it cannot send. Agent runs and live sending are
+  // still refused here, at startup, before anything connects.
+  checkAutomaticPrerequisite(cfg);
   return cfg;
 }
 export function runtimeReadiness(cfg, { decision = false } = {}) {

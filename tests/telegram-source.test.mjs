@@ -192,8 +192,11 @@ test('authorization revocation/account change blocks both intake and prior evide
   assert.deepEqual(sourceFreshnessReasons(h.service,state),['SOURCE_TRANSPORT_NOT_READY']);await assert.rejects(h.apply(empty(11)),/TELEGRAM_SOURCE_POLICY_CHANGED/);
   h.config.opportunity.telegramSources=[];assert.deepEqual(sourceFreshnessReasons(h.service,state),['SOURCE_TRANSPORT_POLICY_UNAVAILABLE']);
 });
-test('legacy sends and normal runtime cannot be enabled with intake',async t=>{
-  const h=await harness(t);for(const [group,key] of [['telegram','enabled'],['telegram','liveSending'],['runtime','enabled']]){
+test('live sends and normal runtime cannot be enabled with intake, a read-only reader can',async t=>{
+  const h=await harness(t);
+  // The reader is the intake path itself, so telegram.enabled alone must not close the boundary.
+  h.config.telegram.enabled=true;await assert.doesNotReject(h.apply(page()));h.config.telegram.enabled=false;
+  for(const [group,key] of [['telegram','liveSending'],['runtime','enabled']]){
     h.config[group][key]=true;await assert.rejects(h.apply(page()),/READ_ONLY_BOUNDARY_REQUIRED/);h.config[group][key]=false;
   }noEffects(h);
 });
