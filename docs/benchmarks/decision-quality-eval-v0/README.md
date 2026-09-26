@@ -159,6 +159,39 @@ readiness, wires the transport, and only then runs generation, so a caller canno
 into `runGeneration()` and quietly skip the preflight that protects the call budget. Either way the
 run refuses until the owner authorises model calls.
 
+## Assembly
+
+`generation/assemble.mjs` is the end of the pipeline, and it is deliberately split in two:
+
+- `assembleCorpus({ input, artefacts, reviews, adjudications })` produces the finished
+  `corpus.json`. It refuses rather than producing a corpus that could not be defended.
+- `deriveReport(corpus)` produces `report.json` **from the corpus alone**. A report is never built
+  from reviews or generated output directly, because two sources of truth drift apart.
+
+The assembler refuses when: there are not exactly two reviews; the two reviewers are the same
+person; a reviewer's identity is the model or carries a machine kind; a review does not declare the
+reviewer protocol; an artefact came from another prompt or answers another case; the artefacts
+disagree about the model; the staged input never named the prompt the corpus would claim; or an axis
+is disputed without an adjudicator. An adjudicator may resolve a disputed axis and may not touch an
+axis the two reviewers already agreed on.
+
+The assembly validates the staged input before projecting anything, so a broken case cannot be
+projected away and slip past the final validator. Generation identity comes from an artefact of a
+case that actually survived, never from a stray file that happens to be first in the directory. And
+a finished evaluation is a claim about real material: it needs at least one case, and every case
+must be `anonymized_real` with a provenance claim — the rule lives in the finished contract, not
+only in the cross-check, so no code path can produce a fixture evaluation wearing a real label.
+
+A non-empty generation input must also name its prompt **before** anything is generated, so real
+calls are never spent against a corpus that could not be closed afterwards.
+
+The adjudicator resolves axes and explains why; it carries no failure tags, because those belong to
+the two human reviewers and widening them would put a third party's vocabulary into the case union.
+
+A model may not be one of the two reviewers, and the adjudicator is held to the same rule. The
+assembler cannot *prove* a person is a person — it can only refuse the identities it can see are a
+machine, and that limit is written down here rather than implied away.
+
 ## Running the validator
 
 ```
