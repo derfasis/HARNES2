@@ -175,9 +175,19 @@ disagree about the model; the staged input never named the prompt the corpus wou
 is disputed without an adjudicator. An adjudicator may resolve a disputed axis and may not touch an
 axis the two reviewers already agreed on.
 
-A model may not be one of the two reviewers. The assembler cannot *prove* a person is a person — it
-can only refuse the identities it can see are a machine, and that limit is written down here rather
-than implied away.
+The assembly validates the staged input before projecting anything, so a broken case cannot be
+projected away and slip past the final validator. Generation identity comes from an artefact of a
+case that actually survived, never from a stray file that happens to be first in the directory. And
+a finished evaluation is a claim about real material: it needs at least one case, and every case
+must be `anonymized_real` with a provenance claim — the rule lives in the finished contract, not
+only in the cross-check, so no code path can produce a fixture evaluation wearing a real label.
+
+A non-empty generation input must also name its prompt **before** anything is generated, so real
+calls are never spent against a corpus that could not be closed afterwards.
+
+A model may not be one of the two reviewers, and the adjudicator is held to the same rule. The
+assembler cannot *prove* a person is a person — it can only refuse the identities it can see are a
+machine, and that limit is written down here rather than implied away.
 
 ## Running the validator
 

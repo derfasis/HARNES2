@@ -140,6 +140,11 @@ export function checkPromptInputAgreement(prompt = fs.readFileSync(PROMPT_PATH, 
 
 export function preflight(input = loadInput()) {
   const problems = [];
+  // A prompt reference costs nothing to supply and cannot be invented later, so a non-empty corpus
+  // must name it now — otherwise real calls would be spent against a corpus that cannot be closed.
+  if (Array.isArray(input?.cases) && input.cases.length > 0
+    && (typeof input.prompt_ref !== 'string' || !input.prompt_ref))
+    problems.push('non_empty_generation_input_must_name_its_prompt');
   if (!validateInputShape(input)) {
     for (const error of validateInputShape.errors ?? [])
       problems.push(`schema:${error.keyword}${error.instancePath || ''}`);

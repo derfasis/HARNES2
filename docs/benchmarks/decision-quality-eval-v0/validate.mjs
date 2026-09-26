@@ -165,6 +165,10 @@ export function validateCorpus(corpus) {
   if (!PROOF_LEVELS.includes(corpus.proof_level)) problems.push({ at: 'corpus', rule: 'corpus_proof_level_known' });
   if (corpus.live_proof !== false) problems.push({ at: 'corpus', rule: 'live_proof_must_be_false' });
   if (!Array.isArray(corpus.cases)) problems.push({ at: 'corpus', rule: 'cases_must_be_array' });
+  else if (corpus?.proof_level === 'offline_human_eval' && corpus.cases.some((item) =>
+    item?.provenance?.kind !== 'anonymized_real'
+    || !/^prov_[A-Za-z0-9._-]+$/.test(item.provenance.provenance_claim_ref ?? '')))
+    problems.push({ at: 'corpus', rule: 'offline_eval_cases_must_be_anonymized_real_with_a_provenance_claim' });
   else {
     const seen = new Set();
     for (const item of corpus.cases) {

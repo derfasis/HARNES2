@@ -7,14 +7,22 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { AXES, BINDINGS, contractCarries, outputProblems, parseRaw, promptDigest, stagedCaseDigest }
-  from './staging.mjs';
+import { AXES, BINDINGS, contractCarries, outputProblems, parseRaw, preflight, promptDigest,
+  stagedCaseDigest } from './staging.mjs';
 import { validateCorpus, validateEvaluation, validateReport } from '../validate.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const REVIEW_PROTOCOL = 'decision-quality-eval-v0/reviewer-protocol';
 
 const own = (value, keys) => keys.every((key) => Object.prototype.hasOwnProperty.call(value ?? {}, key));
+const FAILURE_TAGS = ['invented_fact', 'unsupported_permission', 'missed_opportunity', 'overclaim',
+  'wrong_intent', 'premature_action'];
+// A tag list is checked as a list before anything is spread, so a malformed one fails closed
+// instead of throwing somewhere deep in the projection.
+const tagProblems = (value, at) => {
+  if (!Array.isArray(value)) return [`${at}:failure_tags_must_be_an_array`];
+  return value.filter((tag) => !FAILURE_TAGS.includes(tag)).map((tag) => `${at}:failure_tag_unknown:${tag}`);
+};
 const uniqueTags = (...lists) => [...new Set(lists.flatMap((list) => Array.isArray(list) ? list : []))].sort();
 
 // Every artefact must be ours, from this prompt, for this exact case, and still valid. Otherwise
@@ -58,6 +66,13 @@ export function assembleCorpus({ input, artefacts = {}, reviews = {}, adjudicati
   const cases = [];
   const digest = promptDigest();
   const identities = new Map();
+  const accepted = new Map();
+
+  // The staged input is validated first. Otherwise a broken case can be projected away and the
+  // final validator would never see what was wrong.
+  // The generation preflight reports plain rules; the finished validators report objects.
+  problems.push(...preflight(input).map((entry) => `input:${typeof entry === 'string' ? entry : entry.rule}`));
+  if (problems.length) return { corpus: null, problems };
 
   for (const staged of input?.cases ?? []) {
     const caseId = staged.case_id;
@@ -78,6 +93,7 @@ export function assembleCorpus({ input, artefacts = {}, reviews = {}, adjudicati
     for (const review of pair) {
       if (review?.protocol !== protocol)
         problems.push(`${caseId}:reviews_must_declare_the_reviewer_protocol`);
+      problems.push(...tagProblems(review?.failure_tags, `${caseId}:review`));
       if (!own(review?.axes ?? {}, AXES)) problems.push(`${caseId}:review_is_missing_axes`);
       for (const axis of AXES) {
         const score = review?.axes?.[axis];
@@ -95,11 +111,18 @@ export function assembleCorpus({ input, artefacts = {}, reviews = {}, adjudicati
         problems.push(`${caseId}:adjudication_reviewer_is_required`);
       else if (pair.some((review) => review.reviewer === adjudication.reviewer))
         problems.push(`${caseId}:adjudicator_must_be_a_third_reviewer`);
+      // The third person is a person too: the same machine-identity rule applies.
+      else if (adjudication.reviewer === artefact.model_id || adjudication.kind === 'model'
+        || adjudication.kind === 'agent')
+        problems.push(`${caseId}:a_model_may_not_stand_in_for_a_human_reviewer`);
       if (typeof adjudication.reason !== 'string' || !adjudication.reason)
         problems.push(`${caseId}:adjudication_reason_is_required`);
+      problems.push(...tagProblems(adjudication.failure_tags, `${caseId}:adjudication`));
     }
 
     identities.set(`${artefact.model_id}@${artefact.model_version}`, true);
+    // Only an artefact of a case that actually survived may describe the evaluation.
+    accepted.set(caseId, artefact);
     const [first, second] = pair;
     cases.push({
       case_id: caseId,
@@ -117,7 +140,8 @@ export function assembleCorpus({ input, artefacts = {}, reviews = {}, adjudicati
         { reviewer: second.reviewer, axes: second.axes,
           failure_tags: [...(second.failure_tags ?? [])].sort() },
       ],
-      ...(adjudication ? { adjudication } : {}),
+      ...(adjudication ? { adjudication: { reviewer: adjudication.reviewer,
+        final_axes: adjudication.final_axes, reason: adjudication.reason } } : {}),
       final_axes: published.axes,
       failure_tags: uniqueTags(first.failure_tags, second.failure_tags,
         adjudication?.failure_tags),
@@ -125,12 +149,23 @@ export function assembleCorpus({ input, artefacts = {}, reviews = {}, adjudicati
   }
 
   if (identities.size > 1) problems.push(`the_evaluation_spans_several_models:${[...identities.keys()].join(',')}`);
+  // A finished offline evaluation is a claim about real material, so it needs at least one case
+  // and every one of them must be real and provenanced.
+  if (accepted.size === 0) problems.push('a_finished_evaluation_needs_at_least_one_case');
+  for (const [caseId, artefactForCase] of accepted) {
+    const provenance = input.cases.find((item) => item.case_id === caseId)?.provenance;
+    if (provenance?.kind !== 'anonymized_real')
+      problems.push(`${caseId}:a_finished_evaluation_may_only_contain_anonymized_real_cases`);
+    else if (!/^prov_[A-Za-z0-9._-]+$/.test(provenance.provenance_claim_ref ?? ''))
+      problems.push(`${caseId}:a_finished_evaluation_case_requires_a_provenance_claim`);
+  }
   const promptRef = input?.prompt_ref;
   if (typeof promptRef !== 'string' || !promptRef)
     problems.push('the_staged_input_never_named_the_prompt_the_corpus_would_claim');
   if (problems.length) return { corpus: null, problems };
 
-  const first = Object.entries(artefacts)[0]?.[1] ?? {};
+  // The identity comes from an artefact of a case that survived, never from a stray file.
+  const first = accepted.values().next().value;
   const corpus = {
     corpus_id: 'decision-quality-eval-v0',
     proof_level: 'offline_human_eval',
@@ -139,12 +174,8 @@ export function assembleCorpus({ input, artefacts = {}, reviews = {}, adjudicati
     // the corpus cannot claim a prompt identity, so nothing is produced.
     generation: { model_id: first.model_id, model_version: first.model_version,
       prompt_ref: promptRef, prompt_digest: digest },
-    cases: cases.map((item) => {
-      // The shape the 4D0 corpus schema demands, rebuilt from what we know.
-      const artefact = artefacts[item.case_id];
-      const { parsed } = parseRaw(artefact.raw);
-      return { ...item, model_output: parsed };
-    }),
+    cases: cases.map((item) => ({ ...item,
+      model_output: JSON.parse(accepted.get(item.case_id).raw) })),
   };
   // The corpus must satisfy the finished contract before anything is called finished.
   const corpusProblems = validateCorpus(corpus);
@@ -154,8 +185,11 @@ export function assembleCorpus({ input, artefacts = {}, reviews = {}, adjudicati
 
 // The report is derived from the corpus and nothing else.
 export function deriveReport(corpus) {
-  const problems = [];
   if (!corpus) return { report: null, problems: ['a_report_needs_a_corpus'] };
+  // The corpus is validated before anything is read out of it: a malformed corpus must produce a
+  // refusal, not a report built from fields that were never there.
+  const corpusProblems = validateCorpus(corpus);
+  if (corpusProblems.length) return { report: null, problems: corpusProblems };
   const caseResults = (corpus.cases ?? []).map((item) => ({
     case_id: item.case_id,
     reviews: item.scores.map((score) => ({ reviewer: score.reviewer, axes: score.axes,

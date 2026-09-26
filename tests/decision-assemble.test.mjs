@@ -63,7 +63,10 @@ test('4D a finished corpus is assembled from staged input, a valid artefact and 
     artefacts: { 'case-1': artefact(staged) },
     reviews: { 'case-1': [humanReview('anna'), humanReview('boris')] } });
   assert.equal(unnamed.corpus, null);
-  assert.ok(unnamed.problems.includes('the_staged_input_never_named_the_prompt_the_corpus_would_claim'));
+  // The guard fires earlier than assembly: the generation preflight refuses an unnamed prompt.
+  assert.ok(unnamed.problems.includes('input:non_empty_generation_input_must_name_its_prompt'));
+  assert.ok(unnamed.problems.every((rule) => !rule.includes('a_finished_evaluation_needs_at_least_one_case')),
+    'the input is refused before any case is projected');
 });
 
 test('4D a corpus that could not be defended is refused, not produced', () => {
@@ -103,17 +106,29 @@ test('4D disagreement needs the third person, and they may not touch an agreed a
 
   assert.ok(build({}).problems.some((rule) => rule.includes('disputed_axis_grounding_needs_adjudication')));
   const resolved = build({ adjudications: { 'case-1': { reviewer: 'carol', reason: 'Грандинг слабее.',
-    final_axes: axes(2) } } });
+    final_axes: axes(2), failure_tags: [] } } });
   assert.deepEqual(resolved.problems, [], JSON.stringify(resolved.problems));
   assert.equal(resolved.corpus.cases[0].final_axes.grounding, 2, 'the adjudicator decided the disputed axis');
   assert.equal(resolved.corpus.cases[0].adjudication.reviewer, 'carol');
 
   // Raising an axis both reviewers already agreed on is refused.
-  assert.ok(build({ adjudications: { 'case-1': { reviewer: 'carol', reason: 'x', final_axes: axes(3) } } })
-    .problems.some((rule) => rule.includes('agreed_axis_')));
+  assert.ok(build({ adjudications: { 'case-1': { reviewer: 'carol', reason: 'x', final_axes: axes(3),
+    failure_tags: [] } } }).problems.some((rule) => rule.includes('agreed_axis_')));
   // The adjudicator may not be one of the two reviewers.
-  assert.ok(build({ adjudications: { 'case-1': { reviewer: 'anna', reason: 'x', final_axes: axes(2) } } })
-    .problems.some((rule) => rule.includes('adjudicator_must_be_a_third_reviewer')));
+  assert.ok(build({ adjudications: { 'case-1': { reviewer: 'anna', reason: 'x', final_axes: axes(2),
+    failure_tags: [] } } }).problems.some((rule) => rule.includes('adjudicator_must_be_a_third_reviewer')));
+  // The third person must be a person as well.
+  assert.ok(build({ adjudications: { 'case-1': { reviewer: 'served-model', reason: 'x',
+    final_axes: axes(2), failure_tags: [] } } }).problems
+    .some((rule) => rule.includes('a_model_may_not_stand_in_for_a_human_reviewer')));
+  // A malformed tag list fails closed instead of throwing somewhere in the projection.
+  assert.ok(build({ adjudications: { 'case-1': { reviewer: 'carol', reason: 'x', final_axes: axes(2),
+    failure_tags: { not: 'an array' } } } }).problems
+    .some((rule) => rule.includes('failure_tags_must_be_an_array')));
+  assert.ok(build({ reviews: { 'case-1': [humanReview('anna', { failure_tags: 'nope' }),
+    humanReview('boris')] } }).problems.some((rule) => rule.includes('failure_tags_must_be_an_array')));
+  assert.ok(build({ reviews: { 'case-1': [humanReview('anna', { failure_tags: ['invented_thing'] }),
+    humanReview('boris')] } }).problems.some((rule) => rule.includes('failure_tag_unknown:invented_thing')));
   // A not-assessable axis is disagreement too, when the other reviewer scored it.
   const na = [humanReview('anna', { axes: axes('N/A') }), humanReview('boris')];
   assert.ok(assembleCorpus({ input: input(), artefacts: { 'case-1': artefact(staged) },
@@ -138,6 +153,42 @@ test('4D the report is derived from the corpus alone and its metrics are recompu
   // The report cannot be built from reviews and outputs directly, only from a corpus.
   assert.ok(deriveReport(null).problems.includes('a_report_needs_a_corpus'));
   assert.ok(deriveReport({ corpus_id: 'x' }).report === null, 'a corpus that does not validate yields no report');
+});
+
+test('4D a finished evaluation needs real provenanced cases and a staged input that passed', () => {
+  const staged = stagedCase();
+  const good = [humanReview('anna'), humanReview('boris')];
+  // A fixture case may be generated, but it may not be presented as a finished real evaluation.
+  const fixtureCase = stagedCase({ provenance: { kind: 'sanitized_fixture' } });
+  const fixture = assembleCorpus({ input: input([fixtureCase]),
+    artefacts: { 'case-1': artefact(fixtureCase) }, reviews: { 'case-1': good } });
+  assert.equal(fixture.corpus, null);
+  assert.ok(fixture.problems.some((rule) => rule.includes('a_finished_evaluation_may_only_contain_anonymized_real_cases')));
+  // A case with no provenance claim is no more finished than a fixture.
+  const unprovenancedCase = stagedCase({ provenance: { kind: 'anonymized_real' } });
+  const unprovenanced = assembleCorpus({ input: input([unprovenancedCase]),
+    artefacts: { 'case-1': artefact(unprovenancedCase) }, reviews: { 'case-1': good } });
+  assert.equal(unprovenanced.corpus, null);
+  // The staged preflight catches an unprovenanced real case before assembly ever sees it.
+  assert.ok(unprovenanced.problems.some((rule) => rule.includes('provenance_claim')), JSON.stringify(unprovenanced.problems));
+  // An empty evaluation is not an evaluation.
+  const empty = assembleCorpus({ input: input([]), artefacts: {}, reviews: {} });
+  assert.equal(empty.corpus, null);
+  assert.ok(empty.problems.some((rule) => rule.includes('a_finished_evaluation_needs_at_least_one_case')));
+  // A stray artefact for a case that is not staged cannot describe the evaluation.
+  const stray = assembleCorpus({ input: input(), artefacts: { 'case-1': artefact(staged),
+    'extra-case': artefact(stagedCase({ case_id: 'extra-case' }), { model_id: 'stray-model' }) },
+  reviews: { 'case-1': good } });
+  assert.equal(stray.corpus.generation.model_id, 'served-model',
+    'identity comes from a case that survived, not from a stray file');
+});
+
+test('4D a report cannot be derived from a corpus that does not validate', () => {
+  const broken = { corpus_id: 'decision-quality-eval-v0', proof_level: 'offline_human_eval', live_proof: false,
+    cases: [{ case_id: 'c1' }] };
+  const { report, problems } = deriveReport(broken);
+  assert.equal(report, null, 'a malformed corpus yields no report at all');
+  assert.ok(problems.length > 0);
 });
 
 test('4D one evaluation may not span two models', () => {
