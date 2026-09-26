@@ -111,6 +111,22 @@ the staged input, and it is required the moment a case is `anonymized_real` — 
 needs no such reference, because nothing real leaves the machine. The call ceiling is hard at 24
 and is not a budget this repository can raise.
 
+## Running generation
+
+`generation/run.mjs` is the execution phase: plan, call, validate, store. The model call is
+**injected** — the runner knows how to reach no provider, and with no transport supplied it refuses.
+That keeps the transport a separate, reviewable decision and lets the pipeline be exercised end to
+end against a stub.
+
+A model output is stored only if it satisfies `generation/output.schema.json` **and** quotes the
+input verbatim: every `source_event_id`, every `author_id`, every evidence span's text, and
+`draft.target_id` must match the staged case. A refused output is written nowhere, so a later run
+cannot mistake a malformed generation for a finished one, and a rerun over a completed input has
+nothing left to do.
+
+Four outcomes, four exit codes: `2` refused at the gate, `1` invalid input, `3` nothing to do, `0`
+generated.
+
 ## Running the validator
 
 ```
