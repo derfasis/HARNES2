@@ -79,7 +79,47 @@ def worker_failure_cause(result):
     return None
 
 
-def served_identity(result):
+def collect_response_models():
+    """Record what the provider said it served, at the moment it said it.
+
+    The pinned Hermes does not carry a provider response into its final result, so the only place
+    the served model name exists is the post_api_request lifecycle hook, which is handed
+    ``response_model`` straight off the SDK response. That hook is dispatched from a function that
+    imports ``hermes_cli.lifecycle`` on every call, so wrapping the module's ``has_hook`` and
+    ``invoke_hook`` is enough to observe it, and nothing inside Hermes is modified on disk.
+
+    Only ``response_model`` is kept. Nothing else from the payload is read: no message text, no
+    usage, no request or response body, nothing that could carry a secret into the corpus.
+    """
+    seen = []
+    try:
+        from hermes_cli import lifecycle
+    except Exception:
+        return seen
+    if getattr(lifecycle, "_harnes_identity_collector", False):
+        return getattr(lifecycle, "_harnes_response_models", [])
+
+    original_has, original_invoke = lifecycle.has_hook, lifecycle.invoke_hook
+
+    def has_hook(hook_name, *args, **kwargs):
+        if hook_name == "post_api_request":
+            return True
+        return original_has(hook_name, *args, **kwargs)
+
+    def invoke_hook(hook_name, *args, **kwargs):
+        if hook_name == "post_api_request":
+            name = kwargs.get("response_model")
+            if isinstance(name, str) and name.strip():
+                seen.append(name.strip())
+        return original_invoke(hook_name, *args, **kwargs)
+
+    lifecycle.has_hook, lifecycle.invoke_hook = has_hook, invoke_hook
+    lifecycle._harnes_identity_collector = True
+    lifecycle._harnes_response_models = seen
+    return seen
+
+
+def served_identity(result, response_models=()):
     """What the model service actually said it served.
 
     Only fields that come from a provider response are trusted. The pinned Hermes build copies the
@@ -88,6 +128,13 @@ def served_identity(result):
     provider origin is present the answer is None, because a corpus attributed to a model that did
     not serve it is worse than no corpus.
     """
+    # A run that reached more than one model is not one evaluation, and guessing which of them
+    # served it would be exactly the kind of quiet invention this refuses to make.
+    distinct = sorted({name for name in response_models if isinstance(name, str) and name.strip()})
+    if len(distinct) > 1:
+        return None, f"several_models_served_this_run:{'|'.join(distinct)}"
+    if distinct:
+        return {"model_id": distinct[0], "model_version": None}, None
     if not isinstance(result, dict):
         return None, "runtime_did_not_expose_a_served_model_identity"
     for container in ("last_response", "provider_response", "response_meta", "metadata"):
@@ -147,6 +194,7 @@ def main():
         )
         if agent.tools:
             raise RuntimeError("Hermes advertised tools for a no-tool Situation Router run")
+        response_models = collect_response_models()
         result = agent.run_conversation(
             user_message=json.dumps(envelope["context"], ensure_ascii=False), task_id=run_id,
         )
@@ -157,7 +205,7 @@ def main():
             message["content"] for message in raw_messages
             if isinstance(message, dict) and message.get("role") == "assistant" and message.get("content")
         ]
-        identity, identity_reason = served_identity(result)
+        identity, identity_reason = served_identity(result, response_models)
         output = {
             "schema_version": 1,
             "situation_id": envelope["situation_id"],

@@ -130,7 +130,10 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // served model. Only fields with a provider origin are read: the pinned build copies the
     // configured name into result["model"], and that is configuration wearing a provider's name.
     // The evaluation corpus is attributed to a model or to nothing.
-    "scripts/situation_router_worker.py": "91316b72a9d92bdded8f6584f4353817ece9d51c",
+    // Reviewed extension: the worker now records the served model name from the provider response,
+// which the pinned runtime only exposes through its post_api_request lifecycle hook. The
+// configured model is still never used, and a run that reached two models is refused outright.
+    "scripts/situation_router_worker.py": "a561222dd3e564f8f4ab55f9e181164a8c064ce4",
     // Reviewed extension: invalidate read-only source checkpoints on process recovery.
     // textBlobHash normalizes CRLF, so this is the LF-normalized R7 blob hash.
     "business/store.mjs": "0f173b662506808a76766c12bc38d3e14b026865",
