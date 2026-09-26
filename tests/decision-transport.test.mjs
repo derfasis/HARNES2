@@ -3,11 +3,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import childProcess from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ROOT } from '../business/config.mjs';
-import { ENVELOPE_KEYS, buildEnvelope, childEnvironment, createTransport, readiness, transportProblems }
+import { ENVELOPE_KEYS, buildEnvelope, childEnvironment, createTransport, readiness, runWithTransport,
+  transportProblems }
   from '../docs/benchmarks/decision-quality-eval-v0/generation/transport.mjs';
 
 const RUNTIME = { model: 'configured-model', provider: 'configured-provider', apiMode: 'chat',
@@ -139,10 +141,10 @@ test('4D the worker reports a served model identity and never one taken from con
   const body = worker.slice(worker.indexOf('def served_identity'), worker.indexOf('def main'));
   assert.ok(!body.includes('envelope'), 'the identity may not come from the envelope configuration');
   assert.ok(!body.includes('cfg'), 'the identity may not come from cfg');
-  // The agent object carries the configured name, so consulting it would let configuration
-  // impersonate a served model.
-  assert.ok(!/for source in \(result, agent\)/.test(worker), 'the agent object must not be an identity source');
-  assert.match(worker, /sources = \[result\]/);
+  // The pinned Hermes build copies the configured name into result["model"], so that key is
+  // configuration wearing a provider's name and must never be read as one.
+  assert.ok(!/result\.get\("model"\)/.test(body), 'result["model"] is configuration, not a served model');
+  assert.match(worker, /for container in \("last_response"/);
   const py = fs.readFileSync(path.join(ROOT, 'scripts', 'situation_router_worker.py'), 'utf8');
   assert.ok(!/model_identity.*envelope\["model"\]/.test(py), 'no fallback to the configured model');
 });
@@ -173,6 +175,52 @@ test('4D an unready runtime is refused before the ledger spends a call', async (
   assert.deepEqual(result.reasons, ['model_runtime_is_not_ready']);
   assert.equal(calls, 0, 'no call is made');
   assert.equal(readLedger(directory).calls, 0, 'the ledger is untouched');
+  assert.equal(fs.existsSync(path.join(directory, 'attempts.json')), false);
+  fs.rmSync(directory, { recursive: true, force: true });
+});
+
+test('4D the configured model name is never accepted as a served identity', async () => {
+  // The worker's own Python, so the probe runs the shipped logic rather than a copy of it.
+  const python = path.join(ROOT, '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');
+  assert.ok(fs.existsSync(python), 'the probe needs the local Python the worker itself uses');
+  // The worker's own logic, exercised directly: Hermes hands back result["model"] set to the
+  // configured name, and that must produce no identity at all.
+  const source = fs.readFileSync(path.join(ROOT, 'scripts', 'situation_router_worker.py'), 'utf8');
+  const start = source.indexOf('def served_identity');
+  const end = source.indexOf('def main():');
+  const snippet = source.slice(start, end).replace('def main():', '');
+  const harness = `
+import json
+${snippet}
+print(json.dumps({
+  "configured": served_identity({"model": "configured-model", "provider": "configured-provider"}),
+  "served": served_identity({"last_response": {"model": "served-model", "version": "2026-02"}}),
+  "nothing": served_identity({}),
+}))`;
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harnes2-served-'));
+  const file = path.join(directory, 'probe.py');
+  fs.writeFileSync(file, harness);
+  let output = '';
+  try {
+    output = childProcess.execFileSync(python, [file], { encoding: 'utf8' });
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
+  const result = JSON.parse(output);
+  assert.equal(result.configured[0], null, 'the configured name must yield no identity');
+  assert.match(result.configured[1], /runtime_did_not_expose/);
+  assert.equal(result.served[0].model_id, 'served-model', 'a provider response is trusted');
+  assert.equal(result.nothing[0], null);
+});
+
+test('4D the canonical entrypoint cannot be used without the readiness check', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harnes2-entry-'));
+  const input = { input_id: 'd4-generation-v0', live_proof: false, cases: [stagedCase] };
+  const result = await runWithTransport({ runtime: { ...RUNTIME, baseUrl: 'http://proxy.example/v1' },
+    environment: { ...WITH_CREDENTIAL, HARNES_OWNER_APPROVED_MODEL_CALLS: 'yes' }, directory, input,
+    spawnFn: () => { throw new Error('the worker must never start'); } });
+  assert.equal(result.exit, 2, 'an unready runtime is refused by the entrypoint itself');
+  assert.deepEqual(result.reasons, ['model_runtime_is_not_ready']);
+  const { readLedger } = await import('../docs/benchmarks/decision-quality-eval-v0/generation/run.mjs');
+  assert.equal(readLedger(directory).calls, 0, 'the ledger never moved');
   assert.equal(fs.existsSync(path.join(directory, 'attempts.json')), false);
   fs.rmSync(directory, { recursive: true, force: true });
 });

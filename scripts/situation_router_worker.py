@@ -82,18 +82,19 @@ def worker_failure_cause(result):
 def served_identity(result):
     """What the model service actually said it served.
 
-    Read only from provider-returned data: the run result and any response metadata it carries.
-    The agent object is deliberately not consulted, because its `model` attribute is the
-    configured name — trusting it would let a configuration masquerade as a served model.
-    Returns (identity, reason); identity is None when nothing usable was returned.
+    Only fields that come from a provider response are trusted. The pinned Hermes build copies the
+    configured model name into the top level of its own result, so `result["model"]` is
+    configuration wearing a provider's name and is deliberately not read. If nothing with a
+    provider origin is present the answer is None, because a corpus attributed to a model that did
+    not serve it is worse than no corpus.
     """
-    sources = [result]
-    for key in ("last_response", "response", "response_meta", "metadata"):
-        nested = result.get(key) if isinstance(result, dict) else None
-        if isinstance(nested, dict):
-            sources.append(nested)
-    for source in sources:
-        for key in ("served_model", "model_id", "model"):
+    if not isinstance(result, dict):
+        return None, "runtime_did_not_expose_a_served_model_identity"
+    for container in ("last_response", "provider_response", "response_meta", "metadata"):
+        source = result.get(container)
+        if not isinstance(source, dict):
+            continue
+        for key in ("served_model", "model", "model_id"):
             value = source.get(key)
             if isinstance(value, str) and value.strip():
                 version = source.get("model_version") or source.get("version")

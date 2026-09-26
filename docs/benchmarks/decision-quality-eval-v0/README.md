@@ -154,8 +154,10 @@ usage but not the served identity, so the transport returns a refusal naming exa
 instead of filling the identity in from configuration. The finished corpus is only attributable to a
 model if that model named itself.
 
-Nothing here calls a model on its own. It is reached through `runGeneration()`, which refuses
-until the owner authorises model calls.
+Nothing here calls a model on its own. `runWithTransport()` is the one entry point: it evaluates
+readiness, wires the transport, and only then runs generation, so a caller cannot plug a transport
+into `runGeneration()` and quietly skip the preflight that protects the call budget. Either way the
+run refuses until the owner authorises model calls.
 
 ## Running the validator
 

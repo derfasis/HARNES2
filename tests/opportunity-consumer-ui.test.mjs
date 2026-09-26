@@ -127,8 +127,10 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // derived from the configured model name, and it is null with a reason when the runtime
     // exposes nothing usable. Provider-returned data only: the agent object's own model
     // attribute is the configured name, and trusting it would let configuration impersonate a
-    // served model. The evaluation corpus is attributed to a model or to nothing.
-    "scripts/situation_router_worker.py": "1ad7e1dbcf887559aaa612ca3425d14fe2b1ab10",
+    // served model. Only fields with a provider origin are read: the pinned build copies the
+    // configured name into result["model"], and that is configuration wearing a provider's name.
+    // The evaluation corpus is attributed to a model or to nothing.
+    "scripts/situation_router_worker.py": "91316b72a9d92bdded8f6584f4353817ece9d51c",
     // Reviewed extension: invalidate read-only source checkpoints on process recovery.
     // textBlobHash normalizes CRLF, so this is the LF-normalized R7 blob hash.
     "business/store.mjs": "0f173b662506808a76766c12bc38d3e14b026865",

@@ -68,7 +68,8 @@ export const transportProblems = (runtime = {}, environment = process.env) => {
     let parsed = null;
     try { parsed = new URL(baseUrl); } catch { problems.push('base_url_must_be_a_url'); }
     if (parsed) {
-      if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && ['127.0.0.1', 'localhost', '::1'].includes(parsed.hostname)))
+      const local = ['127.0.0.1', 'localhost', '[::1]', '::1'];
+      if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && local.includes(parsed.hostname)))
         problems.push('base_url_must_be_https_or_localhost_http');
       if (parsed.username || parsed.password) problems.push('base_url_must_not_carry_credentials');
       if (parsed.search || parsed.hash) problems.push('base_url_must_not_carry_a_query_or_fragment');
@@ -102,6 +103,15 @@ export const callOnce = ({ python = PYTHON, worker = WORKER, envelope, environme
 // call from the ledger.
 export const readiness = (runtime = {}, environment = process.env) => transportProblems(runtime, environment);
 
+// The one way to run an evaluation. Wiring a transport into runGeneration directly would leave the
+// readiness check optional, and a forgotten preflight costs a real call, so the binding lives here.
+export async function runWithTransport({ runtime, environment = process.env, directory, ...rest } = {}) {
+  const { runGeneration, EXIT } = await import('./run.mjs');
+  return runGeneration({ ...rest, environment,
+    readiness: readiness(runtime, environment),
+    callModel: createTransport({ runtime, environment, ...rest }) });
+}
+
 export const createTransport = ({ runtime = {}, runId, python, worker, environment = process.env,
   cwd = path.join(ROOT, 'data', 'runtime'), spawnFn = spawn } = {}) => async ({ prompt, staged }) => {
   const problems = transportProblems(runtime, environment);
@@ -112,9 +122,11 @@ export const createTransport = ({ runtime = {}, runId, python, worker, environme
     transport_problems: ['worker_reported_no_completed_response'] };
   // The identity must come from the worker, which reads it from what the model service reported.
   // It is not derived from configuration, and it is not guessed from the model name.
+  // Only the worker's provider-sourced identity is read. Nothing is taken from the worker's own
+  // top level, which the pinned build fills from configuration.
   const identity = parsed.model_identity ?? {};
-  const modelId = identity.model_id ?? parsed.model_id ?? parsed.modelId ?? null;
-  const modelVersion = identity.model_version ?? parsed.model_version ?? parsed.modelVersion ?? null;
+  const modelId = identity.model_id ?? null;
+  const modelVersion = identity.model_version ?? null;
   if (typeof modelId !== 'string' || !modelId || typeof modelVersion !== 'string' || !modelVersion) {
     return { raw: parsed.final_response ?? null, model_id: modelId, model_version: modelVersion,
       transport_problems: [parsed.model_identity_reason ?? 'worker_did_not_report_which_model_answered'] };
