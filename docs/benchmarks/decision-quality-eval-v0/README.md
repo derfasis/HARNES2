@@ -83,6 +83,34 @@ the report says the same thing, and the validator refuses a report that says som
 Structure is checkable; quality is not, and a script that pretended otherwise would be the same
 failure in a new place.
 
+## How a case is actually built
+
+The pipeline has two stages, and conflating them is the mistake the protocol exists to prevent:
+
+```
+permitted source → generation/input.json → model output → two human reviews → final 4D0 corpus + report
+```
+
+`generation/input.json` is a **staging** artefact. A case there has no scores, no reviewers, no
+adjudication, no final axes, and no failure tags — because nobody has reviewed it yet. It carries
+only anonymised evidence and the metadata the frozen prompt needs: `situation_id`, `subject`,
+per-message `source_event_id` and `author_id`, the offer, the goal, and the known unknowns. The
+staged input is validated by its own schema.
+
+The 4D0 corpus is the **finished** artefact, assembled only after two real people have scored the
+case. Its contract is not relaxed to make generation easier.
+
+The prompt and the input contract are checked against each other: if the prompt names an
+identifier the input does not carry, the model would have to invent it, and the preflight refuses.
+
+## Two permissions, not one
+
+Calling a model and sending real third-party text out of this machine are different permissions.
+The first is a single explicit environment flag. The second needs an `egress_authorisation_ref` on
+the staged input, and it is required the moment a case is `anonymized_real` — a sanitized fixture
+needs no such reference, because nothing real leaves the machine. The call ceiling is hard at 24
+and is not a budget this repository can raise.
+
 ## Running the validator
 
 ```
