@@ -16,7 +16,7 @@ const FAILURE_TAGS = ['invented_fact', 'unsupported_permission', 'missed_opportu
 const CLAIM_REF = /^prov_[A-Za-z0-9._-]{1,120}$/;
 const PROOF_LEVELS = ['synthetic_contract_eval', 'offline_human_eval'];
 const CASE_KEYS = ['case_id', 'provenance', 'frozen_input', 'offer', 'operator_goal', 'gold_annotations',
-  'model_output', 'scores', 'adjudication'];
+  'model_output', 'scores', 'adjudication', 'final_axes', 'failure_tags'];
 const REPORT_KEYS = ['corpus_id', 'proof_level', 'live_proof', 'model', 'scored_cases',
   'not_applicable_cases', 'axis_summary', 'case_results', 'failed_cases'];
 
@@ -83,14 +83,35 @@ function validateReviews(reviews, adjudication, at, problems) {
 // exactly what the adjudicator wrote. Anything else is a number that appeared from nowhere.
 function checkPublishedAxes(reviews, adjudication, finalAxes, at, problems) {
   const require_ = (condition, rule) => { if (!condition) problems.push({ at, rule }); };
-  if (adjudication) { require_(sameValue(finalAxes, adjudication.final_axes), 'final_axes_must_be_the_adjudicated_ones'); return; }
-  const [a, b] = reviews ?? [];
+  // A corrupted shape must yield findings, not a TypeError: a validator that crashes on bad input
+  // cannot report that the input is bad.
+  const list = Array.isArray(reviews) ? reviews : [];
+  if (list.length !== 2) { require_(false, 'exactly_two_reviews_required'); return; }
+  const [a, b] = list;
   for (const axis of AXES) {
     const left = a?.axes?.[axis], right = b?.axes?.[axis];
-    require_(finalAxes?.[axis] === (left === right ? left : undefined),
-      `final_axis_${axis}_must_be_the_agreed_score`);
+    if (left === right) {
+      // The reviewers agreed here. Nobody, including the adjudicator, may change it.
+      require_(finalAxes?.[axis] === left, `agreed_axis_${axis}_must_not_be_rewritten`);
+      if (adjudication) require_(adjudication?.final_axes?.[axis] === left,
+        `adjudicator_must_preserve_agreed_axis_${axis}`);
+    } else {
+      // Only a disputed axis may be resolved, and only by the third person.
+      require_(!!adjudication, `disputed_axis_${axis}_needs_adjudication`);
+      require_(finalAxes?.[axis] === adjudication?.final_axes?.[axis],
+        `disputed_axis_${axis}_must_be_the_adjudicated_score`);
+    }
   }
 }
+
+// The aggregate tags of a case are the union of what its reviewers wrote, never a separate field
+// someone can clear.
+export const derivedTags = (reviews) => {
+  const list = Array.isArray(reviews) ? reviews : [];
+  const tags = new Set();
+  for (const scoring of list) for (const tag of Array.isArray(scoring?.failure_tags) ? scoring.failure_tags : []) tags.add(tag);
+  return [...tags].sort();
+};
 
 export function validateCase(item, at = 'case') {
   const problems = [];
@@ -126,6 +147,9 @@ export function validateCase(item, at = 'case') {
     'model_output_object_or_null');
 
   validateReviews(item.scores, item.adjudication, at, problems);
+  checkPublishedAxes(item.scores, item.adjudication, item.final_axes, at, problems);
+  if (!sameValue([...(item.failure_tags ?? [])].sort(), derivedTags(item.scores)))
+    problems.push({ at, rule: 'case_failure_tags_must_be_the_reviewers_union' });
   return problems;
 }
 
@@ -167,8 +191,7 @@ export function deriveReportFacts(report) {
       else if (Number.isInteger(score)) axis[name].scores.push(score);
       else continue;
       if (axisFailed(score) && result?.case_id) {
-        failures.push({ case_id: result.case_id, axis: name, score,
-          failure_tags: [...(Array.isArray(result.failure_tags) ? result.failure_tags : [])].sort() });
+        failures.push({ case_id: result.case_id, axis: name, score, failure_tags: derivedTags(result.reviews) });
       }
     }
   }
@@ -218,6 +241,9 @@ export function validateReport(report) {
     if (!Array.isArray(result?.failure_tags)) problems.push({ at, rule: 'failure_tags_required' });
     for (const tag of Array.isArray(result?.failure_tags) ? result.failure_tags : [])
       if (!FAILURE_TAGS.includes(tag)) problems.push({ at, rule: `failure_tag_unknown:${tag}` });
+    if (!sameValue([...(Array.isArray(result?.failure_tags) ? result.failure_tags : [])].sort(),
+      derivedTags(result?.reviews)))
+      problems.push({ at, rule: 'failure_tags_must_be_the_reviewers_union' });
     if (typeof result?.failed !== 'boolean') problems.push({ at, rule: 'failed_flag_required' });
     else if (result.failed !== AXES.some((axis) => axisFailed(result.final_axes?.[axis])))
       problems.push({ at, rule: 'failed_flag_must_match_final_axes' });
@@ -260,7 +286,8 @@ export function validateReport(report) {
   return problems;
 }
 
-// A report may only claim a real offline evaluation if the corpus behind it really holds one.
+// A report may only claim a real offline evaluation if the corpus behind it really holds one —
+// and the report is a projection of that corpus, never a second independent source of truth.
 export function validateEvaluation(corpus, report) {
   const problems = [];
   const cases = Array.isArray(corpus?.cases) ? corpus.cases : [];
@@ -268,7 +295,8 @@ export function validateEvaluation(corpus, report) {
   // labelling itself synthetic and quietly claim a real measurement.
   if (report?.proof_level === 'offline_human_eval' && corpus?.proof_level !== 'offline_human_eval')
     problems.push({ at: 'corpus', rule: 'offline_report_requires_offline_corpus' });
-  if (corpus?.proof_level === 'offline_human_eval' || report?.proof_level === 'offline_human_eval') {
+  const claimsReal = corpus?.proof_level === 'offline_human_eval' || report?.proof_level === 'offline_human_eval';
+  if (claimsReal) {
     if (cases.length === 0) problems.push({ at: 'corpus', rule: 'offline_eval_requires_cases' });
     for (const item of cases) {
       const at = item?.case_id ?? 'case';
@@ -280,11 +308,49 @@ export function validateEvaluation(corpus, report) {
         problems.push({ at, rule: 'offline_eval_case_requires_model_output' });
     }
   }
-  const corpusIds = cases.map((item) => item?.case_id).filter(Boolean).sort();
+  // The generation identity is frozen in the corpus. Without it a benchmark cannot honestly be
+  // attributed to a model, and "prompt_id" alone is a free string rather than a reference.
+  const generation = corpus?.generation;
+  if (claimsReal && (!generation || typeof generation !== 'object'))
+    problems.push({ at: 'corpus', rule: 'offline_eval_requires_frozen_generation_identity' });
+  if (generation) {
+    for (const key of ['model_id', 'model_version', 'prompt_ref', 'prompt_digest'])
+      if (typeof generation[key] !== 'string' || generation[key].length === 0)
+        problems.push({ at: 'corpus.generation', rule: `generation_${key}_required` });
+    if (report?.model) {
+      if (report.model.id !== generation.model_id) problems.push({ at: 'report.model', rule: 'model_id_must_match_corpus' });
+      if (report.model.version !== generation.model_version) problems.push({ at: 'report.model', rule: 'model_version_must_match_corpus' });
+      if (report.model.prompt_id !== generation.prompt_ref) problems.push({ at: 'report.model', rule: 'prompt_ref_must_match_corpus' });
+      if (report.model.prompt_digest !== undefined && report.model.prompt_digest !== generation.prompt_digest)
+        problems.push({ at: 'report.model', rule: 'prompt_digest_must_match_corpus' });
+    }
+  }
+  const byId = new Map(cases.filter((item) => item?.case_id).map((item) => [item.case_id, item]));
   const reportIds = (Array.isArray(report?.case_results) ? report.case_results : [])
     .map((row) => row?.case_id).filter(Boolean).sort();
+  const corpusIds = [...byId.keys()].sort();
   if (corpusIds.length > 0 && !sameValue(corpusIds, reportIds))
     problems.push({ at: 'report', rule: 'report_case_ids_must_match_corpus' });
+  // Reviews and adjudication in the report must be the corpus's own, compared by reviewer id so
+  // that ordering cannot hide a substitution.
+  const canonical = (reviews) => [...(Array.isArray(reviews) ? reviews : [])]
+    .map((scoring) => ({ reviewer: scoring?.reviewer, axes: scoring?.axes,
+      failure_tags: [...(Array.isArray(scoring?.failure_tags) ? scoring.failure_tags : [])].sort() }))
+    .sort((a, b) => String(a.reviewer).localeCompare(String(b.reviewer)));
+  for (const result of Array.isArray(report?.case_results) ? report.case_results : []) {
+    const source = byId.get(result?.case_id);
+    if (!source) continue;
+    if (!sameValue(canonical(result?.reviews), canonical(source.scores)))
+      problems.push({ at: result.case_id, rule: 'report_reviews_must_match_corpus_scores' });
+    const left = source.adjudication ?? null, right = result?.adjudication ?? null;
+    const sameAdjudication = (!left && !right) || (!!left && !!right
+      && left.reviewer === right.reviewer && sameValue(left.final_axes, right.final_axes)
+      && left.reason === right.reason);
+    if (!sameAdjudication)
+      problems.push({ at: result.case_id, rule: 'report_adjudication_must_match_corpus' });
+    if (source.final_axes !== undefined && !sameValue(result?.final_axes, source.final_axes))
+      problems.push({ at: result.case_id, rule: 'report_final_axes_must_match_corpus' });
+  }
   return problems;
 }
 

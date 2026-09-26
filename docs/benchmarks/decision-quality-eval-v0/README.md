@@ -68,10 +68,17 @@ The JSON Schemas are a second structural guard: the test suite compiles both wit
 each a valid and a deliberately broken fixture, so a schema with a dangling `$ref` cannot pass by
 existing.
 
-`validateEvaluation(corpus, report)` links the two. A report may only claim `offline_human_eval`
-if the corpus behind it is non-empty, every case is `anonymized_real` with a provenance claim and
-a non-null model output, and the report's case ids match the corpus exactly. A report can never
-claim a real measurement on the strength of an empty protocol corpus.
+`validateEvaluation(corpus, report)` links the two, and the report is a **projection** of the corpus
+rather than a second source of truth. A report may only claim `offline_human_eval` if the corpus is
+itself `offline_human_eval`, is non-empty, every case is `anonymized_real` with a provenance claim
+and a non-null model output, and the case ids match exactly. The corpus also freezes the
+**generation identity** — model id, model version, prompt reference, and a prompt digest — and the
+report's `model` block must match it. Without that, a benchmark cannot honestly be attributed to a
+model, and `prompt_id` alone is a free string rather than a reference.
+
+The report's reviews, adjudication, and final axes must equal the corpus's own, compared by
+reviewer id so ordering cannot hide a substitution. In other words: the corpus says what happened,
+the report says the same thing, and the validator refuses a report that says something else.
 
 Structure is checkable; quality is not, and a script that pretended otherwise would be the same
 failure in a new place.

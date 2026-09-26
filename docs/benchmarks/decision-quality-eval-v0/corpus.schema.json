@@ -27,6 +27,34 @@
       "items": {
         "$ref": "#/$defs/case"
       }
+    },
+    "generation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model_id",
+        "model_version",
+        "prompt_ref",
+        "prompt_digest"
+      ],
+      "properties": {
+        "model_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "prompt_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "prompt_digest": {
+          "type": "string",
+          "minLength": 16
+        }
+      }
     }
   },
   "$defs": {
@@ -245,6 +273,12 @@
         },
         "adjudication": {
           "$ref": "#/$defs/adjudication"
+        },
+        "final_axes": {
+          "$ref": "#/$defs/axes"
+        },
+        "failure_tags": {
+          "$ref": "#/$defs/failure_tags"
         }
       }
     }

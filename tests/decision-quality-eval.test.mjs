@@ -12,7 +12,7 @@ import { AXES, deriveReportFacts, validateCase, validateCorpus, validateEvaluati
 const DIR = fileURLToPath(new URL('../docs/benchmarks/decision-quality-eval-v0/', import.meta.url));
 const read = (name) => fs.readFileSync(path.join(DIR, name), 'utf8');
 const axes = (value = 2) => Object.fromEntries(AXES.map((axis) => [axis, value]));
-const realCase = () => ({
+const realCase = (mutate = {}) => ({
   case_id: 'real-1',
   provenance: { kind: 'anonymized_real', provenance_claim_ref: 'prov_internal-1' },
   frozen_input: { source_text: '[PERSON_A]: скільки коштує участь?', author: '[PERSON_A]',
@@ -21,8 +21,9 @@ const realCase = () => ({
   model_output: { hypothesis: 'Возможно, нужна цена.' },
   scores: [{ reviewer: 'r1', axes: axes(2), failure_tags: ['overclaim'] },
     { reviewer: 'r2', axes: axes(2), failure_tags: [] }],
+  final_axes: axes(2), failure_tags: ['overclaim'], ...mutate,
 });
-const rules = (mutate) => validateCase({ ...realCase(), ...mutate }).map((entry) => entry.rule);
+const rules = (mutate) => validateCase(realCase(mutate)).map((entry) => entry.rule);
 
 const validReport = (mutate = {}) => {
   const caseResults = [{ case_id: 'real-1', reviews: [
@@ -89,34 +90,44 @@ test('4D0 exactly two independent reviews, and the adjudicator is a third person
   const same = { ...realCase(), scores: [{ reviewer: 'r1', axes: axes(2), failure_tags: [] },
     { reviewer: 'r1', axes: axes(2), failure_tags: [] }] };
   assert.ok(validateCase(same).map((e) => e.rule).includes('two_distinct_reviewers_required'));
-  const diverged = { ...realCase(), scores: [{ reviewer: 'r1', axes: axes(3), failure_tags: [] },
-    { reviewer: 'r2', axes: axes(0), failure_tags: ['overclaim'] }] };
+  const diverged = realCase({ scores: [{ reviewer: 'r1', axes: axes(3), failure_tags: [] },
+    { reviewer: 'r2', axes: axes(0), failure_tags: ['overclaim'] }], final_axes: axes(1),
+    failure_tags: ['overclaim'] });
   assert.ok(validateCase(diverged).map((e) => e.rule).includes('adjudication_required'));
   assert.ok(validateCase({ ...diverged, adjudication: { reviewer: 'r1', reason: 'own case',
     final_axes: axes(1) } }).map((e) => e.rule).includes('adjudicator_must_be_a_third_reviewer'));
   assert.deepEqual(validateCase({ ...diverged, adjudication: { reviewer: 'r3',
-    reason: 'Ground the first axis.', final_axes: axes(1) } }), []);
+    reason: 'Grounding is weak.', final_axes: axes(1) } }), []);
   assert.ok(validateCase({ ...realCase(), adjudication: { reviewer: 'r3', reason: 'unnecessary',
     final_axes: axes(2) } }).map((e) => e.rule).includes('adjudication_not_expected'));
   assert.equal(({ ...diverged, adjudication: { reviewer: 'r3', reason: 'x', final_axes: axes(1) } }).scores.length, 2,
     'an adjudication never replaces the two original reviews');
+  assert.ok(validateCase(realCase({ scores: [{ reviewer: 'r1', axes: axes(1), failure_tags: [] },
+    { reviewer: 'r2', axes: axes(2), failure_tags: [] }], final_axes: axes(1) })).map((e) => e.rule)
+    .includes('disputed_axis_grounding_needs_adjudication'),
+  'a one-point gap is still a gap');
 });
 
 test('4D0 every score must be 0..3 or N/A, and every failure tag must be known', () => {
   const withAxes = (value) => rules({ scores: [{ reviewer: 'r1', axes: value, failure_tags: [] },
-    { reviewer: 'r2', axes: axes(2), failure_tags: [] }] });
+    { reviewer: 'r2', axes: axes(2), failure_tags: [] }], final_axes: axes(2) });
   for (const invalid of [4, -1, 1.5, 'good'])
     assert.ok(withAxes({ ...axes(2), grounding: invalid }).includes('axis_grounding_score_invalid'));
   assert.ok(withAxes(Object.fromEntries(AXES.slice(0, 5).map((axis) => [axis, 2])))
     .some((rule) => rule.endsWith('_required')), 'a missing axis is refused');
-  assert.deepEqual(rules({ scores: [{ reviewer: 'r1', axes: axes('N/A'), failure_tags: [] },
-    { reviewer: 'r2', axes: axes('N/A'), failure_tags: [] }] }), []);
+
   assert.ok(rules({ scores: [{ reviewer: 'r1', axes: axes(2), failure_tags: ['looks_ugly'] },
-    { reviewer: 'r2', axes: axes(2), failure_tags: [] }] }).includes('failure_tag_unknown:looks_ugly'));
+    { reviewer: 'r2', axes: axes(2), failure_tags: [] }], final_axes: axes(2),
+  failure_tags: ['looks_ugly'] }).includes('failure_tag_unknown:looks_ugly'));
   assert.ok(rules({ scores: [{ reviewer: 'r1', axes: axes(2), note: 'extra' },
-    { reviewer: 'r2', axes: axes(2), failure_tags: [] }] }).includes('scoring_has_extra_fields'));
+    { reviewer: 'r2', axes: axes(2), failure_tags: [] }], final_axes: axes(2) })
+    .includes('scoring_has_extra_fields'));
   assert.ok(rules({ scores: [{ reviewer: 'r1', axes: axes(2) },
-    { reviewer: 'r2', axes: axes(2), failure_tags: [] }] }).includes('scoring_failure_tags_required'));
+    { reviewer: 'r2', axes: axes(2), failure_tags: [] }], final_axes: axes(2) })
+    .includes('scoring_failure_tags_required'));
+  assert.ok(rules({ scores: [{ reviewer: 'r1', axes: axes('N/A'), failure_tags: [] },
+    { reviewer: 'r2', axes: axes('N/A'), failure_tags: [] }], final_axes: axes('N/A'),
+  failure_tags: [] }), [], 'a fully not-assessable case is publishable as is');
 });
 
 test('4D0 the validator enforces the structural rules the schemas declare', () => {
@@ -196,24 +207,16 @@ test('4D0 a published score is either what both reviewers agreed or what the adj
   inflated.not_applicable_cases = 0;
   inflated.failed_cases = deriveReportFacts(inflated).failed_cases;
   assert.ok(validateReport(inflated).map((e) => e.rule)
-    .some((r) => r.startsWith('final_axis_')), 'two reviewers scoring 1 cannot publish 3');
-  const diverged = validReport();
-  diverged.case_results[0].reviews[0].axes = axes(3);
-  diverged.case_results[0].adjudication = { reviewer: 'r3', reason: 'Grounding.',
-    final_axes: axes(1) };
-  assert.ok(validateReport(diverged).map((e) => e.rule).includes('adjudication_required') === false);
-  const ignoredAdjudication = validReport();
-  ignoredAdjudication.case_results[0].reviews[0].axes = axes(3);
-  ignoredAdjudication.case_results[0].adjudication = { reviewer: 'r3', reason: 'Grounding.',
-    final_axes: axes(1) };
-  ignoredAdjudication.case_results[0].final_axes = axes(3);
-  ignoredAdjudication.failed_cases = [];
-  ignoredAdjudication.axis_summary = deriveReportFacts(ignoredAdjudication).axis_summary;
-  ignoredAdjudication.scored_cases = 1;
-  ignoredAdjudication.not_applicable_cases = 0;
-  ignoredAdjudication.failed_cases = deriveReportFacts(ignoredAdjudication).failed_cases;
-  assert.ok(validateReport(ignoredAdjudication).map((e) => e.rule)
-    .includes('final_axes_must_be_the_adjudicated_ones'));
+    .some((r) => r.startsWith('agreed_axis_')), 'two reviewers scoring 1 cannot publish 3');
+  // One disputed axis, adjudicated to 2: publishing 3 there is refused, publishing 2 is not.
+  const adjudicated = validReport();
+  adjudicated.case_results[0].reviews[0].axes = { ...axes(1), grounding: 3 };
+  adjudicated.case_results[0].adjudication = { reviewer: 'r3', reason: 'Grounding is two.',
+    final_axes: { ...axes(1), grounding: 2 } };
+  adjudicated.case_results[0].final_axes = { ...axes(1), grounding: 3 };
+  const adjudicatedRules = validateReport(adjudicated).map((e) => e.rule);
+  assert.ok(adjudicatedRules.includes('disputed_axis_grounding_must_be_the_adjudicated_score'),
+    adjudicatedRules.join(','));
 });
 
 test('4D0 the schemas guard the real data too, not only test fixtures', () => {
@@ -229,19 +232,24 @@ test('4D0 the schemas guard the real data too, not only test fixtures', () => {
 });
 
 test('4D0 a real offline evaluation must be backed by a real corpus', () => {
+  const agreed = { ...realCase(), scores: [{ reviewer: 'r1', axes: axes(1), failure_tags: ['overclaim'] },
+      { reviewer: 'r2', axes: axes(1), failure_tags: [] }], final_axes: axes(1) };
+  const generation = { model_id: 'fixture', model_version: 'v1', prompt_ref: 'p1',
+    prompt_digest: 'sha256-0123456789abcdef' };
   const corpus = { corpus_id: 'decision-quality-eval-v0', proof_level: 'offline_human_eval',
-    live_proof: false, cases: [realCase()] };
-  const report = validReport();
+    live_proof: false, generation, cases: [agreed] };
+  const report = validReport({ model: { id: 'fixture', version: 'v1', prompt_id: 'p1',
+    prompt_digest: 'sha256-0123456789abcdef' } });
   assert.deepEqual(validateEvaluation(corpus, report), []);
   assert.ok(validateEvaluation({ ...corpus, cases: [] }, report).map((e) => e.rule)
     .includes('offline_eval_requires_cases'));
-  const fixture = { ...corpus, cases: [{ ...realCase(), provenance: { kind: 'sanitized_fixture' } }] };
+  const fixture = { ...corpus, cases: [{ ...agreed, provenance: { kind: 'sanitized_fixture' } }] };
   assert.ok(validateEvaluation(fixture, report).map((e) => e.rule)
     .includes('offline_eval_case_must_be_anonymized_real'));
-  const unclaimed = { ...corpus, cases: [{ ...realCase(), provenance: { kind: 'anonymized_real' } }] };
+  const unclaimed = { ...corpus, cases: [{ ...agreed, provenance: { kind: 'anonymized_real' } }] };
   assert.ok(validateEvaluation(unclaimed, report).map((e) => e.rule)
     .includes('offline_eval_case_requires_provenance_claim'));
-  const noOutput = { ...corpus, cases: [{ ...realCase(), model_output: null }] };
+  const noOutput = { ...corpus, cases: [{ ...agreed, model_output: null }] };
   assert.ok(validateEvaluation(noOutput, report).map((e) => e.rule)
     .includes('offline_eval_case_requires_model_output'));
   const otherCase = validReport();
@@ -252,6 +260,72 @@ test('4D0 a real offline evaluation must be backed by a real corpus', () => {
   // synthetic rather than offline: the report's claim is what the corpus must satisfy.
   assert.ok(validateEvaluation(JSON.parse(read('corpus.json')), report).map((e) => e.rule)
     .includes('offline_report_requires_offline_corpus'));
+});
+
+test('4D0 an adjudicator may resolve only the axes the reviewers disputed', () => {
+  // One axis is disputed, the rest are agreed: that is the case the protocol is written for.
+  const disputed = realCase({ scores: [
+    { reviewer: 'r1', axes: { ...axes(1), grounding: 3 }, failure_tags: [] },
+    { reviewer: 'r2', axes: { ...axes(1), grounding: 2 }, failure_tags: [] }],
+    final_axes: { ...axes(1), grounding: 2 }, failure_tags: [] });
+  const honest = { ...disputed, adjudication: { reviewer: 'r3', reason: 'Grounding is two.',
+    final_axes: { ...axes(1), grounding: 2 } } };
+  assert.deepEqual(validateCase(honest), []);
+  // The adjudicator may only resolve grounding. Raising relevance, which both agreed on, is refused.
+  const rewritten = { ...disputed, final_axes: axes(3), adjudication: { reviewer: 'r3',
+    reason: 'Inflated.', final_axes: axes(3) } };
+  const rules = validateCase(rewritten).map((e) => e.rule);
+  assert.ok(rules.includes('adjudicator_must_preserve_agreed_axis_relevance'), rules.join(','));
+  assert.ok(rules.includes('agreed_axis_relevance_must_not_be_rewritten'), rules.join(','));
+});
+
+test('4D0 the case failure tags are the reviewers union, not a field someone can clear', () => {
+  assert.deepEqual(validateCase(realCase({ failure_tags: ['overclaim'] })), []);
+  assert.ok(validateCase(realCase({ failure_tags: [] })).map((e) => e.rule)
+    .includes('case_failure_tags_must_be_the_reviewers_union'));
+  const report = validReport();
+  report.case_results[0].failure_tags = [];
+  assert.ok(validateReport(report).map((e) => e.rule).includes('failure_tags_must_be_the_reviewers_union'));
+});
+
+test('4D0 a malformed reviews value yields findings and never an exception', () => {
+  for (const reviews of [{}, null, 'nope', [1, 2]]) {
+    const broken = validReport();
+    broken.case_results[0].reviews = reviews;
+    const found = validateReport(broken);
+    assert.ok(found.length > 0, `reviews ${JSON.stringify(reviews)} must produce findings`);
+  }
+  const corpusBroken = { corpus_id: 'decision-quality-eval-v0', proof_level: 'offline_human_eval',
+    live_proof: false, generation: { model_id: 'm', model_version: 'v1', prompt_ref: 'p',
+      prompt_digest: 'sha256-0123456789abcdef' }, cases: [realCase({ scores: {} })] };
+  assert.ok(validateCorpus(corpusBroken).length > 0);
+});
+
+test('4D0 a report cannot restate the corpus reviews or the frozen generation identity', () => {
+  const agreed = { ...realCase(), scores: [{ reviewer: 'r1', axes: axes(1), failure_tags: ['overclaim'] },
+    { reviewer: 'r2', axes: axes(1), failure_tags: [] }], final_axes: axes(1) };
+  const generation = { model_id: 'fixture', model_version: 'v1', prompt_ref: 'p1',
+    prompt_digest: 'sha256-0123456789abcdef' };
+  const corpus = { corpus_id: 'decision-quality-eval-v0', proof_level: 'offline_human_eval',
+    live_proof: false, generation, cases: [agreed] };
+  const restated = validReport();
+  restated.case_results[0].reviews[0].axes = axes(3);
+  restated.case_results[0].reviews[1].axes = axes(3);
+  restated.case_results[0].adjudication = { reviewer: 'r3', reason: 'inflated', final_axes: axes(3) };
+  restated.case_results[0].final_axes = axes(3);
+  restated.failed_cases = [];
+  restated.axis_summary = deriveReportFacts(restated).axis_summary;
+  restated.scored_cases = 1;
+  restated.not_applicable_cases = 0;
+  restated.failed_cases = deriveReportFacts(restated).failed_cases;
+  assert.ok(validateEvaluation(corpus, restated).map((e) => e.rule)
+    .includes('report_reviews_must_match_corpus_scores'));
+  const wrongModel = validReport({ model: { id: 'other', version: 'v9', prompt_id: 'zz' } });
+  assert.ok(validateEvaluation(corpus, wrongModel).map((e) => e.rule)
+    .includes('model_id_must_match_corpus'));
+  const noGeneration = { ...corpus, generation: undefined };
+  assert.ok(validateEvaluation(noGeneration, validReport()).map((e) => e.rule)
+    .includes('offline_eval_requires_frozen_generation_identity'));
 });
 
 test('4D0 the protocol separates proof levels and keeps the real one offline', () => {
