@@ -20,6 +20,9 @@ const read = (name) => JSON.parse(fs.readFileSync(path.join(HERE, name), 'utf8')
 const validateInputShape = ajv.compile(read('input.schema.json'));
 const validateOutputShape = ajv.compile(read('output.schema.json'));
 
+export const AXES = ['grounding', 'intent_understanding', 'calibration', 'relevance',
+  'decision_quality', 'operator_usefulness'];
+
 export const PROMPT_PATH = path.join(HERE, 'prompt.md');
 export const INPUT_PATH = path.join(HERE, 'input.json');
 export const CONTRACT = read('input.schema.json');

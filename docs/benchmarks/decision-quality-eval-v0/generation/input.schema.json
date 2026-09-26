@@ -8,6 +8,7 @@
     "input_id": { "type": "string", "minLength": 1 },
     "live_proof": { "const": false },
     "egress_authorisation_ref": { "type": "string", "minLength": 8, "maxLength": 150 },
+    "prompt_ref": { "type": "string", "minLength": 1, "maxLength": 150 },
     "cases": { "type": "array", "maxItems": 24, "items": { "$ref": "#/$defs/staged_case" } }
   },
   "$defs": {
