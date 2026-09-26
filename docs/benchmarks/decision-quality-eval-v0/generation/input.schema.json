@@ -1,0 +1,78 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "decision-quality-eval generation input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["input_id", "live_proof", "cases"],
+  "properties": {
+    "input_id": { "type": "string", "minLength": 1 },
+    "live_proof": { "const": false },
+    "egress_authorisation_ref": { "type": "string", "minLength": 8, "maxLength": 150 },
+    "cases": { "type": "array", "maxItems": 24, "items": { "$ref": "#/$defs/staged_case" } }
+  },
+  "$defs": {
+    "staged_case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["case_id", "provenance", "situation", "subject", "messages", "offer",
+        "operator_goal", "known_unknowns"],
+      "properties": {
+        "case_id": { "type": "string", "minLength": 1, "maxLength": 150,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$" },
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {
+            "kind": { "enum": ["sanitized_fixture", "anonymized_real"] },
+            "provenance_claim_ref": { "type": "string", "pattern": "^prov_[A-Za-z0-9._-]{1,120}$" }
+          }
+        },
+        "situation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["situation_id", "goal_text", "allowed_channels"],
+          "properties": {
+            "situation_id": { "type": "string", "minLength": 1, "maxLength": 150 },
+            "goal_text": { "type": "string", "minLength": 1, "maxLength": 2000 },
+            "allowed_channels": { "type": "array", "minItems": 1,
+              "items": { "enum": ["public", "dm"] } }
+          }
+        },
+        "subject": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["author_id"],
+          "properties": { "author_id": { "type": "string", "minLength": 1, "maxLength": 150 } }
+        },
+        "messages": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 200,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["source_event_id", "author_id", "version", "channel", "direction", "text",
+              "created_at", "reply_to_id", "is_anchor"],
+            "properties": {
+              "source_event_id": { "type": "string", "minLength": 1, "maxLength": 150 },
+              "author_id": { "type": "string", "minLength": 1, "maxLength": 150 },
+              "version": { "type": "integer", "minimum": 1 },
+              "channel": { "enum": ["public", "dm"] },
+              "direction": { "enum": ["in", "out"] },
+              "text": { "type": "string", "minLength": 1, "maxLength": 4000 },
+              "created_at": { "type": "string", "minLength": 1, "maxLength": 40 },
+              "reply_to_id": { "type": ["string", "null"], "maxLength": 150 },
+              "is_anchor": { "type": "boolean" }
+            }
+          }
+        },
+        "offer": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "operator_goal": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "known_unknowns": { "type": "array", "maxItems": 50,
+          "items": { "type": "string", "minLength": 1, "maxLength": 500 } },
+        "model_output": { "type": ["object", "null"] }
+      }
+    }
+  }
+}
