@@ -6,6 +6,7 @@ import { EventEmitter } from 'node:events';
 import childProcess from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
 import { HermesAdapter } from '../business/runtime.mjs';
+import { automaticBoundary } from '../business/source-ingestion.mjs';
 import { ROOT, readJson } from '../business/config.mjs';
 import path from 'node:path';
 const fixture=()=>({config:readJson(path.join(ROOT,'config/default.json'))});
@@ -73,8 +74,12 @@ test('no-tool runtime cannot be entered with automatic disabled or live flags en
   const service=fixture(),adapter=new HermesAdapter(service,new Map());
   assert.throws(()=>adapter.decide({},{}),/AUTOMATIC_PIPELINE_DISABLED/);
   service.config.opportunity.automatic=true;
-  for(const [group,key]of [['runtime','enabled'],['telegram','enabled'],['telegram','liveSending']]){
-    service.config[group][key]=true;assert.throws(()=>adapter.decide({},{}),/READ_ONLY_BOUNDARY_REQUIRED/);service.config[group][key]=false;
+  // The boundary is asserted on its own. Calling decide() with a read-only reader configured would
+  // pass the boundary and really spawn a worker, which is not what this test is about.
+  const boundary=()=>automaticBoundary(service);
+  service.config.telegram.enabled=true;assert.doesNotThrow(boundary);service.config.telegram.enabled=false;
+  for(const [group,key]of [['runtime','enabled'],['telegram','liveSending']]){
+    service.config[group][key]=true;assert.throws(boundary,/READ_ONLY_BOUNDARY_REQUIRED/);service.config[group][key]=false;
   }
 });
 test('ordinary agent run cannot bypass automatic read-only mode',async()=>{

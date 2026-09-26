@@ -70,8 +70,13 @@ const validId = value => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:
 const nullableId = value => value === null || validId(value);
 export function automaticBoundary(service) {
   check(service.config.opportunity?.automatic === true, 'AUTOMATIC_PIPELINE_DISABLED');
-  check(service.config.runtime.enabled === false && service.config.telegram.enabled === false
-    && service.config.telegram.liveSending === false, 'READ_ONLY_BOUNDARY_REQUIRED');
+  // Two different promises used to be checked as one. Reading a permitted chat is not sending, and
+  // the read-only reader is the only way real material ever reaches this pipeline, so requiring
+  // telegram.enabled === false made ingestion unreachable from the reader that feeds it. What must
+  // stay off is unchanged and is checked independently below: interactive agent runs, and any
+  // live sending. A reader may run; it still cannot write to Telegram.
+  check(service.config.runtime.enabled === false, 'READ_ONLY_BOUNDARY_REQUIRED');
+  check(service.config.telegram.liveSending === false, 'READ_ONLY_BOUNDARY_REQUIRED');
 }
 function allowed(service, sourceId) {
   const refs = sourceAllowlist(service);

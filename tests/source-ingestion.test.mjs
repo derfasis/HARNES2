@@ -215,8 +215,12 @@ test('revoked or unknown source allowlist fails closed',t=>{
   const s=h.ingest(input()),state=sourceContextState(h.service,s.source_event_id).source_state;h.config.opportunity.allowedSourceRefs=[];
   assert.deepEqual(sourceFreshnessReasons(h.service,state),['SOURCE_NOT_ALLOWED']);
 });
-test('all live/agent runtime flags are independently rejected',t=>{
-  const h=harness(t);for(const [g,k] of [['runtime','enabled'],['telegram','enabled'],['telegram','liveSending']]){
+test('live and agent runtime flags are independently rejected, a read-only reader is not',t=>{
+  const h=harness(t);
+  // A read-only Telegram reader is how permitted material reaches this pipeline at all, so
+  // telegram.enabled on its own no longer closes the boundary. It was never a sending flag.
+  h.config.telegram.enabled=true;assert.doesNotThrow(()=>h.ingest(input()));h.config.telegram.enabled=false;
+  for(const [g,k] of [['runtime','enabled'],['telegram','liveSending']]){
     h.config[g][k]=true;assert.throws(()=>h.ingest(input()),/READ_ONLY_BOUNDARY_REQUIRED/);h.config[g][k]=false;
   }h.config.opportunity.automatic=false;assert.throws(()=>h.ingest(input()),/AUTOMATIC_PIPELINE_DISABLED/);noEffects(h);
 });

@@ -55,6 +55,15 @@ machine-verifiable needs an immutable registry mapping `provenance_claim_ref` to
 and that registry does not exist yet. Until it does, the honest claim is: this corpus's real-case
 count is only as trustworthy as the people who filled it in.
 
+One consequence found against real Telegram material, stated here because it is not obvious: the
+reference is *not* an internal bookkeeping field. It travels inside the staged input the model is
+shown, and nothing in the anonymiser inspects it. A reference built from a real message id or a
+real chat id therefore reaches the model unchanged, which is the same class of leak the sanitiser
+exists to prevent — the one gap in it. It was not closed by scanning the field as a substring,
+because that trades this for a false positive: a note reading `owner-note-1` collides with a real
+message id of `1`. So the reference stays a human-checked claim, and whoever fills it in is
+responsible for it being an opaque token rather than a source identifier.
+
 ## What the validator will not do
 
 It will not score anything, average anything, or decide whether an output is good. It checks that
