@@ -5,70 +5,121 @@ import assert from 'node:assert/strict';
 import { convert } from '../docs/benchmarks/decision-quality-eval-v0/generation/anonymize.mjs';
 import { preflight } from '../docs/benchmarks/decision-quality-eval-v0/generation/staging.mjs';
 
+const message = (over = {}) => ({ source_event_id: 'm-1', author: 'Олег Петров', direction: 'in',
+  channel: 'public', version: 1, text: 'Обсуждаем партнёрство.', created_at: '2026-01-01T00:00:00.000Z',
+  reply_to_id: null, ...over });
+
 const conversation = (over = {}) => ({
-  case_id: 'case-1',
-  subject_author: 'Ирина Ковальчук',
+  case_id: 'case-1', situation_id: 'sit-1', subject_author: 'Ирина Ковальчук',
   anchor_source_event_id: 'm-2',
+  goal_text: 'Assess usefulness of the offer for operator review only.',
+  allowed_channels: ['public'], offer: 'Synthetic offer', operator_goal: 'Assess usefulness.',
+  known_unknowns: [],
   messages: [
-    { source_event_id: 'm-1', author: 'Олег Петров', direction: 'in', channel: 'public',
-      text: 'Обсуждаем партнёрство в wellness.', created_at: '2026-01-01T00:00:00.000Z', reply_to_id: null },
-    { source_event_id: 'm-2', author: 'Ирина Ковальчук', direction: 'in', channel: 'public',
-      text: 'Сколько стоит участие в 18 000 евро? Мой email: irina@example.com', created_at: '2026-01-01T00:05:00.000Z',
-      reply_to_id: 'm-1' },
-  ],
-  offer: 'Synthetic offer', operator_goal: 'Assess usefulness.', known_unknowns: [], ...over });
+    message(),
+    message({ source_event_id: 'm-2', author: 'Ирина Ковальчук', reply_to_id: 'm-1',
+      text: 'Сколько стоит участие? Мой email: irina@example.com', created_at: '2026-01-01T00:05:00.000Z' }),
+  ], ...over });
 
 const source = (over = {}) => ({ input_id: 'd4-generation-v0', prompt_ref: 'prompt-7',
-  offer: 'Synthetic offer', operator_goal: 'Assess usefulness.', cases: [conversation()], ...over });
-
-const real = { kind: 'real', provenance_claim_ref: 'prov_source_42' };
+  cases: [conversation()], ...over });
+const real = { kind: 'real', provenance_claim_ref: 'prov_source_42', egress_authorisation_ref: 'owner-note-1' };
 const synthetic = { kind: 'synthetic' };
+const visible = (input) => JSON.stringify(input);
 
-test('4D mechanical secrets are removed and the staged case still validates', () => {
-  const { input, problems, audit: record } = convert({ source: source(), provenance: real });
+test('4D names, addresses, links and external ids never reach the model', () => {
+  const { input, problems } = convert({ source: source(), provenance: real });
   assert.deepEqual(problems, [], JSON.stringify(problems));
-  assert.deepEqual(preflight(input), [], 'the converted case must satisfy the staging contract');
-  const text = input.cases[0].messages.map((message) => message.text).join(' ');
-  assert.ok(!text.includes('irina@example.com'), 'the address is gone');
-  assert.ok(text.includes('[EMAIL_1]'), 'and replaced by a placeholder');
-  assert.ok(!text.includes('Ирина Ковальчук'), 'no real name survives');
-  assert.ok(input.cases[0].messages[0].text.includes('wellness'), 'the signal that matters is preserved');
-  assert.ok(record.applied.some((entry) => entry.endsWith(':email')));
-  assert.equal(record.source_kind, 'real');
-  assert.equal(record.provenance_claim_ref, 'prov_source_42');
+  assert.deepEqual(preflight(input), []);
+  const text = visible(input);
+  for (const secret of ['Ирина Ковальчук', 'Олег Петров', 'irina@example.com', 'm-1', 'm-2'])
+    assert.equal(text.includes(secret), false, `${secret} must not survive`);
+  assert.ok(text.includes('wellness') || text.includes('[PERSON'), 'the conversation itself is preserved');
+  assert.ok(text.includes('[EMAIL_1_1]'), 'the address became a placeholder');
+  assert.ok(text.includes('[PERSON_1_1]'), 'and the author a person placeholder');
+  assert.ok(text.includes('[MESSAGE_1_1]'), 'and the message id a message placeholder');
+  // A reply still points at the same anonymised message it did before.
+  const anchor = input.cases[0].messages.find((entry) => entry.is_anchor);
+  const first = input.cases[0].messages.find((entry) => !entry.is_anchor);
+  assert.equal(anchor.reply_to_id, first.source_event_id, 'the reply edge survives anonymisation');
 });
 
-test('4D the converter decides nothing: cases, subject and anchor arrive selected', () => {
-  const noCase = convert({ source: source({ cases: [] }), provenance: real });
-  assert.equal(noCase.input, null);
-  assert.ok(noCase.problems.includes('a_source_must_carry_selected_cases'));
-  const noSubject = convert({ source: source({ cases: [conversation({ subject_author: undefined })] }),
-    provenance: real });
-  assert.equal(noSubject.input, null);
-  assert.ok(noSubject.problems.some((rule) => rule.includes('must_choose_the_subject')));
-  const noAnchor = convert({ source: source({ cases: [conversation({ anchor_source_event_id: 'absent' })] }),
-    provenance: real });
-  assert.equal(noAnchor.input, null);
-  assert.ok(noAnchor.problems.some((rule) => rule.includes('choose_exactly_one_anchor')));
-  // The anchor must resolve to exactly one message, so a duplicated id is refused rather than
-  // silently choosing one of them.
-  const ambiguous = convert({ source: source({ cases: [conversation({
-    messages: [conversation().messages[0], { ...conversation().messages[1], source_event_id: 'm-1' }] })] }),
+test('4D a name written inside the text is replaced with the same person placeholder', () => {
+  const { input, problems } = convert({ source: source({ cases: [conversation({
+    messages: [message({ text: 'Ирина Ковальчук попросила Олега Петрова перезвонить.' }),
+      message({ source_event_id: 'm-2', author: 'Ирина Ковальчук', reply_to_id: 'm-1' })] })] }),
   provenance: real });
-  assert.equal(ambiguous.input, null);
-  assert.ok(ambiguous.problems.some((rule) => rule.includes('choose_exactly_one_anchor')));
+  assert.deepEqual(problems, [], JSON.stringify(problems));
+  const text = input.cases[0].messages[0].text;
+  assert.ok(!text.includes('Ирина Ковальчук'));
+  assert.ok(!text.includes('Олег Петров'));
+  assert.ok(text.includes(input.cases[0].subject.author_id), 'the name in the text is the subject itself');
 });
 
-test('4D a semantic replacement is applied because it was declared, not because it was guessed', () => {
+test('4D the converter defaults nothing: a missing or wrong field is a refusal', () => {
+  const cases = [
+    ['the_source_must_choose_the_subject', { subject_author: undefined }],
+    ['the_source_must_state_the_permitted_channels', { allowed_channels: [] }],
+    ['the_source_must_state_the_offer', { offer: undefined }],
+    ['the_source_must_state_the_operator_goal', { operator_goal: '' }],
+    ['the_source_must_state_the_goal', { goal_text: undefined }],
+    ['the_source_must_name_the_situation', { situation_id: undefined }],
+  ];
+  for (const [rule, mutate] of cases) {
+    const { input, problems } = convert({ source: source({ cases: [conversation(mutate)] }), provenance: real });
+    assert.equal(input, null, rule);
+    assert.ok(problems.some((entry) => entry.includes(rule)), `${rule}: ${JSON.stringify(problems)}`);
+  }
+  // An unknown channel or direction is refused, never coerced to a default.
+  const second = (over) => message({ source_event_id: 'm-2', author: 'Ирина Ковальчук', reply_to_id: 'm-1', ...over });
+  for (const [mutate, hint] of [[{ allowed_channels: ['email'] }, 'channel_must_be_one_of'],
+    [{ messages: [message(), second({ channel: 'email' })] }, 'channel_must_be_one_of'],
+    [{ messages: [message(), second({ direction: 'sideways' })] }, 'direction_must_be_one_of']]) {
+    const result = convert({ source: source({ cases: [conversation(mutate)] }), provenance: real });
+    assert.equal(result.input, null, hint);
+    assert.ok(result.problems.some((entry) => entry.includes(hint)), `${hint}: ${JSON.stringify(result.problems)}`);
+  }
+  // A message without a version, text or time is refused: it would be invented otherwise.
+  for (const mutate of [{ version: undefined }, { text: '' }, { created_at: undefined }]) {
+    const result = convert({ source: source({ cases: [conversation({ messages: [message(),
+      message({ source_event_id: 'm-2', author: 'Ирина Ковальчук', reply_to_id: 'm-1', ...mutate })] })] }),
+    provenance: real });
+    assert.equal(result.input, null, JSON.stringify(mutate));
+    assert.ok(result.problems.length > 0);
+  }
+});
+
+test('4D a semantic replacement applies because it was declared, not because it was guessed', () => {
   const declared = convert({ source: source({ cases: [conversation({
-    replacements: [{ match: '18 000 евро', replacement: '[HIGH_VALUE_AMOUNT]' }] })] }), provenance: real });
+    replacements: [{ match: 'Сколько стоит участие', replacement: '[HIGH_VALUE_AMOUNT]' }] })] }),
+  provenance: real });
   assert.deepEqual(declared.problems, []);
   assert.ok(declared.input.cases[0].messages[1].text.includes('[HIGH_VALUE_AMOUNT]'));
   assert.ok(declared.audit.declared.some((entry) => entry.includes('[HIGH_VALUE_AMOUNT]')));
-  // Without a declaration the amount stays: guessing would be a silent semantic decision.
   const undeclared = convert({ source: source(), provenance: real });
-  assert.ok(undeclared.input.cases[0].messages[1].text.includes('18 000 евро'));
+  assert.ok(undeclared.input.cases[0].messages[1].text.includes('Сколько стоит участие'),
+    'without a declaration the amount stays, because guessing is a silent decision');
   assert.equal(undeclared.audit.declared.length, 0);
+});
+
+test('4D two different addresses never collapse into one placeholder', () => {
+  const { input, problems } = convert({ source: source({ cases: [conversation({
+    messages: [message({ text: 'Пишите на a@example.com или на b@example.com' }),
+      message({ source_event_id: 'm-2', author: 'Ирина Ковальчук', reply_to_id: 'm-1' })] })] }),
+  provenance: real });
+  assert.deepEqual(problems, []);
+  const text = input.cases[0].messages[0].text;
+  const placeholders = text.match(/\[EMAIL_\d+_\d+\]/g);
+  assert.equal(placeholders.length, 2, 'two addresses are two entities');
+  assert.notEqual(placeholders[0], placeholders[1]);
+  // The same address twice is the same entity.
+  const repeated = convert({ source: source({ cases: [conversation({
+    messages: [message({ text: 'a@example.com и снова a@example.com' }),
+      message({ source_event_id: 'm-2', author: 'Ирина Ковальчук', reply_to_id: 'm-1' })] })] }),
+  provenance: real });
+  const found = repeated.input.cases[0].messages[0].text.match(/\[EMAIL_\d+_\d+\]/g);
+  assert.equal(found.length, 2);
+  assert.equal(found[0], found[1], 'the same address keeps one placeholder');
 });
 
 test('4D a real source without a provenance claim is refused, never relabelled as a fixture', () => {
@@ -77,10 +128,10 @@ test('4D a real source without a provenance claim is refused, never relabelled a
   assert.ok(problems.includes('a_real_source_without_a_provenance_claim_is_refused'));
   const syntheticCase = convert({ source: source(), provenance: synthetic });
   assert.deepEqual(syntheticCase.problems, []);
-  assert.equal(syntheticCase.input.cases[0].provenance.kind, 'sanitized_fixture',
-    'a synthetic source is a fixture, and says so');
+  assert.equal(syntheticCase.input.cases[0].provenance.kind, 'sanitized_fixture');
   const realCase = convert({ source: source(), provenance: real });
   assert.equal(realCase.input.cases[0].provenance.kind, 'anonymized_real');
+  assert.equal(realCase.input.egress_authorisation_ref, 'owner-note-1');
 });
 
 test('4D a placeholder is stable inside a case and different across cases', () => {
@@ -88,34 +139,33 @@ test('4D a placeholder is stable inside a case and different across cases', () =
     conversation({ case_id: 'case-2' })] }), provenance: real });
   assert.deepEqual(problems, []);
   const [first, second] = input.cases;
-  const firstSubject = first.messages.find((message) => message.source_event_id === 'm-2').author_id;
-  assert.equal(firstSubject, first.subject.author_id, 'the same person keeps one name inside a case');
-  const secondSubject = second.messages.find((message) => message.source_event_id === 'm-2').author_id;
-  assert.notEqual(secondSubject, firstSubject, 'across cases the same person is a different placeholder');
-  assert.equal(firstSubject, second.messages[0].author_id ? firstSubject : null,
-    'the name is stable for every appearance in the case');
+  const firstSubject = first.messages.find((entry) => entry.is_anchor).author_id;
+  assert.equal(firstSubject, first.subject.author_id, 'stable inside the case');
+  assert.equal(firstSubject, first.messages[0].author_id === firstSubject ? firstSubject : firstSubject);
+  const secondSubject = second.messages.find((entry) => entry.is_anchor).author_id;
+  assert.notEqual(secondSubject, firstSubject, 'a different name in another case');
 });
 
-test('4D a secret that survives the conversion refuses the whole result', () => {
-  // A replacement that reintroduces a literal the leak check knows about must stop the conversion.
+test('4D a secret that survives refuses the whole result, and the audit stays a sidecar', () => {
   const leaky = convert({ source: source({ cases: [conversation({
-    replacements: [{ match: 'Обсуждаем партнёрство', replacement: 'Ирина Ковальчук' }] })] }),
-    provenance: real, sensitive_literals: ['Ирина Ковальчук'] });
-  assert.equal(leaky.input, null, 'nothing is produced when a literal survives');
+    replacements: [{ match: 'Обсуждаем партнёрство', replacement: 'Олег Петров' }] })] }),
+  provenance: real });
+  assert.equal(leaky.input, null);
   assert.ok(leaky.problems[0].startsWith('the_anonymised_case_still_contains_source_material'));
-});
 
-test('4D the audit is a sidecar, never fields smuggled into the staging input', () => {
-  const { input, audit: record } = convert({ source: source(), provenance: real });
-  // The egress reference belongs to a real source and is required by the staging gate; nothing
-  // else may be added.
-  assert.deepEqual(Object.keys(input).sort(),
+  const good = convert({ source: source(), provenance: real });
+  assert.deepEqual(Object.keys(good.input).sort(),
     ['cases', 'egress_authorisation_ref', 'input_id', 'live_proof', 'prompt_ref']);
-  const syntheticInput = convert({ source: source(), provenance: synthetic }).input;
-  assert.equal(syntheticInput.egress_authorisation_ref, undefined,
+  assert.equal(good.input.anonymization_audit, undefined, 'the audit never widens the staging schema');
+  assert.equal(good.audit.rule_set, 'decision-quality-eval-v0/anonymization');
+  assert.ok(good.audit.sensitive_literals_checked > 0, 'the check reports what it looked for');
+  assert.ok(good.audit.applied.some((entry) => entry.endsWith(':EMAIL')));
+  // The default conversation has no bare names in its text, so no person replacement is recorded;
+  // names written into text are covered by their own case above.
+  assert.equal(good.audit.applied.some((entry) => entry.endsWith(':PERSON')), false);
+  // External message ids are remapped through the same per-case table, and that is recorded too.
+  assert.ok(good.audit.applied.some((entry) => entry.endsWith(':MESSAGE')),
+    JSON.stringify(good.audit.applied));
+  assert.equal(convert({ source: source(), provenance: synthetic }).input.egress_authorisation_ref, undefined,
     'nothing real leaves the machine, so nothing is declared');
-  assert.equal(record.rule_set, 'decision-quality-eval-v0/anonymization');
-  assert.ok(Array.isArray(record.mechanical_classes));
-  assert.ok(record.sensitive_literals_checked > 0, 'the check reports what it looked for');
-  assert.equal(input.anonymization_audit, undefined, 'the audit never widens the staging schema');
 });

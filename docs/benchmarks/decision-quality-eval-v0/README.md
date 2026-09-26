@@ -199,11 +199,15 @@ which cases, who the subject is, which message is the anchor, and whether the co
 matters at all all arrive selected in the input. Guessing them here would build a second router
 without any of the review the first one gets.
 
-It removes what it can recognise without being told — addresses, links, phone numbers, handles — and
-applies the semantic replacements the source declared. It does not guess whether a sum or a city
+It removes what it can recognise without being told — addresses, links, phone numbers, handles,
+external account and message ids — including a real name written inside the message text, which is
+still the person. Placeholders are one stable name per literal within a case: two different
+addresses never collapse into one placeholder, and the same address always keeps the same one.
+It also applies the semantic replacements the source declared. It does not guess whether a sum or a city
 matters to the decision; that is a judgement about the material, and it belongs to whoever holds
-it. Placeholders are stable inside a case and different in every other case, because one placeholder
-meaning two people would teach a model exactly the wrong thing.
+it. Nothing is defaulted either: a missing channel, direction, version, goal, offer or permitted
+channel is a refusal, because a default would be a decision this code has no standing to make — and
+a wrong `allowed_channels` would widen what the model may ever propose.
 
 A known literal that survives the conversion refuses the whole result, and a **real** source
 without a provenance claim is refused rather than quietly relabelled as a fixture. Relabelling real
