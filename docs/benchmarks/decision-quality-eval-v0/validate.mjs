@@ -26,6 +26,48 @@ const validScore = (value) => (Number.isInteger(value) && value >= 0 && value <=
 // Deliberately hand-written rather than schema-driven: a validator that can be reconfigured
 // alongside the data can be talked into accepting anything. It checks the rules that matter and
 // names the rule it broke.
+// The reviewer protocol, applied identically to a corpus case and to a report case_result.
+function validateReviews(reviews, adjudication, at, problems) {
+  const require_ = (condition, rule) => { if (!condition) problems.push({ at, rule }); };
+  require_(Array.isArray(reviews) && reviews.length === 2, 'exactly_two_reviews_required');
+  const list = Array.isArray(reviews) ? reviews : [];
+  const reviewers = new Set();
+  for (const scoring of list) {
+    require_(typeof scoring?.reviewer === 'string' && scoring.reviewer.length > 0, 'scoring_reviewer_required');
+    require_(scoring?.axes && typeof scoring.axes === 'object', 'scoring_axes_required');
+    require_(extraKeys(scoring, ['reviewer', 'axes', 'failure_tags']).length === 0, 'scoring_has_extra_fields');
+    require_(Array.isArray(scoring?.failure_tags), 'scoring_failure_tags_required');
+    require_(extraKeys(scoring?.axes, AXES).length === 0, 'scoring_axes_has_extra_fields');
+    for (const axis of AXES) require_(own(scoring?.axes, [axis]), `axis_${axis}_required`);
+    for (const axis of AXES) require_(validScore(scoring?.axes?.[axis]), `axis_${axis}_score_invalid`);
+    for (const tag of scoring?.failure_tags ?? [])
+      require_(FAILURE_TAGS.includes(tag), `failure_tag_unknown:${tag}`);
+    reviewers.add(scoring?.reviewer);
+  }
+  require_(reviewers.size === 2, 'two_distinct_reviewers_required');
+  const divergent = list.length === 2 && AXES.some((axis) => {
+    const [a, b] = [list[0]?.axes?.[axis], list[1]?.axes?.[axis]];
+    if (a === 'N/A' || b === 'N/A') return a !== b;
+    return Math.abs(a - b) >= 2;
+  });
+  require_(divergent === !!adjudication, divergent ? 'adjudication_required' : 'adjudication_not_expected');
+  if (adjudication) {
+    require_(typeof adjudication.reviewer === 'string' && adjudication.reviewer.length > 0,
+      'adjudication_reviewer_required');
+    // The adjudicator is a third person, not one of the two who already scored the case.
+    require_(!reviewers.has(adjudication.reviewer), 'adjudicator_must_be_a_third_reviewer');
+    require_(extraKeys(adjudication, ['reviewer', 'final_axes', 'reason']).length === 0,
+      'adjudication_has_extra_fields');
+    require_(typeof adjudication.reason === 'string' && adjudication.reason.length > 0,
+      'adjudication_reason_required');
+    require_(extraKeys(adjudication.final_axes, AXES).length === 0 && own(adjudication.final_axes, AXES),
+      'adjudication_final_axes_required');
+    for (const axis of AXES)
+      require_(validScore(adjudication.final_axes?.[axis]), `adjudication_axis_${axis}_score_invalid`);
+  }
+  return problems;
+}
+
 export function validateCase(item, at = 'case') {
   const problems = [];
   const require_ = (condition, rule) => { if (!condition) problems.push({ at, rule }); };
@@ -59,40 +101,7 @@ export function validateCase(item, at = 'case') {
   require_(item.model_output === null || (typeof item.model_output === 'object' && !Array.isArray(item.model_output)),
     'model_output_object_or_null');
 
-  // The protocol: exactly two independent reviews, by two different people.
-  const scores = item.scores ?? [];
-  require_(Array.isArray(scores) && scores.length === 2, 'exactly_two_reviews_required');
-  const reviewers = new Set();
-  for (const scoring of scores) {
-    require_(typeof scoring?.reviewer === 'string' && scoring.reviewer.length > 0, 'scoring_reviewer_required');
-    require_(scoring?.axes && typeof scoring.axes === 'object', 'scoring_axes_required');
-    require_(extraKeys(scoring?.axes, AXES).length === 0, 'scoring_axes_has_extra_fields');
-    for (const axis of AXES) require_(own(scoring?.axes, [axis]), `axis_${axis}_required`);
-    for (const axis of AXES) require_(validScore(scoring?.axes?.[axis]), `axis_${axis}_score_invalid`);
-    for (const tag of scoring?.failure_tags ?? [])
-      require_(FAILURE_TAGS.includes(tag), `failure_tag_unknown:${tag}`);
-    reviewers.add(scoring?.reviewer);
-  }
-  require_(reviewers.size === 2, 'two_distinct_reviewers_required');
-
-  // Adjudication is required exactly when the two reviews disagree, and never replaces them.
-  const divergent = scores.length === 2 && AXES.some((axis) => {
-    const [a, b] = [scores[0]?.axes?.[axis], scores[1]?.axes?.[axis]];
-    if (a === 'N/A' || b === 'N/A') return a !== b;
-    return Math.abs(a - b) >= 2;
-  });
-  require_(divergent === !!item.adjudication,
-    divergent ? 'adjudication_required' : 'adjudication_not_expected');
-  if (item.adjudication) {
-    require_(typeof item.adjudication.reviewer === 'string' && item.adjudication.reviewer.length > 0,
-      'adjudication_reviewer_required');
-    require_(typeof item.adjudication.reason === 'string' && item.adjudication.reason.length > 0,
-      'adjudication_reason_required');
-    require_(extraKeys(item.adjudication.final_axes, AXES).length === 0 && own(item.adjudication.final_axes, AXES),
-      'adjudication_final_axes_required');
-    for (const axis of AXES)
-      require_(validScore(item.adjudication.final_axes?.[axis]), `adjudication_axis_${axis}_score_invalid`);
-  }
+  validateReviews(item.scores, item.adjudication, at, problems);
   return problems;
 }
 
@@ -110,6 +119,39 @@ export function validateCorpus(corpus) {
 }
 
 const axisFailed = (score) => score !== 'N/A' && score <= 1;
+const round3 = (value) => Math.round(value * 1000) / 1000;
+const sameValue = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+// Everything a report asserts is recomputed from case_results. A metric that cannot be derived
+// from the per-case results is a number someone typed, and a benchmark cannot be built on that.
+export function deriveReportFacts(report) {
+  const results = Array.isArray(report?.case_results) ? report.case_results : [];
+  const axis = Object.fromEntries(AXES.map((name) => [name, { scores: [], na: 0 }]));
+  const failures = [];
+  for (const result of results) {
+    for (const name of AXES) {
+      const score = result?.final_axes?.[name];
+      if (score === 'N/A') axis[name].na += 1;
+      else if (Number.isInteger(score)) axis[name].scores.push(score);
+      else continue;
+      if (axisFailed(score) && result?.case_id) {
+        failures.push({ case_id: result.case_id, axis: name, score,
+          failure_tags: [...(result.failure_tags ?? [])].sort() });
+      }
+    }
+  }
+  const summary = Object.fromEntries(AXES.map((name) => {
+    const { scores, na } = axis[name];
+    return [name, { scored: scores.length, na,
+      mean: scores.length ? round3(scores.reduce((a, b) => a + b, 0) / scores.length) : null }];
+  }));
+  return {
+    scored_cases: results.length,
+    not_applicable_cases: results.filter((result) => AXES.every((name) => result?.final_axes?.[name] === 'N/A')).length,
+    axis_summary: summary,
+    failed_cases: failures.sort((a, b) => `${a.case_id}|${a.axis}`.localeCompare(`${b.case_id}|${b.axis}`)),
+  };
+}
 
 export function validateReport(report) {
   const problems = [];
@@ -120,50 +162,88 @@ export function validateReport(report) {
   if (report.proof_level !== 'offline_human_eval')
     problems.push({ at: 'report', rule: 'report_proof_level_must_be_offline_human_eval' });
   if (report.live_proof !== false) problems.push({ at: 'report', rule: 'live_proof_must_be_false' });
-  if (!report.model || typeof report.model.id !== 'string' || typeof report.model.version !== 'string'
-    || typeof report.model.prompt_id !== 'string')
+  if (extraKeys(report.model ?? {}, ['id', 'version', 'prompt_id']).length > 0
+    || typeof report.model?.id !== 'string' || typeof report.model?.version !== 'string'
+    || typeof report.model?.prompt_id !== 'string')
     problems.push({ at: 'report', rule: 'model_must_be_named_with_version' });
-  if (!Number.isInteger(report.scored_cases) || report.scored_cases < 0)
-    problems.push({ at: 'report', rule: 'scored_cases_required' });
-  if (!report.axis_summary || typeof report.axis_summary !== 'object')
-    problems.push({ at: 'report', rule: 'axis_summary_required' });
-  else for (const axis of AXES) {
-    const value = report.axis_summary[axis];
-    if (!value || !Number.isInteger(value.scored) || !Number.isInteger(value.na))
-      problems.push({ at: `report.axis_summary.${axis}`, rule: 'axis_counts_required' });
-    if (value && value.aggregate_score !== undefined)
-      problems.push({ at: `report.axis_summary.${axis}`, rule: 'no_aggregate_magic_score' });
-  }
-  // A single headline number is exactly what this benchmark refuses to produce.
-  if (report.aggregate_score !== undefined) problems.push({ at: 'report', rule: 'no_aggregate_magic_score' });
   if (!Array.isArray(report.case_results)) {
     problems.push({ at: 'report', rule: 'case_results_required' });
-  } else {
-    // failed_cases must be derivable from case_results, so a failing case cannot quietly vanish.
-    const derived = new Set();
-    report.case_results.forEach((result, index) => {
-      if (!result || typeof result.case_id !== 'string' || result.case_id.length === 0)
-        problems.push({ at: `report.case_results[${index}]`, rule: 'case_id_required' });
-      const finalAxes = result?.final_axes ?? {};
-      for (const axis of AXES) {
-        const score = finalAxes[axis];
-        if (!validScore(score)) problems.push({ at: `report.case_results[${index}].${axis}`, rule: 'final_axis_score_invalid' });
-        else if (axisFailed(score)) derived.add(`${result.case_id}|${axis}`);
-      }
-      if (result && typeof result.failed !== 'boolean')
-        problems.push({ at: `report.case_results[${index}]`, rule: 'failed_flag_required' });
-      if (result && finalAxes && result.failed !== AXES.some((axis) => axisFailed(finalAxes[axis])))
-        problems.push({ at: `report.case_results[${index}]`, rule: 'failed_flag_must_match_final_axes' });
-    });
-    if (!Array.isArray(report.failed_cases)) problems.push({ at: 'report', rule: 'failed_cases_required' });
-    else {
-      const listed = new Set(report.failed_cases.map((row) => `${row?.case_id}|${row?.axis}`));
-      for (const missing of derived) if (!listed.has(missing))
-        problems.push({ at: 'report.failed_cases', rule: `failed_case_missing:${missing}` });
-      for (const invented of listed) if (!derived.has(invented))
-        problems.push({ at: 'report.failed_cases', rule: `failed_case_invented:${invented}` });
+    return problems;
+  }
+  report.case_results.forEach((result, index) => {
+    const at = `report.case_results[${index}]`;
+    if (extraKeys(result ?? {}, ['case_id', 'reviews', 'adjudication', 'final_axes', 'failure_tags', 'failed']).length > 0)
+      problems.push({ at, rule: 'case_result_has_extra_fields' });
+    if (typeof result?.case_id !== 'string' || result.case_id.length === 0)
+      problems.push({ at, rule: 'case_id_required' });
+    if (extraKeys(result?.final_axes, AXES).length > 0 || !own(result?.final_axes, AXES))
+      problems.push({ at, rule: 'final_axes_required' });
+    for (const axis of AXES) if (!validScore(result?.final_axes?.[axis]))
+      problems.push({ at: axis, rule: 'final_axis_score_invalid' });
+    if (!Array.isArray(result?.failure_tags)) problems.push({ at, rule: 'failure_tags_required' });
+    for (const tag of result?.failure_tags ?? [])
+      if (!FAILURE_TAGS.includes(tag)) problems.push({ at, rule: `failure_tag_unknown:${tag}` });
+    if (typeof result?.failed !== 'boolean') problems.push({ at, rule: 'failed_flag_required' });
+    else if (result.failed !== AXES.some((axis) => axisFailed(result.final_axes?.[axis])))
+      problems.push({ at, rule: 'failed_flag_must_match_final_axes' });
+    // The same reviewer protocol applies inside a report, not only inside a corpus case.
+    validateReviews(result?.reviews, result?.adjudication, at, problems);
+  });
+  // A single headline number is exactly what this benchmark refuses to produce.
+  if (report.aggregate_score !== undefined) problems.push({ at: 'report', rule: 'no_aggregate_magic_score' });
+  for (const axis of AXES)
+    if (report.axis_summary?.[axis] && report.axis_summary[axis].aggregate_score !== undefined)
+      problems.push({ at: `report.axis_summary.${axis}`, rule: 'no_aggregate_magic_score' });
+  const facts = deriveReportFacts(report);
+  if (report.scored_cases !== facts.scored_cases)
+    problems.push({ at: 'report.scored_cases', rule: 'scored_cases_must_be_derived' });
+  if (report.not_applicable_cases !== undefined && report.not_applicable_cases !== facts.not_applicable_cases)
+    problems.push({ at: 'report.not_applicable_cases', rule: 'not_applicable_cases_must_be_derived' });
+  if (!report.axis_summary || typeof report.axis_summary !== 'object') {
+    problems.push({ at: 'report', rule: 'axis_summary_required' });
+  } else for (const axis of AXES) {
+    if (!sameValue(report.axis_summary[axis], facts.axis_summary[axis]))
+      problems.push({ at: `report.axis_summary.${axis}`, rule: 'axis_summary_must_be_derived' });
+  }
+  // failed_cases is an exact derivation, not a selection: no duplicates, nothing invented.
+  const listed = Array.isArray(report.failed_cases) ? report.failed_cases : [];
+  if (!Array.isArray(report.failed_cases)) problems.push({ at: 'report', rule: 'failed_cases_required' });
+  const keys = listed.map((row) => `${row?.case_id}|${row?.axis}`);
+  if (new Set(keys).size !== keys.length)
+    problems.push({ at: 'report.failed_cases', rule: 'failed_cases_must_not_duplicate' });
+  for (const row of listed) {
+    if (extraKeys(row ?? {}, ['case_id', 'axis', 'score', 'failure_tags']).length > 0)
+      problems.push({ at: 'report.failed_cases', rule: 'failed_case_has_extra_fields' });
+    if (!AXES.includes(row?.axis)) problems.push({ at: 'report.failed_cases', rule: 'failed_case_axis_known' });
+    if (!validScore(row?.score)) problems.push({ at: 'report.failed_cases', rule: 'failed_case_score_invalid' });
+  }
+  if (!sameValue([...listed].map((row) => ({ case_id: row?.case_id, axis: row?.axis, score: row?.score,
+    failure_tags: [...(row?.failure_tags ?? [])].sort() })), facts.failed_cases))
+    problems.push({ at: 'report.failed_cases', rule: 'failed_cases_must_be_exactly_derived' });
+  return problems;
+}
+
+// A report may only claim a real offline evaluation if the corpus behind it really holds one.
+export function validateEvaluation(corpus, report) {
+  const problems = [];
+  const cases = Array.isArray(corpus?.cases) ? corpus.cases : [];
+  if (corpus?.proof_level === 'offline_human_eval') {
+    if (cases.length === 0) problems.push({ at: 'corpus', rule: 'offline_eval_requires_cases' });
+    for (const item of cases) {
+      const at = item?.case_id ?? 'case';
+      if (item?.provenance?.kind !== 'anonymized_real')
+        problems.push({ at, rule: 'offline_eval_case_must_be_anonymized_real' });
+      if (!CLAIM_REF.test(item?.provenance?.provenance_claim_ref ?? ''))
+        problems.push({ at, rule: 'offline_eval_case_requires_provenance_claim' });
+      if (item?.model_output === null || item?.model_output === undefined)
+        problems.push({ at, rule: 'offline_eval_case_requires_model_output' });
     }
   }
+  const corpusIds = cases.map((item) => item?.case_id).filter(Boolean).sort();
+  const reportIds = (Array.isArray(report?.case_results) ? report.case_results : [])
+    .map((row) => row?.case_id).filter(Boolean).sort();
+  if (corpusIds.length > 0 && !sameValue(corpusIds, reportIds))
+    problems.push({ at: 'report', rule: 'report_case_ids_must_match_corpus' });
   return problems;
 }
 

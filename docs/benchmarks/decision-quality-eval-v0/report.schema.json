@@ -56,6 +56,12 @@
       "type": "integer",
       "minimum": 0
     },
+    "case_results": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/case_result"
+      }
+    },
     "axis_summary": {
       "type": "object",
       "additionalProperties": false,
@@ -91,76 +97,22 @@
     "failed_cases": {
       "type": "array",
       "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "case_id",
-          "axis",
-          "score",
-          "failure_tags"
-        ],
-        "properties": {
-          "case_id": {
-            "type": "string",
-            "minLength": 1
-          },
-          "axis": {
-            "type": "string",
-            "minLength": 1
-          },
-          "score": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 3
-              },
-              {
-                "const": "N/A"
-              }
-            ]
-          },
-          "failure_tags": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        }
-      }
-    },
-    "case_results": {
-      "type": "array",
-      "items": {
-        "$ref": "#/$defs/case_result"
+        "$ref": "#/$defs/failed_case"
       }
     }
   },
   "$defs": {
-    "axis": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "scored",
-        "na",
-        "mean"
-      ],
-      "properties": {
-        "scored": {
+    "score": {
+      "anyOf": [
+        {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 3
         },
-        "na": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "mean": {
-          "type": [
-            "number",
-            "null"
-          ]
+        {
+          "const": "N/A"
         }
-      }
+      ]
     },
     "axes": {
       "type": "object",
@@ -218,21 +170,20 @@
             "additionalProperties": false,
             "required": [
               "reviewer",
-              "axes"
+              "axes",
+              "failure_tags"
             ],
             "properties": {
               "reviewer": {
                 "type": "string",
-                "minLength": 1
+                "minLength": 1,
+                "maxLength": 100
               },
               "axes": {
                 "$ref": "#/$defs/axes"
               },
               "failure_tags": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
+                "$ref": "#/$defs/failure_tags"
               }
             }
           }
@@ -248,7 +199,8 @@
           "properties": {
             "reviewer": {
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "maxLength": 100
             },
             "final_axes": {
               "$ref": "#/$defs/axes"
@@ -263,14 +215,81 @@
           "$ref": "#/$defs/axes"
         },
         "failure_tags": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
+          "$ref": "#/$defs/failure_tags"
         },
         "failed": {
           "type": "boolean"
         }
+      }
+    },
+    "failed_case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_id",
+        "axis",
+        "score",
+        "failure_tags"
+      ],
+      "properties": {
+        "case_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "axis": {
+          "enum": [
+            "grounding",
+            "intent_understanding",
+            "calibration",
+            "relevance",
+            "decision_quality",
+            "operator_usefulness"
+          ]
+        },
+        "score": {
+          "$ref": "#/$defs/score"
+        },
+        "failure_tags": {
+          "$ref": "#/$defs/failure_tags"
+        }
+      }
+    },
+    "axis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scored",
+        "na",
+        "mean"
+      ],
+      "properties": {
+        "scored": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "na": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mean": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      }
+    },
+    "failure_tags": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "invented_fact",
+          "unsupported_permission",
+          "missed_opportunity",
+          "overclaim",
+          "wrong_intent",
+          "premature_action"
+        ]
       }
     }
   }

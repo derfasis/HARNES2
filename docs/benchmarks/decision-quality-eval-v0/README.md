@@ -58,9 +58,23 @@ count is only as trustworthy as the people who filled it in.
 ## What the validator will not do
 
 It will not score anything, average anything, or decide whether an output is good. It checks that
-the shapes are right, that scores are integers `0..3` or `N/A`, that a real case is provenanced,
-and that no aggregate magic number is hiding in a report. Structure is checkable; quality is not,
-and a script that pretended otherwise would be the same failure in a new place.
+the shapes are right, that scores are integers `0..3` or `N/A`, that a real case carries a
+well-formed provenance claim, and — most importantly — that **every metric in a report is
+recomputed from the per-case results**. `scored_cases`, each axis's `scored`/`na`/`mean`, and every
+row of `failed_cases` must match the derivation exactly, duplicates included. A number someone
+typed is a number someone typed, no matter how plausible it looks.
+
+The JSON Schemas are a second structural guard: the test suite compiles both with Ajv and feeds
+each a valid and a deliberately broken fixture, so a schema with a dangling `$ref` cannot pass by
+existing.
+
+`validateEvaluation(corpus, report)` links the two. A report may only claim `offline_human_eval`
+if the corpus behind it is non-empty, every case is `anonymized_real` with a provenance claim and
+a non-null model output, and the report's case ids match the corpus exactly. A report can never
+claim a real measurement on the strength of an empty protocol corpus.
+
+Structure is checkable; quality is not, and a script that pretended otherwise would be the same
+failure in a new place.
 
 ## Running the validator
 
