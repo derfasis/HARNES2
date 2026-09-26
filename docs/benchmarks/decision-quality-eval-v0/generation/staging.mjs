@@ -248,10 +248,24 @@ export const plan = (input, completed = new Map()) => {
 
 // The transport hands back text. Anything else — an object, a number, undefined — is a refusal,
 // not something to hand to a parser and hope for.
+// A model asked for one JSON object routinely wraps it in a markdown fence, and the frozen
+// prompt's own example is written that way. The fence is presentation, not content, so exactly one
+// outer fence around exactly one JSON object is unwrapped before parsing. The allowance is
+// deliberately narrow: any surrounding prose, more than one object, or a fence that does not wrap
+// the whole reply is still refused, because at that point the text is not the contract's object and
+// accepting it would be reading meaning into whatever the model felt like saying around it.
+const FENCED = /^\s*```(?:json)?\s*\r?\n([\s\S]*?)\r?\n?```\s*$/i;
 export const parseRaw = (raw) => {
   if (typeof raw !== 'string') return { parsed: null, problems: ['raw_must_be_the_text_the_runtime_returned'] };
-  try { return { parsed: JSON.parse(raw), problems: [] }; }
-  catch { return { parsed: null, problems: ['output_is_not_json'] }; }
+  const fenced = FENCED.exec(raw);
+  const body = fenced ? fenced[1] : raw;
+  if (fenced && /```/.test(body)) return { parsed: null, problems: ['output_is_not_json'] };
+  try {
+    const parsed = JSON.parse(body);
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed))
+      return { parsed: null, problems: ['output_is_not_a_json_object'] };
+    return { parsed, problems: [] };
+  } catch { return { parsed: null, problems: ['output_is_not_json'] }; }
 };
 
 export const outputProblems = (raw, stagedCase) => {
