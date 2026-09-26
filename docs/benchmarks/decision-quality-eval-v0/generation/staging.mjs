@@ -106,6 +106,10 @@ export function contractCarries(identifier, schema = CONTRACT) {
   return declaredSomewhere(schema);
 }
 
+// The decision names exactly one channel. Comparing the words directly would be wrong:
+// PUBLIC_REPLY is not spelled "public".
+const DECISION_CHANNEL = { PUBLIC_REPLY: 'public', DM: 'dm' };
+
 // The prompt must bind only to identifiers the input contract actually carries, and must not name
 // an identifier path that nothing provides.
 export function checkPromptInputAgreement(prompt = fs.readFileSync(PROMPT_PATH, 'utf8')) {
@@ -151,29 +155,40 @@ export function checkOutput(output, stagedCase) {
       problems.push(`output_schema:${error.keyword}${error.instancePath || ''}`);
     return problems;
   }
-  const ids = new Set((stagedCase.messages ?? []).map((message) => message.source_event_id));
-  const authors = new Set((stagedCase.messages ?? []).map((message) => message.author_id));
-  const grounded = (text) => (stagedCase.messages ?? []).some((message) => message.text.includes(text));
+  // Every attribute of a span is checked against the one message its source_event_id names.
+  // Checking them independently would let a span borrow an id from one message, an author from
+  // another and a text from a third.
+  const byId = new Map((stagedCase.messages ?? []).map((message) => [message.source_event_id, message]));
+  const ids = new Set(byId.keys());
   const action = output.next_action;
   if (action.situation_id !== stagedCase.situation.situation_id) problems.push('output_invents_situation_id');
   for (const reference of action.evidence_message_ids)
     if (!ids.has(reference)) problems.push(`output_invents_source_event_id:${reference}`);
   for (const span of [...output.hypothesis.evidence, ...output.hypothesis.contradictions]) {
-    if (!ids.has(span.source_event_id)) problems.push(`span_invents_source_event_id:${span.source_event_id}`);
-    else if (!authors.has(span.author_id)) problems.push(`span_invents_author_id:${span.author_id}`);
-    else if (!grounded(span.text)) problems.push(`span_text_is_not_grounded:${span.text}`);
+    const message = byId.get(span.source_event_id);
+    if (!message) { problems.push(`span_invents_source_event_id:${span.source_event_id}`); continue; }
+    if (span.author_id !== message.author_id)
+      problems.push(`span_author_does_not_belong_to_its_message:${span.source_event_id}`);
+    if (span.version !== message.version)
+      problems.push(`span_version_does_not_match_its_message:${span.source_event_id}`);
+    if (!message.text.includes(span.text))
+      problems.push(`span_text_is_not_grounded_in_its_own_message:${span.source_event_id}`);
   }
   if (['IGNORE', 'WAIT', 'HANDOFF'].includes(action.decision) && action.draft !== null)
     problems.push(`decision_${action.decision}_must_not_carry_a_draft`);
   if (['PUBLIC_REPLY', 'DM'].includes(action.decision)) {
     if (!action.draft) problems.push(`decision_${action.decision}_requires_a_draft`);
     else {
+      // The decision and the channel are one claim: they cannot disagree, and the channel has to
+      // be one the situation actually permits.
+      if (action.draft.channel !== DECISION_CHANNEL[action.decision])
+        problems.push(`draft_channel_does_not_match_decision_${action.decision}`);
+      if (!stagedCase.situation.allowed_channels.includes(action.draft.channel))
+        problems.push(`draft_channel_is_not_permitted_for_this_situation:${action.draft.channel}`);
       if (action.draft.target_id !== stagedCase.subject.author_id)
         problems.push('draft_target_must_be_the_subject');
       for (const reference of action.draft.source_message_ids)
         if (!ids.has(reference)) problems.push(`draft_invents_source_event_id:${reference}`);
-      if (action.draft.channel === 'dm' && !stagedCase.situation.allowed_channels.includes('dm'))
-        problems.push('draft_channel_is_not_permitted_for_this_situation');
     }
   }
   if (output.hypothesis.text !== null && output.hypothesis.evidence.length === 0)
@@ -183,10 +198,15 @@ export function checkOutput(output, stagedCase) {
   return problems;
 }
 
-export const plan = (input) => (input.cases ?? [])
-  .filter((item) => item.model_output === null || item.model_output === undefined)
-  .map((item) => ({ case_id: item.case_id, situation_id: item.situation.situation_id,
-    anchor: (item.messages ?? []).find((message) => message.is_anchor)?.source_event_id ?? null }));
+// The staged input is immutable, so completion lives in the persisted outputs. A case is done
+// when an output file exists for it, and nothing else decides that.
+export const plan = (input, completed = []) => {
+  const done = new Set(completed);
+  return (input.cases ?? [])
+    .filter((item) => !done.has(item.case_id))
+    .map((item) => ({ case_id: item.case_id, situation_id: item.situation.situation_id,
+      anchor: (item.messages ?? []).find((message) => message.is_anchor)?.source_event_id ?? null }));
+};
 
 export const outputProblems = (raw, stagedCase) => {
   let parsed;

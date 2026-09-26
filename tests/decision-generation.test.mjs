@@ -3,13 +3,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import childProcess from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { BINDINGS, MAX_CALLS, checkCaseGraph, checkPromptInputAgreement, generationGate, loadInput,
   outputProblems, plan, preflight, promptDigest, INPUT_PATH, PROMPT_PATH }
   from '../docs/benchmarks/decision-quality-eval-v0/generation/staging.mjs';
-import { EXIT, runGeneration } from '../docs/benchmarks/decision-quality-eval-v0/generation/run.mjs';
+import { EXIT, completedCases, fileStore, identityProblems, runGeneration }
+  from '../docs/benchmarks/decision-quality-eval-v0/generation/run.mjs';
 
 const GENERATION = fileURLToPath(new URL('../docs/benchmarks/decision-quality-eval-v0/generation/', import.meta.url));
 
@@ -31,6 +33,9 @@ const stagedCase = (over = {}) => ({
 
 const stagedInput = (cases = [stagedCase()], mutate = {}) => ({
   input_id: 'd4-generation-v0', live_proof: false, cases, ...mutate });
+
+const response = (over = {}) => ({ raw: JSON.stringify(validOutput()), model_id: 'runtime-model',
+  model_version: 'runtime-2026-02', ...over });
 
 const validOutput = (over = {}) => ({
   hypothesis: { text: 'Возможно, нужен разбор.', evidence: [
@@ -114,7 +119,17 @@ test('4D a model output is only generated when it satisfies the contract and quo
   assert.ok(outputProblems(invented, staged).some((rule) => rule.includes('output_invents_source_event_id')));
   const ungrounded = structuredClone(validOutput());
   ungrounded.hypothesis.evidence[0].text = 'Текст, которого нет в источнике.';
-  assert.ok(outputProblems(ungrounded, staged).some((rule) => rule.includes('span_text_is_not_grounded')));
+  assert.ok(outputProblems(ungrounded, staged)
+    .some((rule) => rule.includes('span_text_is_not_grounded_in_its_own_message')));
+  // A span may not borrow an author or a version from another message.
+  const swappedAuthor = structuredClone(validOutput());
+  swappedAuthor.hypothesis.evidence[0].author_id = 'user-01';
+  assert.ok(outputProblems(swappedAuthor, staged)
+    .includes('span_author_does_not_belong_to_its_message:ev-2'));
+  const swappedVersion = structuredClone(validOutput());
+  swappedVersion.hypothesis.evidence[0].version = 7;
+  assert.ok(outputProblems(swappedVersion, staged)
+    .includes('span_version_does_not_match_its_message:ev-2'));
   const wrongSubject = structuredClone(validOutput());
   wrongSubject.next_action.draft.target_id = 'user-99';
   assert.ok(outputProblems(wrongSubject, staged).includes('draft_target_must_be_the_subject'));
@@ -124,7 +139,17 @@ test('4D a model output is only generated when it satisfies the contract and quo
   const dmNotPermitted = structuredClone(validOutput());
   dmNotPermitted.next_action.decision = 'DM';
   dmNotPermitted.next_action.draft.channel = 'dm';
-  assert.ok(outputProblems(dmNotPermitted, staged).includes('draft_channel_is_not_permitted_for_this_situation'));
+  assert.ok(outputProblems(dmNotPermitted, staged)
+    .includes('draft_channel_is_not_permitted_for_this_situation:dm'));
+  // The decision and the channel are one claim and cannot disagree.
+  const desynced = structuredClone(validOutput());
+  desynced.next_action.decision = 'DM';
+  assert.ok(outputProblems(desynced, staged)
+    .includes('draft_channel_does_not_match_decision_DM'));
+  const wrongChannel = structuredClone(validOutput());
+  wrongChannel.next_action.draft.channel = 'dm';
+  assert.ok(outputProblems(wrongChannel, staged)
+    .includes('draft_channel_does_not_match_decision_PUBLIC_REPLY'));
   const wrongSituation = structuredClone(validOutput());
   wrongSituation.next_action.situation_id = 'sit-99';
   assert.ok(outputProblems(wrongSituation, staged).includes('output_invents_situation_id'));
@@ -159,36 +184,68 @@ test('4D calling a model and sending real words out are two different permission
 
 test('4D one staged case runs end to end on a stubbed call, and a rerun has nothing left', async () => {
   const input = stagedInput();
-  const stored = new Map();
-  const store = (caseId, payload) => stored.set(caseId, payload);
-  const first = await runGeneration({ input, environment: OPEN, store, callModel: async () => validOutput() });
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harnes2-eval-run-'));
+  let calls = 0;
+  const stub = async () => { calls += 1; return response(); };
+  const first = await runGeneration({ input, environment: OPEN, directory, callModel: stub });
   assert.equal(first.exit, EXIT.done, JSON.stringify(first.summary));
   assert.equal(first.summary.planned, 1);
   assert.equal(first.summary.generated, 1);
-  assert.equal(stored.size, 1);
-  assert.equal(stored.get('case-1').prompt_sha256, first.summary.prompt_sha256);
-  assert.equal(stored.get('case-1').raw, JSON.stringify(validOutput()), 'the raw model text is kept');
+  assert.equal(calls, 1);
+  // The real default store is exercised here, in a temporary directory, and the file is checked.
+  const written = JSON.parse(fs.readFileSync(path.join(directory, 'case-1.json'), 'utf8'));
+  assert.equal(written.raw, JSON.stringify(validOutput()), 'the raw model text is kept');
+  assert.equal(written.prompt_sha256, first.summary.prompt_sha256);
+  assert.equal(written.model_id, 'runtime-model', 'the identity comes from the runtime');
+  assert.equal(written.model_version, 'runtime-2026-02');
+  assert.deepEqual(completedCases(directory), ['case-1']);
 
-  const refused = await runGeneration({ input, environment: OPEN, store, callModel: async () => ({ foo: 'bar' }) });
-  assert.equal(refused.exit, EXIT.nothing_to_do);
-  assert.equal(refused.summary.refused, 1);
-  assert.equal(stored.size, 1, 'a refused output is written nowhere');
-
-  const done = { ...input, cases: [{ ...stagedCase(), model_output: validOutput() }] };
-  const rerun = await runGeneration({ input: done, environment: OPEN, store, callModel: async () => validOutput() });
+  // A rerun is idempotent because completion is read from the stored outputs, not from input.
+  const rerun = await runGeneration({ input, environment: OPEN, directory, callModel: stub });
   assert.equal(rerun.exit, EXIT.nothing_to_do);
   assert.equal(rerun.summary.planned, 0);
+  assert.equal(calls, 1, 'a completed case is never called again');
 
-  // No transport means the run refuses rather than guessing a provider.
-  const noTransport = await runGeneration({ input, environment: OPEN, store });
+  const refused = await runGeneration({ input, environment: OPEN, directory,
+    callModel: async () => response({ raw: JSON.stringify({ foo: 'bar' }) }) });
+  assert.equal(refused.exit, EXIT.nothing_to_do);
+  assert.equal(refused.summary.planned, 0, 'the case is already complete, so nothing is retried');
+  assert.equal(fs.readdirSync(directory).length, 1, 'a refused output is written nowhere');
+
+  const noTransport = await runGeneration({ input, environment: OPEN, directory });
   assert.equal(noTransport.exit, EXIT.refused);
   assert.ok(noTransport.reasons.some((reason) => reason.includes('no_model_transport_supplied')));
-  // And an invalid corpus never reaches a call at all.
-  let called = false;
+  let calledDuringInvalid = false;
   const invalid = await runGeneration({ input: stagedInput([stagedCase({ subject: { author_id: 'user-99' } })]),
-    environment: OPEN, store, callModel: async () => { called = true; return validOutput(); } });
+    environment: OPEN, directory, callModel: async () => { calledDuringInvalid = true; return response(); } });
   assert.equal(invalid.exit, EXIT.invalid);
-  assert.equal(called, false, 'a graph defect stops the run before any call');
+  assert.equal(calledDuringInvalid, false, 'a graph defect stops the run before any call');
+  fs.rmSync(directory, { recursive: true, force: true });
+});
+
+test('4D a generation without a reported runtime identity is refused', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harnes2-eval-id-'));
+  const input = stagedInput();
+  for (const missing of ['model_id', 'model_version']) {
+    const answer = response();
+    delete answer[missing];
+    const result = await runGeneration({ input, environment: OPEN, directory, callModel: async () => answer });
+    assert.equal(result.summary.generated, 0);
+    assert.ok(result.summary.results[0].problems.includes(`runtime_did_not_report_${missing}`));
+    assert.equal(fs.existsSync(path.join(directory, 'case-1.json')), false, 'nothing is stored without an identity');
+  }
+  assert.deepEqual(identityProblems({ model_id: 'a', model_version: '1' }), []);
+  assert.deepEqual(identityProblems({ model_id: 'a', model_version: '' }).length, 1);
+  fs.rmSync(directory, { recursive: true, force: true });
+});
+
+test('4D the real default store writes the file it claims to write', () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harnes2-eval-store-'));
+  const store = fileStore(directory);
+  store('case-x', { raw: '{}' });
+  assert.equal(fs.existsSync(path.join(directory, 'case-x.json')), true);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(directory, 'case-x.json'), 'utf8')).raw, '{}');
+  fs.rmSync(directory, { recursive: true, force: true });
 });
 
 test('4D the call ceiling is hard and not a budget the operator can raise here', () => {

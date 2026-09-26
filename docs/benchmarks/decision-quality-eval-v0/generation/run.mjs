@@ -3,6 +3,10 @@
 // The model call is injected. Nothing here knows how to reach a provider, and with no caller
 // supplied the run refuses — so the transport stays a separate, reviewable decision, and the
 // pipeline can be exercised end to end against a stub.
+//
+// The transport contract is explicit: a call returns the raw text it received together with the
+// model identity the runtime actually reported. Filling a model id in by hand later is exactly
+// what this programme forbids.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,10 +18,31 @@ export const OUTPUTS_DIR = path.join(HERE, 'outputs');
 
 export const EXIT = { refused: 2, invalid: 1, nothing_to_do: 3, done: 0 };
 
-// Store only what the contract accepts. A refused output is written nowhere, so a later run
-// cannot mistake a malformed generation for a finished one.
-export async function runGeneration({ input = loadInput(), callModel, environment = process.env,
-  store = defaultStore, gate = generationGate(environment, input), problems = preflight(input) } = {}) {
+// A generation is only acceptable with an identity the runtime stated. Silence is a refusal.
+export const identityProblems = (identity) => {
+  const problems = [];
+  for (const key of ['model_id', 'model_version']) {
+    if (typeof identity?.[key] !== 'string' || identity[key].length === 0)
+      problems.push(`runtime_did_not_report_${key}`);
+  }
+  return problems;
+};
+
+export const fileStore = (directory = OUTPUTS_DIR) => (caseId, payload) => {
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(path.join(directory, `${caseId}.json`), JSON.stringify(payload, null, 2));
+};
+
+export const completedCases = (directory = OUTPUTS_DIR) => {
+  if (!fs.existsSync(directory)) return [];
+  return fs.readdirSync(directory).filter((name) => name.endsWith('.json')).map((name) => name.slice(0, -5));
+};
+
+export async function runGeneration({
+  input = loadInput(), callModel, environment = process.env, directory = OUTPUTS_DIR,
+  store = fileStore(directory), gate = generationGate(environment, input), problems = preflight(input),
+  done = completedCases(directory),
+} = {}) {
   const summary = { stage: 'generation', prompt_sha256: promptDigest(), live_proof: false,
     planned: 0, generated: 0, refused: 0, results: [] };
   if (!gate.allowed) return { exit: EXIT.refused, summary, reasons: gate.reasons };
@@ -26,36 +51,29 @@ export async function runGeneration({ input = loadInput(), callModel, environmen
     return { exit: EXIT.refused, summary,
       reasons: ['no_model_transport_supplied_the_call_is_injected_not_implicit'] };
 
-  const todo = plan(input);
+  const todo = plan(input, done);
   summary.planned = todo.length;
   for (const item of todo) {
-    const raw = await callModel({ prompt: fs.readFileSync(path.join(HERE, 'prompt.md'), 'utf8'),
-      case: item, staged: input.cases.find((entry) => entry.case_id === item.case_id) });
-    const failures = outputProblems(raw, input.cases.find((entry) => entry.case_id === item.case_id));
+    const staged = input.cases.find((entry) => entry.case_id === item.case_id);
+    const response = await callModel({ prompt: fs.readFileSync(path.join(HERE, 'prompt.md'), 'utf8'),
+      case: item, staged });
+    const identity = response && typeof response === 'object' && !Array.isArray(response) ? response : {};
+    const raw = typeof response === 'string' ? response : identity.raw;
+    const failures = [...identityProblems(identity), ...outputProblems(raw, staged)];
     if (failures.length > 0) {
       summary.refused += 1;
       summary.results.push({ case_id: item.case_id, accepted: false, problems: failures });
       continue;
     }
-    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-    store(item.case_id, { raw: typeof raw === 'string' ? raw : JSON.stringify(raw), output: parsed,
-      prompt_sha256: summary.prompt_sha256 });
+    store(item.case_id, { raw, output: JSON.parse(raw), prompt_sha256: summary.prompt_sha256,
+      model_id: identity.model_id, model_version: identity.model_version });
     summary.generated += 1;
     summary.results.push({ case_id: item.case_id, accepted: true, problems: [] });
   }
   return { exit: summary.generated > 0 ? EXIT.done : EXIT.nothing_to_do, summary };
 }
 
-function defaultStore() {
-  const directory = OUTPUTS_DIR;
-  return (caseId, payload) => {
-    fs.mkdirSync(directory, { recursive: true });
-    fs.writeFileSync(path.join(directory, `${caseId}.json`), JSON.stringify(payload, null, 2));
-  };
-}
-
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  // eslint-disable-next-line no-top-level-await
   const result = await runGeneration();
   console.log(JSON.stringify({ ...result.summary, exit: result.exit, reasons: result.reasons,
     problems: result.problems }, null, 2));
@@ -68,7 +86,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     process.exit(EXIT.invalid);
   }
   if (result.exit === EXIT.nothing_to_do) {
-    console.error('\nNothing to generate: the staged input holds no ungenerated cases.');
+    console.error('\nNothing to generate: every staged case already has a stored output.');
     process.exit(EXIT.nothing_to_do);
   }
 }

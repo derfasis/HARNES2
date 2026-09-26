@@ -119,10 +119,20 @@ That keeps the transport a separate, reviewable decision and lets the pipeline b
 end against a stub.
 
 A model output is stored only if it satisfies `generation/output.schema.json` **and** quotes the
-input verbatim: every `source_event_id`, every `author_id`, every evidence span's text, and
-`draft.target_id` must match the staged case. A refused output is written nowhere, so a later run
-cannot mistake a malformed generation for a finished one, and a rerun over a completed input has
-nothing left to do.
+input verbatim. Each evidence span is resolved against the *one* message its `source_event_id`
+names, and its `author_id`, `version`, and text must belong to that same message — checking them
+independently would let a span borrow an id from one message, an author from another, and a text
+from a third. The decision and the draft channel are one claim and cannot disagree, and the channel
+must be one the situation permits.
+
+Generation is only accepted with a **runtime-reported** identity: the transport returns the model id
+and version the runtime actually gave, alongside the raw text. Filling those in by hand afterwards
+is exactly what the finished-corpus contract forbids, so a call that cannot state its identity is
+refused rather than annotated later.
+
+A refused output is written nowhere, so a later run cannot mistake a malformed generation for a
+finished one. The staged input is immutable, so completion lives in the stored outputs: a rerun
+reads them, finds every case done, and makes no call at all.
 
 Four outcomes, four exit codes: `2` refused at the gate, `1` invalid input, `3` nothing to do, `0`
 generated.
