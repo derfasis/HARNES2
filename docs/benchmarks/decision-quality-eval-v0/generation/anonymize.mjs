@@ -248,15 +248,26 @@ export function convert(input = {}) {
     staged_input.egress_authorisation_ref = provenance.egress_authorisation_ref;
 
   // 5. Nothing the source handed us may still be visible, in any form it declared.
+  // Prose is scanned as substring, because a name can appear anywhere inside a sentence. Structural
+  // ids are compared field by field instead: a real message id of "1" also occurs in `version: 1`
+  // and in its own replacement, and substring-scanning those would refuse a case that is clean.
   const visible = JSON.stringify(staged_input);
+  const rawIds = [...new Set(source.cases.flatMap((item) => item.messages.flatMap((message) => [
+    String(message.source_event_id),
+    message.reply_to_id ? String(message.reply_to_id) : null])))]
+    .filter((literal) => isText(literal));
+  const outIds = new Set(staged_input.cases.flatMap((item) => item.messages.flatMap((message) => [
+    message.source_event_id, message.reply_to_id])));
   const candidates = [...new Set([...sensitive_literals, ...removed,
-    ...source.cases.flatMap((item) => [item.subject_author, ...item.messages.map((message) => message.author),
-      ...item.messages.map((message) => String(message.source_event_id)),
-      ...item.messages.map((message) => (message.reply_to_id ? String(message.reply_to_id) : null))]),
+    ...source.cases.flatMap((item) => [item.subject_author,
+      ...item.messages.map((message) => message.author)]),
     ...source.cases.flatMap((item) => [...(item.subject_aliases ?? []),
       ...item.messages.flatMap((message) => message.author_aliases ?? [])])])]
     .filter((literal) => isText(literal));
   const leaked = candidates.filter((literal) => visible.includes(literal));
+  for (const id of rawIds) {
+    if (outIds.has(id)) leaked.push(`residual_message_id:${id}`);
+  }
   for (const item of staged_input.cases) {
     const strings = [item.offer, item.operator_goal, item.situation.goal_text, ...item.known_unknowns,
       ...item.messages.map((message) => message.text), ...item.messages.map((message) => message.created_at)];

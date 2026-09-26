@@ -299,6 +299,24 @@ test('4D two rules sharing one replacement label are counted separately', () => 
   assert.equal(both.input.cases[0].offer.includes('30 000 EUR'), false);
 });
 
+test('4D a short raw message id is checked structurally, not by substring', () => {
+  // A real id of "1" also occurs in `version: 1` and inside its own replacement. Substring-scanning
+  // the whole result refused a case whose ids were removed correctly.
+  const { input, problems } = convert({ source: source({ cases: [conversation({
+    anchor_source_event_id: '2',
+    messages: [message({ source_event_id: '1' }),
+      message({ source_event_id: '2', author: IRINA[0], author_aliases: IRINA, reply_to_id: '1',
+        text: 'сколько стоит?' })] })] }), provenance: real });
+  assert.deepEqual(problems, [], JSON.stringify(problems));
+  const ids = input.cases[0].messages.map((entry) => entry.source_event_id);
+  assert.deepEqual(ids, ['[MESSAGE_1_1]', '[MESSAGE_1_2]']);
+  assert.equal(ids.includes('1'), false, 'the raw id is gone from the id fields');
+  assert.equal(input.cases[0].messages[1].reply_to_id, '[MESSAGE_1_1]', 'the reply edge still points at it');
+  // The structural rule that replaces the substring scan is defence in depth: convert() maps every
+  // id through the placeholder table, so a surviving raw id is not reachable from the outside.
+  // What is reachable is the false positive, and that is what this test pins.
+});
+
 test('4D one long form is never eaten by a shorter one', () => {
   // "Ann" is a form of Anna and also a prefix of the other person's name. Ordering the forms per
   // person would replace "Ann" first and leave "abel" behind; one global longest-first list cannot.
