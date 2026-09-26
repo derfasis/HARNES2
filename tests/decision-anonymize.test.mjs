@@ -312,9 +312,30 @@ test('4D a short raw message id is checked structurally, not by substring', () =
   assert.deepEqual(ids, ['[MESSAGE_1_1]', '[MESSAGE_1_2]']);
   assert.equal(ids.includes('1'), false, 'the raw id is gone from the id fields');
   assert.equal(input.cases[0].messages[1].reply_to_id, '[MESSAGE_1_1]', 'the reply edge still points at it');
-  // The structural rule that replaces the substring scan is defence in depth: convert() maps every
-  // id through the placeholder table, so a surviving raw id is not reachable from the outside.
-  // What is reachable is the false positive, and that is what this test pins.
+});
+
+test('4D a raw message id is caught in prose and in the situation id, not only in the id fields', () => {
+  // Checking ids structurally alone let an id that survived in the text or as a situation id ship.
+  const inProse = convert({ source: source({ cases: [conversation({
+    messages: [message({ text: 'в ответ на m-1 всё понятно' }),
+      message({ source_event_id: 'm-2', author: IRINA[0], author_aliases: IRINA, reply_to_id: 'm-1' })] })] }),
+    provenance: real });
+  assert.equal(inProse.input, null, 'an id quoted in the text is still source material');
+  assert.ok(inProse.problems.some((entry) => entry.startsWith('the_anonymised_case_still_contains_source_material')));
+
+  const asSituation = convert({ source: source({ cases: [conversation({ situation_id: 'm-1' })] }),
+    provenance: real });
+  assert.equal(asSituation.input, null, 'an id standing where an id belongs has survived');
+  assert.ok(asSituation.problems.some((entry) => entry.includes('residual_message_id')));
+  // And a clean case is not refused just because its dates and times contain the id's digits.
+  // "2026-01-01" contains a "1" that is not the id; only a standalone token counts.
+  const clean = convert({ source: source({ cases: [conversation({
+    anchor_source_event_id: '2',
+    messages: [message({ source_event_id: '1', text: 'сообщение от 2026-01-01, всё в порядке' }),
+      message({ source_event_id: '2', author: IRINA[0], author_aliases: IRINA, reply_to_id: '1',
+        text: 'сколько стоит?' })] })] }), provenance: real });
+  assert.deepEqual(clean.problems, [], JSON.stringify(clean.problems));
+  assert.equal(clean.input.cases[0].messages[0].source_event_id, '[MESSAGE_1_1]');
 });
 
 test('4D one long form is never eaten by a shorter one', () => {

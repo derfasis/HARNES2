@@ -248,16 +248,23 @@ export function convert(input = {}) {
     staged_input.egress_authorisation_ref = provenance.egress_authorisation_ref;
 
   // 5. Nothing the source handed us may still be visible, in any form it declared.
-  // Prose is scanned as substring, because a name can appear anywhere inside a sentence. Structural
-  // ids are compared field by field instead: a real message id of "1" also occurs in `version: 1`
-  // and in its own replacement, and substring-scanning those would refuse a case that is clean.
-  const visible = JSON.stringify(staged_input);
+  // Prose is scanned as substring, because a name or an id can appear anywhere inside a sentence.
+  // The surface is the model-visible text, not the whole serialised result: a real message id of "1"
+  // also occurs in `version: 1`, and scanning the whole result refused cases that were clean.
+  // Placeholders are this converter's own output, so they are removed before the scan; otherwise a
+  // short id matches the digits of the very placeholder that replaced it.
+  const visible = staged_input.cases.map((item) => [item.situation.situation_id,
+    item.situation.goal_text, item.offer, item.operator_goal, ...item.known_unknowns,
+    ...item.messages.flatMap((message) => [message.text, message.created_at])]
+    .map((value) => String(value ?? '')).join('\n')).join('\n')
+    .replace(/\[[A-Z]+_\d+_\d+\]/g, ' ');
   const rawIds = [...new Set(source.cases.flatMap((item) => item.messages.flatMap((message) => [
     String(message.source_event_id),
     message.reply_to_id ? String(message.reply_to_id) : null])))]
     .filter((literal) => isText(literal));
-  const outIds = new Set(staged_input.cases.flatMap((item) => item.messages.flatMap((message) => [
-    message.source_event_id, message.reply_to_id])));
+  // A raw id that is still standing where an id belongs has survived, whatever the prose says.
+  const outIds = new Set(staged_input.cases.flatMap((item) => [item.situation.situation_id,
+    ...item.messages.flatMap((message) => [message.source_event_id, message.reply_to_id])]));
   const candidates = [...new Set([...sensitive_literals, ...removed,
     ...source.cases.flatMap((item) => [item.subject_author,
       ...item.messages.map((message) => message.author)]),
@@ -265,8 +272,12 @@ export function convert(input = {}) {
       ...item.messages.flatMap((message) => message.author_aliases ?? [])])])]
     .filter((literal) => isText(literal));
   const leaked = candidates.filter((literal) => visible.includes(literal));
+  // An id is an identifier, not prose, so it has to stand on its own to count as surviving. A bare
+  // substring test would match the "1" of 2026-01-01 and refuse cases whose ids are long gone.
   for (const id of rawIds) {
-    if (outIds.has(id)) leaked.push(`residual_message_id:${id}`);
+    if (outIds.has(id)) { leaked.push(`residual_message_id:${id}`); continue; }
+    const pattern = new RegExp(`(?<![\\w-])${escapeRegExp(id)}(?![\\w-])`);
+    if (pattern.test(visible)) leaked.push(`residual_message_id:${id}`);
   }
   for (const item of staged_input.cases) {
     const strings = [item.offer, item.operator_goal, item.situation.goal_text, ...item.known_unknowns,
