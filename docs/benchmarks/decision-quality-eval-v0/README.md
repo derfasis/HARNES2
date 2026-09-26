@@ -192,6 +192,27 @@ A model may not be one of the two reviewers, and the adjudicator is held to the 
 assembler cannot *prove* a person is a person — it can only refuse the identities it can see are a
 machine, and that limit is written down here rather than implied away.
 
+## Anonymisation
+
+`generation/anonymize.mjs` turns a permitted conversation into a staged case, and decides nothing:
+which cases, who the subject is, which message is the anchor, and whether the conversation
+matters at all all arrive selected in the input. Guessing them here would build a second router
+without any of the review the first one gets.
+
+It removes what it can recognise without being told — addresses, links, phone numbers, handles — and
+applies the semantic replacements the source declared. It does not guess whether a sum or a city
+matters to the decision; that is a judgement about the material, and it belongs to whoever holds
+it. Placeholders are stable inside a case and different in every other case, because one placeholder
+meaning two people would teach a model exactly the wrong thing.
+
+A known literal that survives the conversion refuses the whole result, and a **real** source
+without a provenance claim is refused rather than quietly relabelled as a fixture. Relabelling real
+material would make the finished corpus claim something that is not true.
+
+The audit is returned as a sidecar, never as fields smuggled into the staging input, so the staging
+schema stays exactly as narrow as it is. The result is only a success after it also passes the
+generation preflight.
+
 ## Running the validator
 
 ```
