@@ -1406,3 +1406,20 @@ test('a snapshot conflict still latches as integrity, and now also names the bra
   assert.doesNotMatch(serialised,/https?:\/\//);
   for(const key of Object.keys(payload)) assert.ok(!/text|body|raw|payload|credential|session/i.test(key),key);
 });
+
+test('a branch is never carried over from a page that succeeded',async t=>{
+  // conflict() is an argument to check, so it runs on every page, successful or not, and leaves a
+  // branch stashed. A later failure that is NOT a snapshot conflict would then be published under
+  // the name of a branch that has nothing to do with it, and the operator would read a fiction.
+  const h=harness(t);await h.bootstrap();
+  // A clean, applied page. It passes through a conflict() call, which stashes a branch.
+  h.reply(difference(11,[message()]));
+  await h.poll();await h.tick();
+  assert.equal(h.state().reason,null,'the first page applied cleanly');
+  // Now a refusal that is not a snapshot conflict at all: a mapping failure.
+  h.reply(mappingFailure);
+  await assert.rejects(h.poll(),{code:'TELEGRAM_MAPPING_INTEGRITY'});
+  const named=h.store.all("SELECT * FROM events WHERE kind='source.telegram.integrity_conflict'");
+  assert.deepEqual(named,[],
+    'a refusal that is not a snapshot conflict names no branch, and certainly not a stale one');
+});

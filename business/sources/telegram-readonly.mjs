@@ -23,8 +23,8 @@ export const TELEGRAM_RECONCILIATION = 'telegram-reconciliation-v1';
  */
 let pendingConflict = null;
 const conflict = (kind, detail) => { pendingConflict = { conflict_kind: kind, ...detail }; return 'TELEGRAM_SNAPSHOT_CONFLICT'; };
-function publishPendingConflict(service) {
-  const record = pendingConflict;
+function publishPendingConflict(service, record = null) {
+  record = record ?? pendingConflict;
   pendingConflict = null;
   if (!record) return;
   try {
@@ -51,7 +51,11 @@ const integrityErrors = new Set(['TELEGRAM_PTS_COLLISION','SOURCE_VERSION_COLLIS
   'SOURCE_CREATION_TIME_CHANGED','SOURCE_UPDATE_TIME_ROLLBACK','TELEGRAM_MESSAGE_DELETED','TELEGRAM_DIFFERENCE_TOO_LONG',
   'SOURCE_TRANSPORT_CORRUPT_CHECKPOINT','TELEGRAM_RESPONSE_CURSOR_MISMATCH','TELEGRAM_SNAPSHOT_CONFLICT',
   'TELEGRAM_UNVERIFIED_REPLAY','TELEGRAM_PTS_GAP','TELEGRAM_UNACCOUNTED_PTS',INTEGRITY]);
-const check = (ok, code) => ensure(ok, `Telegram source: ${code}`, 409, code);
+// conflict() is an argument here, so it runs before this and leaves a branch stashed even when
+// the check passes. A passing check clears it: only a refusal may keep a branch, and only until
+// the caller publishes it. Without this, a stale branch from an earlier success would be
+// published against a later, unrelated failure.
+const check = (ok, code) => { if (ok) pendingConflict = null; return ensure(ok, `Telegram source: ${code}`, 409, code); };
 const integer = (n, min = 1) => Number.isInteger(n) && n >= min && n <= MAX_PTS;
 const numericId = x => typeof x === 'string' && /^[1-9][0-9]{0,18}$/.test(x);
 function fields(value, keys) {
@@ -487,6 +491,9 @@ export function applyTelegramDifference(service,sourceId,page,expectedPts=null,c
       return {disposition:'applied',pts:cursor,phase:final?'current':'catching_up'};
     }); } catch(error) {
       if(stillOwned()!==true)throw error;
+      // Taken before the failure transaction: the checks it runs are successful ones, and those
+      // are exactly the calls that clear a stale branch.
+      const record=pendingConflict;
       // Separate failure transaction keeps the previous cursor but invalidates evidence.
       // If DB is unavailable even here, rethrow: never report success or advance transport.
       service.store.transaction(()=>{
@@ -496,7 +503,7 @@ export function applyTelegramDifference(service,sourceId,page,expectedPts=null,c
         if(authorizationId && telegramRecoveryAuthorization(service,p)===authorizationId)finishRecovery(service,p,authorizationId,'failed');
       });
       // The outcome is settled; only now, after the rollback, is it safe to name the branch.
-      publishPendingConflict(service);
+      publishPendingConflict(service,record);
       throw error;
     }
   });
