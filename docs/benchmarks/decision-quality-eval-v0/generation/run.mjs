@@ -12,6 +12,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { MAX_CALLS, completedOutputs, generationGate, loadInput, mixedIdentities, outputProblems,
   parseRaw, plan, preflight, promptDigest, stagedCaseDigest } from './staging.mjs';
+import { REFUSAL_FILE, readRefusals, recordRefusal, refusalReceipt } from './refusal.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const OUTPUTS_DIR = path.join(HERE, 'outputs');
@@ -39,8 +40,9 @@ export const readArtefacts = (directory = OUTPUTS_DIR) => {
   const artefacts = {};
   if (!fs.existsSync(directory)) return artefacts;
   for (const name of fs.readdirSync(directory)) {
-    // The ledger is bookkeeping, not a generated artefact.
-    if (!name.endsWith('.json') || name === LEDGER_FILE) continue;
+    // Bookkeeping is not a generated artefact: the ledger counts calls, the refusal sidecar
+    // records calls that were refused, and neither is an answer to a staged case.
+    if (!name.endsWith('.json') || name === LEDGER_FILE || name === REFUSAL_FILE) continue;
     try { artefacts[name.slice(0, -5)] = JSON.parse(fs.readFileSync(path.join(directory, name), 'utf8')); }
     catch { artefacts[name.slice(0, -5)] = null; }
   }
@@ -126,6 +128,21 @@ export async function runGeneration({
   const todo = plan(input, completed).slice(0, Math.max(0, MAX_CALLS - attempts.calls));
   summary.planned = todo.length;
   let runIdentity = frozen ?? null;
+  // A refusal is written beside the outputs, never into them. The sidecar is the only place the
+  // reason survives, and it holds structure only, so a run that was refused can be diagnosed
+  // without a second call being spent to find out what was wrong with the first one. Returns the
+  // problem to report if the record could not be written, so a case still has exactly one result.
+  const record = (caseId, failures, raw = null) => {
+    const receipt = refusalReceipt({ caseId, attempt: attempts.by_case[caseId], failures, raw });
+    if (!receipt) return null;
+    try { recordRefusal(directory, receipt); return null; }
+    catch (error) {
+      // The call is refused either way. What must not happen is a refusal whose reason then fails
+      // to be recorded and reads as a call that never happened, so the failure rides along on the
+      // case's own problems where the run summary still reports it.
+      return `refusal_receipt_not_recorded:${error?.message ?? 'unknown'}`;
+    }
+  };
   for (const item of todo) {
     const staged = input.cases.find((entry) => entry.case_id === item.case_id);
     // The attempt is persisted before the call, so a transport that dies mid-flight still costs.
@@ -139,9 +156,11 @@ export async function runGeneration({
         case: item, staged });
     } catch (error) {
       // A transport that throws is a refusal of this case, not a reason to lose the whole run.
+      const transport = [`model_transport_call_failed:${error?.message ?? 'unknown'}`];
+      const unrecorded = record(item.case_id, ['model_transport_call_failed']);
       summary.refused += 1;
       summary.results.push({ case_id: item.case_id, accepted: false,
-        problems: [`model_transport_call_failed:${error?.message ?? 'unknown'}`] });
+        problems: unrecorded ? [...transport, unrecorded] : transport });
       continue;
     }
     const identity = response && typeof response === 'object' && !Array.isArray(response) ? response : {};
@@ -152,8 +171,10 @@ export async function runGeneration({
       || identity.model_version !== runIdentity.model_version))
       failures.push('this_evaluation_is_frozen_to_another_model');
     if (failures.length > 0) {
+      const unrecorded = record(item.case_id, failures, identity.raw);
       summary.refused += 1;
-      summary.results.push({ case_id: item.case_id, accepted: false, problems: failures });
+      summary.results.push({ case_id: item.case_id, accepted: false,
+        problems: unrecorded ? [...failures, unrecorded] : failures });
       continue;
     }
     runIdentity ??= { model_id: identity.model_id, model_version: identity.model_version };
@@ -168,6 +189,11 @@ export async function runGeneration({
   summary.model_id = runIdentity?.model_id ?? null;
   summary.model_version = runIdentity?.model_version ?? null;
   summary.calls_total = attempts.calls;
+  // The sidecar is reported, including when it is damaged: a refusal record that stopped being
+  // readable has to be visible in the run summary, not inferred later from a missing line.
+  const onRecord = readRefusals(directory);
+  summary.refusals_on_record = onRecord.receipts.length;
+  if (onRecord.corrupted.length) summary.refusal_records_corrupted = onRecord.corrupted;
   writeLedger(directory, attempts);
   return { exit: summary.generated > 0 ? EXIT.done : EXIT.nothing_to_do, summary };
 }
