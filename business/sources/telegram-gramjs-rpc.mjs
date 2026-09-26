@@ -8,6 +8,7 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { Api } = require('telegram');
+const { UpdateConnectionState } = require('telegram/network');
 const bigInt = require('big-integer');
 
 export class GramjsSourceRpc {
@@ -29,9 +30,12 @@ export class GramjsSourceRpc {
   // and the Api.Update* family, so a wrapped event would silently never match. Polling would still
   // work, which is what makes this the kind of break a test cannot see.
   //
-  // There is deliberately no fault subscription. The SDK's connection-state event is not one of
-  // its update builders, and registering it crashes the dispatch loop; the reader already treats
-  // a failing read as a transport fault and invalidates itself, which is the same outcome.
+  // Connection-state events are the one class not passed through. The reader treats one as proof
+  // that its evidence may be stale and invalidates the source, which is right for a real
+  // disconnect. The SDK emits the same class as a keepalive about four times a minute, so
+  // forwarding them blocked the source within seconds of connecting and nothing could ever be
+  // ingested. Only a genuine loss of connection is reported; the reader still invalidates on any
+  // failing read, so a real break is caught on the next poll either way.
   subscribe(onUpdate) {
     if (this.#builder) return;
     this.#builder = {
@@ -40,7 +44,14 @@ export class GramjsSourceRpc {
       async filter(update) { return update; },
       build(update) { return update; },
     };
-    this.#handler = event => { if (!this.#closed) onUpdate(event); };
+    this.#handler = event => {
+      if (this.#closed) return;
+      if (event instanceof UpdateConnectionState) {
+        if (this.#client.connected === false) onUpdate(event);
+        return;
+      }
+      onUpdate(event);
+    };
     this.#client.addEventHandler(this.#handler, this.#builder);
   }
 
