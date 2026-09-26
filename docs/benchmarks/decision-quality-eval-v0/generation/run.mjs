@@ -10,8 +10,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { generationGate, loadInput, outputProblems, plan, preflight, promptDigest }
-  from './staging.mjs';
+import { completedOutputs, generationGate, loadInput, outputProblems, parseRaw, plan, preflight,
+  promptDigest } from './staging.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const OUTPUTS_DIR = path.join(HERE, 'outputs');
@@ -33,15 +33,23 @@ export const fileStore = (directory = OUTPUTS_DIR) => (caseId, payload) => {
   fs.writeFileSync(path.join(directory, `${caseId}.json`), JSON.stringify(payload, null, 2));
 };
 
-export const completedCases = (directory = OUTPUTS_DIR) => {
-  if (!fs.existsSync(directory)) return [];
-  return fs.readdirSync(directory).filter((name) => name.endsWith('.json')).map((name) => name.slice(0, -5));
+// Read the stored artefacts. A file that does not parse is reported as absent-with-a-reason rather
+// than crashing the run, so a corrupt directory leads to regeneration, never to a silent skip.
+export const readArtefacts = (directory = OUTPUTS_DIR) => {
+  const artefacts = {};
+  if (!fs.existsSync(directory)) return artefacts;
+  for (const name of fs.readdirSync(directory)) {
+    if (!name.endsWith('.json')) continue;
+    try { artefacts[name.slice(0, -5)] = JSON.parse(fs.readFileSync(path.join(directory, name), 'utf8')); }
+    catch { artefacts[name.slice(0, -5)] = null; }
+  }
+  return artefacts;
 };
 
 export async function runGeneration({
   input = loadInput(), callModel, environment = process.env, directory = OUTPUTS_DIR,
   store = fileStore(directory), gate = generationGate(environment, input), problems = preflight(input),
-  done = completedCases(directory),
+  done = completedOutputs(input, readArtefacts(directory)),
 } = {}) {
   const summary = { stage: 'generation', prompt_sha256: promptDigest(), live_proof: false,
     planned: 0, generated: 0, refused: 0, results: [] };
@@ -51,25 +59,37 @@ export async function runGeneration({
     return { exit: EXIT.refused, summary,
       reasons: ['no_model_transport_supplied_the_call_is_injected_not_implicit'] };
 
+  // One evaluation, one model. The identity is frozen by whatever was already accepted, and if
+  // nothing is stored yet, by the first accepted call. A later case from another model is refused
+  // and written nowhere, because a corpus that mixes models cannot be attributed to any of them.
+  const frozen = done instanceof Map && done.size > 0 ? [...done.values()][0] : null;
   const todo = plan(input, done);
   summary.planned = todo.length;
+  let runIdentity = frozen ?? null;
   for (const item of todo) {
     const staged = input.cases.find((entry) => entry.case_id === item.case_id);
     const response = await callModel({ prompt: fs.readFileSync(path.join(HERE, 'prompt.md'), 'utf8'),
       case: item, staged });
     const identity = response && typeof response === 'object' && !Array.isArray(response) ? response : {};
-    const raw = typeof response === 'string' ? response : identity.raw;
-    const failures = [...identityProblems(identity), ...outputProblems(raw, staged)];
+    const { parsed, problems: parseProblems } = parseRaw(identity.raw);
+    const failures = [...identityProblems(identity), ...parseProblems,
+      ...(parseProblems.length ? [] : outputProblems(identity.raw, staged))];
+    if (runIdentity && (identity.model_id !== runIdentity.model_id
+      || identity.model_version !== runIdentity.model_version))
+      failures.push('this_evaluation_is_frozen_to_another_model');
     if (failures.length > 0) {
       summary.refused += 1;
       summary.results.push({ case_id: item.case_id, accepted: false, problems: failures });
       continue;
     }
-    store(item.case_id, { raw, output: JSON.parse(raw), prompt_sha256: summary.prompt_sha256,
+    runIdentity ??= { model_id: identity.model_id, model_version: identity.model_version };
+    store(item.case_id, { raw: identity.raw, output: parsed, prompt_sha256: summary.prompt_sha256,
       model_id: identity.model_id, model_version: identity.model_version });
     summary.generated += 1;
     summary.results.push({ case_id: item.case_id, accepted: true, problems: [] });
   }
+  summary.model_id = runIdentity?.model_id ?? null;
+  summary.model_version = runIdentity?.model_version ?? null;
   return { exit: summary.generated > 0 ? EXIT.done : EXIT.nothing_to_do, summary };
 }
 

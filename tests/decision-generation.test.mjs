@@ -7,10 +7,10 @@ import os from 'node:os';
 import path from 'node:path';
 import childProcess from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { BINDINGS, MAX_CALLS, checkCaseGraph, checkPromptInputAgreement, generationGate, loadInput,
-  outputProblems, plan, preflight, promptDigest, INPUT_PATH, PROMPT_PATH }
+import { BINDINGS, MAX_CALLS, checkCaseGraph, checkPromptInputAgreement, completedOutputs, generationGate,
+  loadInput, outputProblems, parseRaw, plan, preflight, promptDigest, INPUT_PATH, PROMPT_PATH }
   from '../docs/benchmarks/decision-quality-eval-v0/generation/staging.mjs';
-import { EXIT, completedCases, fileStore, identityProblems, runGeneration }
+import { EXIT, fileStore, identityProblems, readArtefacts, runGeneration }
   from '../docs/benchmarks/decision-quality-eval-v0/generation/run.mjs';
 
 const GENERATION = fileURLToPath(new URL('../docs/benchmarks/decision-quality-eval-v0/generation/', import.meta.url));
@@ -113,51 +113,51 @@ test('4D the staged graph must hold: unique ids, one anchor, resolvable replies'
 
 test('4D a model output is only generated when it satisfies the contract and quotes the input', () => {
   const staged = stagedCase();
-  assert.deepEqual(outputProblems(validOutput(), staged), []);
+  assert.deepEqual(outputProblems(JSON.stringify(validOutput()), staged), []);
   const invented = structuredClone(validOutput());
   invented.next_action.evidence_message_ids = ['ev-999'];
-  assert.ok(outputProblems(invented, staged).some((rule) => rule.includes('output_invents_source_event_id')));
+  assert.ok(outputProblems(JSON.stringify(invented), staged).some((rule) => rule.includes('output_invents_source_event_id')));
   const ungrounded = structuredClone(validOutput());
   ungrounded.hypothesis.evidence[0].text = 'Текст, которого нет в источнике.';
-  assert.ok(outputProblems(ungrounded, staged)
+  assert.ok(outputProblems(JSON.stringify(ungrounded), staged)
     .some((rule) => rule.includes('span_text_is_not_grounded_in_its_own_message')));
   // A span may not borrow an author or a version from another message.
   const swappedAuthor = structuredClone(validOutput());
   swappedAuthor.hypothesis.evidence[0].author_id = 'user-01';
-  assert.ok(outputProblems(swappedAuthor, staged)
+  assert.ok(outputProblems(JSON.stringify(swappedAuthor), staged)
     .includes('span_author_does_not_belong_to_its_message:ev-2'));
   const swappedVersion = structuredClone(validOutput());
   swappedVersion.hypothesis.evidence[0].version = 7;
-  assert.ok(outputProblems(swappedVersion, staged)
+  assert.ok(outputProblems(JSON.stringify(swappedVersion), staged)
     .includes('span_version_does_not_match_its_message:ev-2'));
   const wrongSubject = structuredClone(validOutput());
   wrongSubject.next_action.draft.target_id = 'user-99';
-  assert.ok(outputProblems(wrongSubject, staged).includes('draft_target_must_be_the_subject'));
+  assert.ok(outputProblems(JSON.stringify(wrongSubject), staged).includes('draft_target_must_be_the_subject'));
   const waitWithDraft = structuredClone(validOutput());
   waitWithDraft.next_action.decision = 'WAIT';
-  assert.ok(outputProblems(waitWithDraft, staged).some((rule) => rule.includes('WAIT_must_not_carry_a_draft')));
+  assert.ok(outputProblems(JSON.stringify(waitWithDraft), staged).some((rule) => rule.includes('WAIT_must_not_carry_a_draft')));
   const dmNotPermitted = structuredClone(validOutput());
   dmNotPermitted.next_action.decision = 'DM';
   dmNotPermitted.next_action.draft.channel = 'dm';
-  assert.ok(outputProblems(dmNotPermitted, staged)
+  assert.ok(outputProblems(JSON.stringify(dmNotPermitted), staged)
     .includes('draft_channel_is_not_permitted_for_this_situation:dm'));
   // The decision and the channel are one claim and cannot disagree.
   const desynced = structuredClone(validOutput());
   desynced.next_action.decision = 'DM';
-  assert.ok(outputProblems(desynced, staged)
+  assert.ok(outputProblems(JSON.stringify(desynced), staged)
     .includes('draft_channel_does_not_match_decision_DM'));
   const wrongChannel = structuredClone(validOutput());
   wrongChannel.next_action.draft.channel = 'dm';
-  assert.ok(outputProblems(wrongChannel, staged)
+  assert.ok(outputProblems(JSON.stringify(wrongChannel), staged)
     .includes('draft_channel_does_not_match_decision_PUBLIC_REPLY'));
   const wrongSituation = structuredClone(validOutput());
   wrongSituation.next_action.situation_id = 'sit-99';
-  assert.ok(outputProblems(wrongSituation, staged).includes('output_invents_situation_id'));
-  assert.ok(outputProblems({ foo: 'bar' }, staged).some((rule) => rule.startsWith('output_schema:')));
+  assert.ok(outputProblems(JSON.stringify(wrongSituation), staged).includes('output_invents_situation_id'));
+  assert.ok(outputProblems(JSON.stringify({ foo: 'bar' }), staged).some((rule) => rule.startsWith('output_schema:')));
   assert.deepEqual(outputProblems('not json at all', staged), ['output_is_not_json']);
   const unsupported = structuredClone(validOutput());
   unsupported.hypothesis.text = null;
-  assert.ok(outputProblems(unsupported, staged).includes('evidence_without_hypothesis'));
+  assert.ok(outputProblems(JSON.stringify(unsupported), staged).includes('evidence_without_hypothesis'));
 });
 
 test('4D calling a model and sending real words out are two different permissions', () => {
@@ -198,7 +198,7 @@ test('4D one staged case runs end to end on a stubbed call, and a rerun has noth
   assert.equal(written.prompt_sha256, first.summary.prompt_sha256);
   assert.equal(written.model_id, 'runtime-model', 'the identity comes from the runtime');
   assert.equal(written.model_version, 'runtime-2026-02');
-  assert.deepEqual(completedCases(directory), ['case-1']);
+  assert.deepEqual(Object.keys(readArtefacts(directory)), ['case-1']);
 
   // A rerun is idempotent because completion is read from the stored outputs, not from input.
   const rerun = await runGeneration({ input, environment: OPEN, directory, callModel: stub });
@@ -278,3 +278,67 @@ test('4D the run refuses at the gate, and the finished-corpus contract is untouc
   assert.match(validate, /offline_human_eval/);
   assert.ok(fs.existsSync(INPUT_PATH));
 });
+
+test('4D a stored artefact counts as complete only if it is ours, current, and still valid', () => {
+  const input = stagedInput();
+  const staged = stagedCase();
+  const artefact = (over = {}) => ({ raw: JSON.stringify(validOutput()), prompt_sha256: promptDigest(),
+    model_id: 'runtime-model', model_version: 'runtime-2026-02', ...over });
+  assert.deepEqual([...completedOutputs(input, { 'case-1': artefact() }).keys()], ['case-1']);
+  // An older prompt means the artefact answers a different question.
+  assert.equal(completedOutputs(input, { 'case-1': artefact({ prompt_sha256: 'stale' }) }).size, 0);
+  // A hand-made file with no identity is not evidence of anything.
+  assert.equal(completedOutputs(input, { 'case-1': artefact({ model_id: undefined }) }).size, 0);
+  assert.equal(completedOutputs(input, { 'case-1': null }).size, 0);
+  assert.equal(completedOutputs(input, { 'case-1': { ...artefact(), raw: '{ broken' } }).size, 0);
+  // And a stored output that no longer satisfies the contract must be regenerated.
+  const tampered = artefact({ raw: JSON.stringify({ foo: 'bar' }) });
+  assert.equal(completedOutputs(input, { 'case-1': tampered }).size, 0);
+  assert.equal(completedOutputs(input, { 'unknown-case': artefact() }).size, 0);
+  assert.equal(staged.case_id, 'case-1');
+});
+
+test('4D one evaluation is frozen to a single model, and a second one is refused', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harnes2-eval-freeze-'));
+  const input = stagedInput([stagedCase({ case_id: 'case-1' }), stagedCase({ case_id: 'case-2' })]);
+  // The first run completes case-1 and refuses case-2 on a technical defect, so case-2 is
+  // genuinely unfinished and the second run has something to call.
+  const first = await runGeneration({ input, environment: OPEN, directory,
+    callModel: async ({ case: item }) => (item.case_id === 'case-1'
+      ? response({ raw: JSON.stringify(caseOutput(item)) })
+      : response({ raw: JSON.stringify({ foo: 'bar' }) })) });
+  assert.equal(first.summary.generated, 1, JSON.stringify(first.summary.results));
+  assert.equal(first.summary.refused, 1);
+  assert.equal(first.summary.model_id, 'runtime-model');
+  assert.equal(fs.existsSync(path.join(directory, 'case-2.json')), false);
+
+  const second = await runGeneration({ input: stagedInput([stagedCase({ case_id: 'case-1' }),
+    stagedCase({ case_id: 'case-2' })]), environment: OPEN, directory,
+    callModel: async ({ case: item }) => (item.case_id === 'case-1'
+      ? response({ raw: JSON.stringify(caseOutput(item)) })
+      : response({ raw: JSON.stringify(caseOutput(item)), model_id: 'other-model', model_version: 'v9' })) });
+  assert.equal(second.summary.generated, 0);
+  assert.ok(second.summary.results.some((row) => row.problems.includes('this_evaluation_is_frozen_to_another_model')));
+  assert.equal(fs.existsSync(path.join(directory, 'case-2.json')), false,
+    'a case refused for using another model is not written under either identity');
+  fs.rmSync(directory, { recursive: true, force: true });
+});
+
+test('4D a malformed transport is a refusal, never an exception', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harnes2-eval-transport-'));
+  for (const malformed of [{ raw: validOutput(), model_id: 'm', model_version: '1' },
+    { raw: 42, model_id: 'm', model_version: '1' }, { model_id: 'm', model_version: '1' }, 'plain text', null]) {
+    const result = await runGeneration({ input: stagedInput(), environment: OPEN, directory,
+      callModel: async () => malformed });
+    assert.equal(result.summary.generated, 0, JSON.stringify(malformed));
+    assert.ok(result.summary.results[0].problems.includes('raw_must_be_the_text_the_runtime_returned')
+      || result.summary.results[0].problems.includes('output_is_not_json'), JSON.stringify(malformed));
+  }
+  assert.equal(fs.readdirSync(directory).length, 0, 'nothing is stored from a malformed transport');
+  assert.deepEqual(parseRaw('{"a":1}').problems, []);
+  assert.deepEqual(parseRaw(5).problems, ['raw_must_be_the_text_the_runtime_returned']);
+  fs.rmSync(directory, { recursive: true, force: true });
+});
+
+const caseOutput = (item) => validOutput({ next_action: { ...validOutput().next_action,
+  situation_id: item.situation_id } });

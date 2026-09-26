@@ -198,19 +198,42 @@ export function checkOutput(output, stagedCase) {
   return problems;
 }
 
-// The staged input is immutable, so completion lives in the persisted outputs. A case is done
-// when an output file exists for it, and nothing else decides that.
-export const plan = (input, completed = []) => {
-  const done = new Set(completed);
+// A stored artefact only counts as complete when it is actually ours, from this prompt, and still
+// valid against this case. A file name is not evidence of anything: a stale output from an older
+// prompt, a hand-made file, or a corrupt one must all be re-generated rather than trusted.
+export const completedOutputs = (input, artefacts, digest = promptDigest()) => {
+  const completed = new Map();
+  for (const [caseId, artefact] of Object.entries(artefacts ?? {})) {
+    const staged = (input.cases ?? []).find((item) => item.case_id === caseId);
+    if (!staged) continue;
+    if (!artefact || typeof artefact !== 'object') continue;
+    if (artefact.prompt_sha256 !== digest) continue;
+    if (typeof artefact.model_id !== 'string' || !artefact.model_id
+      || typeof artefact.model_version !== 'string' || !artefact.model_version) continue;
+    if (outputProblems(artefact.raw, staged).length > 0) continue;
+    completed.set(caseId, { model_id: artefact.model_id, model_version: artefact.model_version });
+  }
+  return completed;
+};
+
+// The staged input is immutable, so completion lives in the persisted outputs.
+export const plan = (input, completed = new Map()) => {
+  const done = completed instanceof Map ? completed : new Map(Object.entries(completed ?? {}));
   return (input.cases ?? [])
     .filter((item) => !done.has(item.case_id))
     .map((item) => ({ case_id: item.case_id, situation_id: item.situation.situation_id,
       anchor: (item.messages ?? []).find((message) => message.is_anchor)?.source_event_id ?? null }));
 };
 
+// The transport hands back text. Anything else — an object, a number, undefined — is a refusal,
+// not something to hand to a parser and hope for.
+export const parseRaw = (raw) => {
+  if (typeof raw !== 'string') return { parsed: null, problems: ['raw_must_be_the_text_the_runtime_returned'] };
+  try { return { parsed: JSON.parse(raw), problems: [] }; }
+  catch { return { parsed: null, problems: ['output_is_not_json'] }; }
+};
+
 export const outputProblems = (raw, stagedCase) => {
-  let parsed;
-  try { parsed = typeof raw === 'string' ? JSON.parse(raw) : raw; }
-  catch { return ['output_is_not_json']; }
-  return checkOutput(parsed, stagedCase);
+  const { parsed, problems } = parseRaw(raw);
+  return problems.length ? problems : checkOutput(parsed, stagedCase);
 };
