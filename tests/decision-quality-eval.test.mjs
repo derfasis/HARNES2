@@ -32,10 +32,30 @@ const validReport = (mutate = {}) => {
     final_axes: axes(1), failure_tags: ['overclaim'], failed: true }];
   const facts = deriveReportFacts({ case_results: caseResults });
   return { corpus_id: 'decision-quality-eval-v0', proof_level: 'offline_human_eval', live_proof: false,
-    model: { id: 'fixture', version: 'v1', prompt_id: 'p1' },
+    model: { id: 'fixture', version: 'v1', prompt_id: 'p1', prompt_digest: 'sha256-0123456789abcdef' },
     scored_cases: facts.scored_cases, not_applicable_cases: facts.not_applicable_cases,
     axis_summary: facts.axis_summary, case_results: caseResults, failed_cases: facts.failed_cases,
     ...mutate };
+};
+
+
+// A complete, honest offline pair: everything the protocol will one day hold, so the whole chain
+// is exercised on real data rather than on fragments.
+const generation = { model_id: 'fixture-model', model_version: '2026-01', prompt_ref: 'prompt-7',
+  prompt_digest: 'sha256-0123456789abcdef' };
+
+const offlineCase = (mutate = {}) => realCase({ case_id: 'real-1',
+  scores: [{ reviewer: 'r1', axes: axes(1), failure_tags: ['overclaim'] },
+    { reviewer: 'r2', axes: axes(1), failure_tags: [] }],
+  final_axes: axes(1), failure_tags: ['overclaim'], ...mutate });
+
+const offlineCorpus = (mutate = {}) => ({ corpus_id: 'decision-quality-eval-v0',
+  proof_level: 'offline_human_eval', live_proof: false, generation, cases: [offlineCase()], ...mutate });
+
+const offlineReport = (mutate = {}) => {
+  const report = validReport({ model: { id: generation.model_id, version: generation.model_version,
+    prompt_id: generation.prompt_ref, prompt_digest: generation.prompt_digest } });
+  return { ...report, ...mutate };
 };
 
 test('4D0 the shipped corpus is empty and claims no live proof', () => {
@@ -49,9 +69,10 @@ test('4D0 both schemas compile and accept a valid fixture, rejecting a broken on
   const ajv = new Ajv({ strict: false });
   const corpusValidate = ajv.compile(JSON.parse(read('corpus.schema.json')));
   const reportValidate = ajv.compile(JSON.parse(read('report.schema.json')));
-  const corpus = { corpus_id: 'decision-quality-eval-v0', proof_level: 'offline_human_eval',
-    live_proof: false, cases: [realCase()] };
+  const corpus = offlineCorpus();
   assert.equal(corpusValidate(corpus), true, JSON.stringify(corpusValidate.errors));
+  assert.equal(corpusValidate({ ...corpus, generation: undefined }), false,
+    'an offline corpus without a frozen generation identity is not a valid corpus');
   assert.equal(corpusValidate({ ...corpus, cases: [{ ...realCase(), scores: [realCase().scores[0]] }] }), false,
     'a schema that cannot be broken by a missing review is not a schema');
   const report = validReport();
@@ -168,7 +189,8 @@ test('4D0 every report metric must be derivable from the case results', () => {
   duplicated.failed_cases = [...duplicated.failed_cases, { ...duplicated.failed_cases[0] }];
   assert.ok(validateReport(duplicated).map((e) => e.rule).includes('failed_cases_must_not_duplicate'));
   assert.ok(reportRules({ aggregate_score: 87 }).includes('no_aggregate_magic_score'));
-  assert.ok(reportRules({ model: { id: 'f', version: 'v1' } }).includes('model_must_be_named_with_version'));
+  assert.ok(reportRules({ model: { id: 'f', version: 'v1' } })
+    .includes('model_must_be_named_with_version_and_digest'));
   assert.ok(reportRules({ proof_level: 'synthetic_contract_eval' })
     .includes('report_proof_level_must_be_offline_human_eval'));
   const lying = validReport();
@@ -326,6 +348,41 @@ test('4D0 a report cannot restate the corpus reviews or the frozen generation id
   const noGeneration = { ...corpus, generation: undefined };
   assert.ok(validateEvaluation(noGeneration, validReport()).map((e) => e.rule)
     .includes('offline_eval_requires_frozen_generation_identity'));
+});
+
+
+test('4D0 the whole chain accepts a complete honest pair and refuses each missing piece', () => {
+  // The end-to-end regression: the same data through corpus, report, and the link between them.
+  assert.deepEqual(validateCorpus(offlineCorpus()), [],
+    'a real offline corpus with a frozen generation identity must validate');
+  assert.deepEqual(validateReport(offlineReport()), [],
+    'a matching report must validate');
+  assert.deepEqual(validateEvaluation(offlineCorpus(), offlineReport()), []);
+
+  const noGeneration = offlineCorpus({ generation: undefined });
+  assert.ok(validateCorpus(noGeneration).map((e) => e.rule)
+    .includes('offline_eval_requires_frozen_generation_identity'));
+  assert.ok(validateEvaluation(noGeneration, offlineReport()).map((e) => e.rule)
+    .includes('offline_eval_requires_frozen_generation_identity'));
+
+  const noDigest = offlineReport();
+  delete noDigest.model.prompt_digest;
+  assert.ok(validateReport(noDigest).map((e) => e.rule)
+    .includes('model_must_be_named_with_version_and_digest'));
+  const wrongDigest = offlineReport({ model: { ...offlineReport().model, prompt_digest: 'sha256-ffffffffffffffff' } });
+  assert.ok(validateEvaluation(offlineCorpus(), wrongDigest).map((e) => e.rule)
+    .includes('prompt_digest_must_match_corpus'));
+
+  // A malformed tag list anywhere is a finding, never a crash.
+  for (const value of [{}, null, 'overclaim', 7]) {
+    const broken = offlineCorpus({ cases: [offlineCase({ failure_tags: value })] });
+    const found = validateCorpus(broken);
+    assert.ok(found.some((e) => e.rule.startsWith('case_failure_tags_')),
+      `failure_tags ${JSON.stringify(value)} must produce a finding`);
+  }
+  const brokenReport = offlineReport();
+  brokenReport.case_results[0].reviews = {};
+  assert.ok(validateReport(brokenReport).length > 0);
 });
 
 test('4D0 the protocol separates proof levels and keeps the real one offline', () => {

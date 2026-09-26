@@ -31,7 +31,8 @@
       "required": [
         "id",
         "version",
-        "prompt_id"
+        "prompt_id",
+        "prompt_digest"
       ],
       "properties": {
         "id": {

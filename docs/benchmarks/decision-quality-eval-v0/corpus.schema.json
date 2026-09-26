@@ -282,5 +282,20 @@
         }
       }
     }
+  },
+  "if": {
+    "properties": {
+      "proof_level": {
+        "const": "offline_human_eval"
+      }
+    },
+    "required": [
+      "proof_level"
+    ]
+  },
+  "then": {
+    "required": [
+      "generation"
+    ]
   }
 }

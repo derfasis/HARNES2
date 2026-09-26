@@ -148,7 +148,8 @@ export function validateCase(item, at = 'case') {
 
   validateReviews(item.scores, item.adjudication, at, problems);
   checkPublishedAxes(item.scores, item.adjudication, item.final_axes, at, problems);
-  if (!sameValue([...(item.failure_tags ?? [])].sort(), derivedTags(item.scores)))
+  if (!Array.isArray(item.failure_tags)) problems.push({ at, rule: 'case_failure_tags_required' });
+  else if (!sameValue([...item.failure_tags].sort(), derivedTags(item.scores)))
     problems.push({ at, rule: 'case_failure_tags_must_be_the_reviewers_union' });
   return problems;
 }
@@ -156,8 +157,10 @@ export function validateCase(item, at = 'case') {
 export function validateCorpus(corpus) {
   const problems = [];
   if (!corpus || typeof corpus !== 'object') return [{ at: 'corpus', rule: 'corpus_must_be_object' }];
-  if (extraKeys(corpus, ['corpus_id', 'proof_level', 'live_proof', 'cases']).length > 0)
+  if (extraKeys(corpus, ['corpus_id', 'proof_level', 'live_proof', 'generation', 'cases']).length > 0)
     problems.push({ at: 'corpus', rule: 'corpus_has_extra_fields' });
+  if (corpus.proof_level === 'offline_human_eval' && !corpus.generation)
+    problems.push({ at: 'corpus', rule: 'offline_eval_requires_frozen_generation_identity' });
   if (corpus.corpus_id !== 'decision-quality-eval-v0') problems.push({ at: 'corpus', rule: 'corpus_id_mismatch' });
   if (!PROOF_LEVELS.includes(corpus.proof_level)) problems.push({ at: 'corpus', rule: 'corpus_proof_level_known' });
   if (corpus.live_proof !== false) problems.push({ at: 'corpus', rule: 'live_proof_must_be_false' });
@@ -217,10 +220,10 @@ export function validateReport(report) {
   if (report.proof_level !== 'offline_human_eval')
     problems.push({ at: 'report', rule: 'report_proof_level_must_be_offline_human_eval' });
   if (report.live_proof !== false) problems.push({ at: 'report', rule: 'live_proof_must_be_false' });
-  if (extraKeys(report.model ?? {}, ['id', 'version', 'prompt_id']).length > 0
+  if (extraKeys(report.model ?? {}, ['id', 'version', 'prompt_id', 'prompt_digest']).length > 0
     || typeof report.model?.id !== 'string' || typeof report.model?.version !== 'string'
-    || typeof report.model?.prompt_id !== 'string')
-    problems.push({ at: 'report', rule: 'model_must_be_named_with_version' });
+    || typeof report.model?.prompt_id !== 'string' || typeof report.model?.prompt_digest !== 'string')
+    problems.push({ at: 'report', rule: 'model_must_be_named_with_version_and_digest' });
   if (!Array.isArray(report.case_results)) {
     problems.push({ at: 'report', rule: 'case_results_required' });
     return problems;
@@ -298,6 +301,8 @@ export function validateEvaluation(corpus, report) {
   const claimsReal = corpus?.proof_level === 'offline_human_eval' || report?.proof_level === 'offline_human_eval';
   if (claimsReal) {
     if (cases.length === 0) problems.push({ at: 'corpus', rule: 'offline_eval_requires_cases' });
+    if (!corpus?.generation || typeof corpus.generation !== 'object')
+      problems.push({ at: 'corpus', rule: 'offline_eval_requires_frozen_generation_identity' });
     for (const item of cases) {
       const at = item?.case_id ?? 'case';
       if (item?.provenance?.kind !== 'anonymized_real')
@@ -311,8 +316,6 @@ export function validateEvaluation(corpus, report) {
   // The generation identity is frozen in the corpus. Without it a benchmark cannot honestly be
   // attributed to a model, and "prompt_id" alone is a free string rather than a reference.
   const generation = corpus?.generation;
-  if (claimsReal && (!generation || typeof generation !== 'object'))
-    problems.push({ at: 'corpus', rule: 'offline_eval_requires_frozen_generation_identity' });
   if (generation) {
     for (const key of ['model_id', 'model_version', 'prompt_ref', 'prompt_digest'])
       if (typeof generation[key] !== 'string' || generation[key].length === 0)
@@ -321,7 +324,8 @@ export function validateEvaluation(corpus, report) {
       if (report.model.id !== generation.model_id) problems.push({ at: 'report.model', rule: 'model_id_must_match_corpus' });
       if (report.model.version !== generation.model_version) problems.push({ at: 'report.model', rule: 'model_version_must_match_corpus' });
       if (report.model.prompt_id !== generation.prompt_ref) problems.push({ at: 'report.model', rule: 'prompt_ref_must_match_corpus' });
-      if (report.model.prompt_digest !== undefined && report.model.prompt_digest !== generation.prompt_digest)
+      // Exact equality, always: an absent digest is not a passing digest.
+      if (report.model.prompt_digest !== generation.prompt_digest)
         problems.push({ at: 'report.model', rule: 'prompt_digest_must_match_corpus' });
     }
   }
