@@ -153,6 +153,47 @@ test('the scheduler is told what came up even when a reader does not', async () 
   assert.equal(channel.lastSourceCode, 'PEER_ID_INVALID');
 });
 
+test('one dead source does not cost the live ones their chance to start', async (t) => {
+  // The ordering that matters: three configured, the first fails on bootstrap, the other two
+  // must still come up. Before this, the throw ended the loop and two healthy sources were
+  // reported as absent — one failure, three dead sources, and no way to tell them apart.
+  const { MtprotoTelegramChannel } = await import('../business/channels/telegram-mtproto.mjs');
+  const { createRequire } = await import('node:module');
+  const { Api } = createRequire(import.meta.url)('telegram');
+  const ids = ['telegram:channel:100', 'telegram:channel:200', 'telegram:channel:300'];
+  const { store, service, scheduler } = await harness(t, { configured: ids });
+  const published = [];
+  const channel = new MtprotoTelegramChannel(service);
+  channel.accountId = '999';
+  channel.client = { connected: true, invoke: async () => ({}), addEventHandler: () => {},
+    removeEventHandler: () => {},
+    getEntity: async (input) => {
+      const id = Number(String(input).replace('-100', ''));
+      if (id === 100) throw Object.assign(new Error('peer lookup failed'), { code: 'PEER_ID_INVALID' });
+      // GramJS TL classes take camelCase fields; a snake_case one is silently dropped, which
+      // would leave accessHash undefined and the peer unreadable for the wrong reason.
+      return new Api.Channel({ id: BigInt(id), accessHash: 1n, title: 't', photo: null, date: 0,
+        username: null });
+    } };
+  channel.onSourcesReady = (readers) => { published.push(readers); scheduler.sourceReaders = readers; };
+  // In the running service the scheduler's telegram is the channel itself, which is where the
+  // failure code comes from. Wiring it the same way here is what makes the cause assertable.
+  scheduler.telegram = channel;
+  // The call still fails loudly: publishing state is not swallowing the fault.
+  await assert.rejects(() => channel.startSourceReaders(), /peer lookup failed/);
+  assert.equal(published.length, 1, 'the scheduler is told once, with what actually came up');
+  assert.deepEqual(published[0].map((entry) => entry.sourceId), [ids[1], ids[2]],
+    'the two healthy sources are up; the dead one is not counted among them');
+  assert.equal(channel.lastSourceCode, 'PEER_ID_INVALID');
+  // And the scheduler's own view agrees: one missing, and the two live ones keep being polled.
+  await scheduler.tick();
+  const [row] = events(store, 'source.telegram.readers_absent');
+  assert.deepEqual(JSON.parse(row.payload_json), { configured_sources: 3, active_readers: 2,
+    missing_readers: 1, cause_code: 'PEER_ID_INVALID' });
+  assert.equal(scheduler.lastReason, 'source_readers_absent:PEER_ID_INVALID');
+  for (const entry of channel.sourceReaders) await entry.transport.close().catch(() => {});
+});
+
 test('a source belonging to another account is named, and does not throw', async () => {
   const { MtprotoTelegramChannel } = await import('../business/channels/telegram-mtproto.mjs');
   const published = [];

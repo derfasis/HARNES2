@@ -95,31 +95,42 @@ export class MtprotoTelegramChannel {
   }
 
   // Lifecycle is fixed: connected, account verified, peer resolved, reader constructed, baselined,
-  // then handed to the scheduler. A source that cannot be started never blocks the connection.
+  // then handed to the scheduler. A source that cannot be started never blocks the connection,
+  // and never blocks another source either: one dead reader must not cost the live ones.
   async startSourceReaders() {
     const policies = this.service.config.opportunity?.telegramSources ?? [];
     this.sourceReaders = [];
-    this.lastSourceCode = null;
+    let firstError = null;
+    let failureCode = null;
     try {
       for (const policy of policies) {
         if (policy.accountId !== this.accountId) {
           this.lastSourceError = `source ${policy.sourceId} belongs to another account`;
-          this.lastSourceCode = 'SOURCE_ACCOUNT_MISMATCH';
+          failureCode ??= 'SOURCE_ACCOUNT_MISMATCH';
           continue;
         }
-        const rpc = new GramjsSourceRpc(this.client, this.service, policy.sourceId);
-        const peer = await rpc.resolveInputChannel(policy.channelId);
-        const reader = new TelegramPublicSourceReader(this.service, policy.sourceId, rpc, peer, null, { joinedPeer: true });
-        await reader.bootstrap();
-        this.sourceReaders.push({ sourceId: policy.sourceId, transport: reader });
+        try {
+          const rpc = new GramjsSourceRpc(this.client, this.service, policy.sourceId);
+          const peer = await rpc.resolveInputChannel(policy.channelId);
+          const reader = new TelegramPublicSourceReader(this.service, policy.sourceId, rpc, peer, null, { joinedPeer: true });
+          await reader.bootstrap();
+          this.sourceReaders.push({ sourceId: policy.sourceId, transport: reader });
+        } catch (error) {
+          // The first failure is remembered and rethrown below, so the call still fails loudly.
+          // What changes is that the sources after this one still get their chance to start.
+          firstError ??= error;
+          failureCode ??= sourceFailureCode(error);
+        }
       }
     } finally {
-      // The scheduler is told what actually came up, even when one reader did not. Publishing
+      // The scheduler is told what actually came up, even when a reader did not. Publishing
       // only on the success path left the scheduler holding the empty list it was built with,
       // which is how a source that nobody is reading came to look like a source with nothing to
       // say. There is no retry here: this is an honest report of the current state, nothing more.
+      this.lastSourceCode = failureCode;
       if (typeof this.onSourcesReady === 'function') this.onSourcesReady([...this.sourceReaders]);
     }
+    if (firstError) throw firstError;
   }
 
   // Releasing a reader must not disconnect the shared client; the channel owns the connection.
