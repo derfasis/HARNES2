@@ -32,5 +32,6 @@ under-anonymised.
 ## Never
 
 - Never put a real name, handle, or raw message id into a case, even temporarily.
-- Never claim `anonymized_real` without a `provenance_ref`. A reference to the internal origin of
-  the material, opaque to the reviewer, is what makes the claim checkable.
+- Never claim `anonymized_real` without a `provenance_claim_ref`: an opaque pointer to the
+  internal origin of the material, so a human can check the claim. It is a claim, not a proof —
+  nothing verifies it mechanically, and this document must not imply otherwise.

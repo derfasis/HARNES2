@@ -15,9 +15,13 @@ A third adjudicator is added when either condition holds:
 - On any axis, the two scores differ by **2 or more points** (`0` vs `2`, `1` vs `3`).
 - One reviewer records `N/A` while the other records `0..3`.
 
-The adjudicator sees both scorings, the rubric, and the case, and records the final score with a
-one-line reason. The reason is part of the report: an adjudication without a stated reason is
-itself a finding about the rubric being unclear.
+The adjudicator sees both scorings, the rubric, and the case, and records a `final_axes` score for
+**all six axes** plus a one-line reason. The reason is part of the report: an adjudication without
+a stated reason is itself a finding about the rubric being unclear.
+
+An adjudication never replaces the two original scorings — it is recorded **in addition** to them,
+so a report always shows the disagreement it resolved. A case with no adjudication and a
+disagreement is an incomplete case, not a resolved one, and the validator refuses it.
 
 ## Order of operations
 

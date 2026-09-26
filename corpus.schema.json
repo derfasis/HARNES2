@@ -30,6 +30,109 @@
     }
   },
   "$defs": {
+    "score": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        {
+          "const": "N/A"
+        }
+      ]
+    },
+    "axes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "grounding",
+        "intent_understanding",
+        "calibration",
+        "relevance",
+        "decision_quality",
+        "operator_usefulness"
+      ],
+      "properties": {
+        "grounding": {
+          "$ref": "#/$defs/score"
+        },
+        "intent_understanding": {
+          "$ref": "#/$defs/score"
+        },
+        "calibration": {
+          "$ref": "#/$defs/score"
+        },
+        "relevance": {
+          "$ref": "#/$defs/score"
+        },
+        "decision_quality": {
+          "$ref": "#/$defs/score"
+        },
+        "operator_usefulness": {
+          "$ref": "#/$defs/score"
+        }
+      }
+    },
+    "failure_tag": {
+      "enum": [
+        "invented_fact",
+        "unsupported_permission",
+        "missed_opportunity",
+        "overclaim",
+        "wrong_intent",
+        "premature_action"
+      ]
+    },
+    "scoring": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reviewer",
+        "axes",
+        "failure_tags"
+      ],
+      "properties": {
+        "reviewer": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "axes": {
+          "$ref": "#/$defs/axes"
+        },
+        "failure_tags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/failure_tag"
+          }
+        }
+      }
+    },
+    "adjudication": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reviewer",
+        "final_axes",
+        "reason"
+      ],
+      "properties": {
+        "reviewer": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "final_axes": {
+          "$ref": "#/$defs/axes"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        }
+      }
+    },
     "case": {
       "type": "object",
       "additionalProperties": false,
@@ -142,84 +245,6 @@
         },
         "adjudication": {
           "$ref": "#/$defs/adjudication"
-        }
-      }
-    },
-    "score": {
-      "anyOf": [
-        {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 3
-        },
-        {
-          "const": "N/A"
-        }
-      ]
-    },
-    "failure_tag": {
-      "enum": [
-        "invented_fact",
-        "unsupported_permission",
-        "missed_opportunity",
-        "overclaim",
-        "wrong_intent",
-        "premature_action"
-      ]
-    },
-    "axes": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "grounding",
-        "intent_understanding",
-        "calibration",
-        "relevance",
-        "decision_quality",
-        "operator_usefulness"
-      ],
-      "properties": {
-        "grounding": {
-          "$ref": "#/$defs/score"
-        },
-        "intent_understanding": {
-          "$ref": "#/$defs/score"
-        },
-        "calibration": {
-          "$ref": "#/$defs/score"
-        },
-        "relevance": {
-          "$ref": "#/$defs/score"
-        },
-        "decision_quality": {
-          "$ref": "#/$defs/score"
-        },
-        "operator_usefulness": {
-          "$ref": "#/$defs/score"
-        }
-      }
-    },
-    "adjudication": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "reviewer",
-        "final_axes",
-        "reason"
-      ],
-      "properties": {
-        "reviewer": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 100
-        },
-        "final_axes": {
-          "$ref": "#/$defs/axes"
-        },
-        "reason": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 2000
         }
       }
     }

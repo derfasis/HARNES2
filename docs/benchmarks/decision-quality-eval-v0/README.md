@@ -7,6 +7,15 @@ reviewer looks at, and what a result looks like. The corpus is empty until real,
 material exists and the owner explicitly authorises model calls. Nothing here invents "real" cases
 to fill a gap.
 
+## Proof levels
+
+- `synthetic_contract_eval` — this protocol and its validator. The corpus is empty.
+- `offline_human_eval` — a future real measurement: real anonymised cases, real model output, two
+  human reviewers. Offline, isolated from the live business, and still `live_proof=false`.
+
+A report may claim the second only when its corpus carries real provenanced cases and a named
+model. It may never claim `live_proof=true` at all in this stage.
+
 ## What this stage does and does not measure
 
 Stage 4B measured **discipline**: whether a reasoning output is grounded, states its uncertainty,
@@ -30,12 +39,21 @@ conclusion relative to the evidence provided and, where they exist, gold annotat
 | `corpus.json` | The cases. Empty today, and that is the honest state |
 | `validate.mjs` | A small deterministic validator. It checks structure, never quality |
 
-## The one rule that matters most
+## The rule that matters most, and its honest limit
 
-A case is only `anonymized_real` if it carries a `provenance_ref` — an opaque internal identifier
-that proves the case came from a real source. Not a raw message, not a person's name, not a
-screenshot. Without that reference the validator refuses the case, because a corpus that quietly
-fills itself with plausible-looking inventions is worse than an empty one.
+A case is only `anonymized_real` if it carries a `provenance_claim_ref` — an opaque internal
+identifier naming where the material came from.
+
+That reference is a **claim, not a proof**. Today nothing verifies it: a validator can check that a
+string is present and well formed, and that is all. An earlier draft of this document called it
+proof, and that was wrong — a corpus that quietly fills itself with plausible-looking inventions
+would pass.
+
+So the rule stands, with its limit stated: the reference makes a real case *checkable by a human*
+who can look up the origin, and makes a fabricated one *visible when someone does*. Making it
+machine-verifiable needs an immutable registry mapping `provenance_claim_ref` to a source digest,
+and that registry does not exist yet. Until it does, the honest claim is: this corpus's real-case
+count is only as trustworthy as the people who filled it in.
 
 ## What the validator will not do
 
