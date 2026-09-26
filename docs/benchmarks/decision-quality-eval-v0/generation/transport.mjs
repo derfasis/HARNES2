@@ -30,17 +30,21 @@ export const childEnvironment = (environment = process.env) => {
   return { ...env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' };
 };
 
-// The staged case travels as the router context, with no effect tools: this evaluation has no
-// business surface at all, so a case can never reach a person.
+// The exact envelope the existing worker reads. It requires run_id, situation_id, system_prompt,
+// model and context, and refuses any envelope carrying tools. A fake worker will happily accept
+// anything, so the shape is asserted against the worker's own source in the test suite.
+export const ENVELOPE_KEYS = ['run_id', 'situation_id', 'system_prompt', 'model', 'context', 'tools'];
+
 export const buildEnvelope = ({ prompt, staged, runId = randomUUID(), runtime }) => ({
   run_id: runId,
+  situation_id: staged.situation.situation_id,
+  system_prompt: prompt,
   tools: [],
   model: { model: runtime.model, provider: runtime.provider, apiMode: runtime.apiMode,
     baseUrl: runtime.baseUrl, maxIterations: 1, maxOutputTokens: runtime.maxOutputTokens,
     timeoutSeconds: runtime.timeoutSeconds },
-  context: { prompt, subject: staged.subject, situation: staged.situation,
-    messages: staged.messages, offer: staged.offer, operator_goal: staged.operator_goal,
-    known_unknowns: staged.known_unknowns },
+  context: { subject: staged.subject, situation: staged.situation, messages: staged.messages,
+    offer: staged.offer, operator_goal: staged.operator_goal, known_unknowns: staged.known_unknowns },
 });
 
 export const transportProblems = (runtime = {}) => {

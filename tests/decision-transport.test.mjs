@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ROOT } from '../business/config.mjs';
-import { buildEnvelope, childEnvironment, createTransport, transportProblems }
+import { ENVELOPE_KEYS, buildEnvelope, childEnvironment, createTransport, transportProblems }
   from '../docs/benchmarks/decision-quality-eval-v0/generation/transport.mjs';
 
 const RUNTIME = { model: 'configured-model', provider: 'configured-provider', apiMode: 'chat',
@@ -43,15 +43,20 @@ test('4D the transport refuses to call a runtime that does not describe a model'
     assert.ok(transportProblems({ ...RUNTIME, [key]: '' }).includes(`runtime_config_is_missing_${key}`));
 });
 
-test('4D the envelope carries the frozen prompt and the staged case, and no effect tools', () => {
+test('4D the envelope matches what the real worker actually reads', () => {
   const envelope = buildEnvelope({ prompt: 'PROMPT', staged: stagedCase, runId: 'run-1', runtime: RUNTIME });
   assert.equal(envelope.run_id, 'run-1');
   assert.deepEqual(envelope.tools, [], 'this evaluation has no business surface at all');
-  assert.equal(envelope.context.prompt, 'PROMPT');
-  assert.equal(envelope.context.situation.situation_id, 'sit-1');
+  assert.equal(envelope.system_prompt, 'PROMPT', 'the prompt is the worker system prompt');
+  assert.equal(envelope.situation_id, 'sit-1');
   assert.equal(envelope.context.messages[0].source_event_id, 'ev-1');
   assert.equal(envelope.model.model, 'configured-model');
   assert.equal(envelope.model.maxIterations, 1);
+  // A fake worker accepts any shape, so the contract is checked against the worker's own source.
+  const worker = fs.readFileSync(path.join(ROOT, 'scripts', 'situation_router_worker.py'), 'utf8');
+  for (const key of ['run_id', 'situation_id', 'system_prompt', 'model', 'context'])
+    assert.ok(worker.includes(`envelope["${key}"]`), `the worker must read envelope["${key}"]`);
+  for (const key of ENVELOPE_KEYS) assert.ok(key in envelope, `the envelope must carry ${key}`);
 });
 
 test('4D credentials are passed through explicitly, never inherited wholesale', () => {
