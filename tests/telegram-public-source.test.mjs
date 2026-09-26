@@ -446,7 +446,10 @@ test('GLM F6: failed source remains stale while healthy source polls and creates
   h.config.opportunity.telegramSources.push(other);h.config.opportunity.allowedSourceRefs.push(other.sourceId);
   await bootstrapTelegramSource(h.service,other.sourceId,{pts:10,history:[]});await h.bootstrap();h.reply(difference());
   const scheduler=h.schedulerWith([{sourceId:other.sourceId,transport:{readDifference:async()=>{throw Error('invented-provider-secret');}}},
-    {sourceId,transport:h.reader}]);await scheduler.tick();assert.equal(scheduler.busy,false);assert.equal(scheduler.lastReason,'source_read_failed');
+    {sourceId,transport:h.reader}]);await scheduler.tick();assert.equal(scheduler.busy,false);assert.equal(scheduler.lastReason,'source_read_failed:UNCLASSIFIED');
+  const pollFailures=h.store.all("SELECT * FROM events WHERE kind='source.telegram.poll.failed'");
+  assert.equal(pollFailures.length,1,'a failed poll is recorded, not swallowed');
+  assert.deepEqual(JSON.parse(pollFailures[0].payload_json),{source_id:other.sourceId,code:'UNCLASSIFIED',checkpoint_pts:10,phase:'catching_up',reason:'READ_FAILED'});
   assert.equal(sourceCheckpoint(h.service,other.sourceId).phase,'catching_up');assert.equal(sourceCheckpoint(h.service,other.sourceId).pts,10);
   assert.equal(h.state().phase,'current');assert.equal(h.calls,1);assert.equal(h.cards().length,1);
   assert.doesNotMatch(JSON.stringify(h.store.all('SELECT * FROM events')),/invented-provider-secret/);noEffects(h);
