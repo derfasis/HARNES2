@@ -1,0 +1,34 @@
+# Reviewer protocol
+
+Quality is measured by people, so the way people are used has to be fixed before any scoring
+starts, not after the numbers look wrong.
+
+## Two independent reviewers
+
+Every scored case is read by two reviewers working independently. They may read the rubric, the
+case, and the protocol. They may not discuss the case before both have submitted their scores.
+
+## When a third reviewer adjudicates
+
+A third adjudicator is added when either condition holds:
+
+- On any axis, the two scores differ by **2 or more points** (`0` vs `2`, `1` vs `3`).
+- One reviewer records `N/A` while the other records `0..3`.
+
+The adjudicator sees both scorings, the rubric, and the case, and records the final score with a
+one-line reason. The reason is part of the report: an adjudication without a stated reason is
+itself a finding about the rubric being unclear.
+
+## Order of operations
+
+1. Reviewers score independently.
+2. Scores are compared mechanically.
+3. Only then may anyone discuss a case.
+
+Discussing first is not a shortcut, it is the thing that makes the second reviewer worthless.
+
+## What a reviewer may not do
+
+- May not consult the model's own confidence or self-assessment. It is the thing under test.
+- May not use the failure tags as a shortcut to the axes, or the axes as a shortcut to the tags.
+- May not rescore after seeing the aggregate result of any other case.
