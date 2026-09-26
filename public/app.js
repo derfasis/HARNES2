@@ -44,10 +44,23 @@ function overview(){
 // Stage 3E: a read-only Discovery viewer. It renders the frozen 3B/3C projections and issues
 // nothing but the two GET endpoints. There is deliberately no command path here.
 let discoveryList=null,discoveryError=null,discoveryDetail=null,discoverySelection=null,discoveryDetailError='',discoveryCursorStack=[];
+let discoveryQueue=null;
+// The queue pages on its own cursor: a hundred actionable situations must not hide the rest.
+async function loadDiscoveryQueue(cursor) {
+  discoveryQueue=await api(cursor?`/api/discovery/decisions?cursor=${encodeURIComponent(cursor)}`:'/api/discovery/decisions');
+}
+async function nextDiscoveryQueue() {
+  const cursor=discoveryQueue?.next_cursor; if(!cursor) return;
+  await loadDiscoveryQueue(cursor); render();
+}
 async function loadDiscovery() {
   discoveryCursorStack=[];
-  try { discoveryList=await api('/api/discovery/reason-states'); discoveryError=null; }
-  catch(error) { discoveryList=null; discoveryError=error.message; }
+  try {
+    discoveryList=await api('/api/discovery/reason-states');
+    // The situations an operator can still act on. The reason-state list alone cannot reach them.
+    await loadDiscoveryQueue();
+    discoveryError=null;
+  } catch(error) { discoveryList=null; discoveryQueue=null; discoveryError=error.message; }
   // The open situation is re-read too, so a card that went stale, revoked, or unavailable is never
   // left on screen looking fresh next to an already updated list.
   if(discoverySelection) await selectSituation(discoverySelection);
@@ -81,7 +94,12 @@ function discoveryTab(){
     <strong>${esc(item.situation_id)}</strong><small>${esc(item.decision)} · ${esc(item.state)}</small>
     <small>Условие: ${esc(item.unlock)}</small><small>${esc(item.reason)}</small>
     <small>${item.wait?`Ожидание: ${esc(item.wait.kind)}${item.wait.at?` до ${esc(item.wait.at)} (${esc(date(item.wait.at))})`:''}`:'Ожидание: нет'}</small><small>${esc(freshnessLine(item.freshness))}</small></button>`).join('');
-  return `${panel('Discovery: состояния решений',rows?`<div class="person-list">${rows}</div>`:empty('Нет заблокированных ситуаций','Здесь появляются ситуации, ожидающие решения. Ничего менять из этого экрана нельзя.'),discoveryList?.next_cursor?button('Далее','discovery-next'):'')}
+  const queue=(discoveryQueue?.items??[]).filter(item=>item.review_available||item.reason_available);
+  const queueRows=queue.map(item=>`<button class="person-card ${item.situation_id===discoverySelection?'active':''}" data-do="discovery-select" data-id="${esc(item.situation_id)}">
+    <strong>${esc(item.situation_id)}</strong><small>${item.review_available?'Ждёт ревью':''}${item.review_available&&item.reason_available?' · ':''}${item.reason_available?'Можно принять решение':''}</small>
+    <small>${esc(freshnessLine(item.freshness))}</small></button>`).join('');
+  return `${queue.length||discoveryQueue?.next_cursor?panel('Discovery: требуют решения',`<div class="person-list">${queueRows}</div>${discoveryQueue?.next_cursor?button('Далее','discovery-queue-next'):''}`):''}
+    ${panel('Discovery: состояния решений',rows?`<div class="person-list">${rows}</div>`:empty('Нет заблокированных ситуаций','Здесь появляются ситуации, ожидающие решения. Ничего менять из этого экрана нельзя.'),discoveryList?.next_cursor?button('Далее','discovery-next'):'')}
     ${discoveryDetailPanel()}`;
 }
 function discoveryDetailPanel(){
@@ -98,11 +116,71 @@ function discoveryDetailPanel(){
     <small>${esc(freshnessLine(a.freshness))}</small></div></div>`).join('');
   const proposals=d.opening_proposals.map(p=>`<p><strong>Предложение — не черновик, не отправлено, не даёт разрешения на контакт</strong>: ${esc(p.text)}${truncatedMark(p.text_truncated)}<small>${esc(p.rationale)}${truncatedMark(p.rationale_truncated)}</small></p>`).join('');
   return panel(`Ситуация ${d.situation_id}`,`<p>Статус: ${esc(d.status)} · в хранении: ${esc(d.storage_status)} · ревизия ${d.revision}</p>
+    ${['STOPPED','DISMISSED','TRANSFERRED','STALE'].includes(d.status)?`<p class="section-note">Эта ситуация закрыта: ${esc(d.status)}. Запись сохранена, решения недоступны.</p>`:d.freshness?.fresh===true?'':`<p class="section-note">Основание устарело: ${esc((d.freshness?.reasons??[]).join(', '))}. Решения недоступны, пока основание не обновится.</p>`}
+    ${discoveryOperatorActions(d)}
     <p>${esc(freshnessLine(d.freshness))}</p><h3>Наблюдения</h3>${evidence||'<p>Пока нет.</p>'}
     <h3>Гипотезы</h3>${assessments||'<p>Пока нет.</p>'}<h3>Предложения</h3>${proposals||'<p>Пока нет.</p>'}
-    <p><strong>Не отправлено</strong> · <strong>Не даёт разрешения на контакт</strong> · ничего из этого экрана выполнить нельзя</p>
+    <p><strong>Не отправлено</strong> · <strong>Не даёт разрешения на контакт</strong> · отсюда ничего не отправляется; решения меняют только состояние Discovery</p>
     <p>Задачи ревью: ${d.review_tasks.map(t=>esc(t.status)).join(', ')||'нет'}</p>`);
 }
+
+// Stage 4E: the operator's existing write commands, exposed and nothing more. The UI never
+// decides, never repairs, and never retries a rejected decision on its own.
+// Actions are offered only for a live, fresh basis. A stale or expired situation is shown, but it
+// is not decided from the screen: the operator's own basis has already moved on.
+const discoveryLive = d => !!d && !['STOPPED','DISMISSED','TRANSFERRED','STALE'].includes(d.status)
+  && d.freshness?.fresh === true;
+const discoveryProposedReview = d => (d?.review_tasks ?? []).find(t => t.status === 'proposed');
+// A reason decision is only possible while the latest assessment still produced the situation's
+// current revision on the current evidence. After an approve the revision moves on, and offering
+// the buttons would be offering a guaranteed DISCOVERY_REASON_ASSESSMENT_STALE.
+const discoveryReasonable = d => {
+  const a = d?.assessments?.at(-1);
+  return !!a && a.result_revision === d.revision && a.evidence_fingerprint === d.evidence_fingerprint;
+};
+function discoveryOperatorActions(d) {
+  if (!discoveryLive(d)) return '';
+  const proposed = discoveryProposedReview(d), parts = [];
+  if (proposed) {
+    parts.push(button('Одобрить разбор','discovery-review-approve',proposed.id,'primary'));
+    parts.push(button('Отклонить','discovery-review-reject',proposed.id,'danger'));
+  }
+  // Each decision gets its own control. The decision travels in data-mode, exactly like the
+  // other actions carry their parameter, so the real click path cannot open an undefined form.
+  if (!discoveryReasonable(d)) return parts.length ? `<div class="actions">${parts.join('')}</div>` : '';
+  for (const decision of ['WAIT','IGNORE','STOP'])
+    parts.push(`<button class="button ${decision==='STOP'?'danger':'secondary'}" data-do="discovery-reason-open" data-id="${esc(d.situation_id)}" data-mode="${decision}">${decision}</button>`);
+  return `<div class="actions">${parts.join('')}</div>`;
+}
+const reasonForm = decision => {
+  const waitFields = decision === 'WAIT'
+    ? field('wait_kind','Условие','select','evidence_change',[['evidence_change','Новое evidence'],['deadline','Срок']])
+      + field('wait_at','Срок (ISO 8601)')
+    : '';
+  return modal(`Решение: ${decision}`, field('reason','Почему','textarea') + waitFields, async values => {
+    if (!values.reason || !String(values.reason).trim()) throw new Error('Причина обязательна');
+    if (decision === 'WAIT' && (!values.wait_kind || (values.wait_kind === 'deadline' && !values.wait_at)))
+      throw new Error('Для WAIT нужно условие: evidence_change или срок');
+    const d = discoveryDetail;
+    if (!discoveryLive(d)) throw new Error('Ситуация уже недоступна для решения');
+    const assessment = d.assessments?.at(-1);
+    if (!assessment) throw new Error('Нет оценки, на которую можно опереться');
+    const wait = decision === 'WAIT'
+      ? (values.wait_kind === 'deadline' ? { kind: 'deadline', at: values.wait_at } : { kind: 'evidence_change' })
+      : undefined;
+    try {
+      await command('discovery.reason', { situation_id: d.situation_id, assessment_id: String(assessment.id),
+        expected_revision: d.revision, expected_evidence_fingerprint: d.evidence_fingerprint,
+        decision, reason: values.reason, ...(wait ? { wait } : {}) });
+    } finally {
+      // One attempt, always. A refusal means this screen is out of date, so the canonical state is
+      // re-read before the error reaches the operator.
+      await selectSituation(d.situation_id);
+      await loadDiscovery();
+      render();
+    }
+  });
+};
 function engagementPanel(){
   const all=detail.engagements??[],e=all.find(e=>!['CLOSED','STOPPED'].includes(e.status));
   if(!e)return panel('Постійна справа',`<p>Увімкнення явне. Старі текстові дозволи не стають типізованою згодою. Після STOP потрібні окреме відновлення контакту, нова справа та новий дозвіл.</p>${all.map(x=>`<p>${esc(x.topic)}: ${esc(x.status)}</p>`).join('')}`,button('Відкрити справу','eng-open'));
@@ -194,9 +272,26 @@ function modal(title,content,onSubmit){
 const convOptions=()=>[['','Общая работа партнёра'],...state.conversations.map(c=>[c.id,c.name])];
 const convPayload=()=>({conversation_id:selected});
 async function act(action,itemId,extra){
-  // Discovery is a viewer: both branches only read, and neither reaches command().
   if(action==='discovery-select'){await selectSituation(itemId);render();return;}
   if(action==='discovery-next'){await nextDiscoveryPage();render();return;}
+  // Stage 4E: operator decisions call the existing commands with the exact current basis, and a
+  // rejection is reported rather than retried.
+  if(action==='discovery-review-approve'||action==='discovery-review-reject'){
+    const d=discoveryDetail;if(!discoveryLive(d))throw new Error('Ситуация уже недоступна');
+    const proposed=discoveryProposedReview(d);
+    if(!proposed||proposed.id!==itemId)throw new Error('Предложение на ревью больше не актуально');
+    try{
+      await command('discovery.review',{task_id:itemId,decision:action.endsWith('approve')?'approve':'reject',
+        expected_revision:d.revision,expected_evidence_fingerprint:d.evidence_fingerprint});
+    }finally{
+      // A rejected decision means the screen is out of date: go back to canonical state, then let
+      // the error reach the operator. Never retry, never paper over it.
+      await selectSituation(d.situation_id);await loadDiscovery();render();
+    }return;
+  }
+  if(action==='discovery-queue-next'){await nextDiscoveryQueue();return;}
+  if(action==='discovery-reason-open'){reasonForm(extra);return;}
+  if(action==='discovery-reason-cancel'){if(modal.open)modal.close();return;}
   if(action.startsWith('eng-')){
     const e=(detail?.engagements??[]).find(e=>!['CLOSED','STOPPED'].includes(e.status));
     const ep={engagement_id:e?.id};

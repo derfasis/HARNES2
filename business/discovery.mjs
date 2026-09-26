@@ -690,6 +690,41 @@ function reasonTransition(service, p, actor) {
 
 const REASON_STATE_MAX_LIMIT = 100;
 const freshnessVerdict = state => ({ fresh: state.fresh, reasons: state.reasons });
+// Stage 4E: the honest way to reach an actionable situation. The reason-state surface only lists
+// situations a reason transition governs, which is exactly the set a reason decision cannot be made
+// on. This read lists the live situations an operator could still act on, and nothing more.
+function decisionQueue(service, options, actor) {
+  operator(actor);
+  fields(options, ['limit', 'cursor']);
+  const limit = options.limit === undefined ? REASON_STATE_MAX_LIMIT : options.limit;
+  check(Number.isInteger(limit) && limit >= 1 && limit <= REASON_STATE_MAX_LIMIT, 'DISCOVERY_FIELDS_INVALID');
+  if (options.cursor !== undefined) {
+    check(typeof options.cursor === 'string' && SITUATION_ID.test(options.cursor), 'DISCOVERY_FIELDS_INVALID');
+  }
+  const rows = service.store.all(`SELECT * FROM discovery_situations
+    WHERE partner_id=? AND ${ACTIVE} AND id>? ORDER BY id LIMIT ?`,
+  service.config.partnerId, options.cursor ?? '', limit + 1);
+  const page = rows.slice(0, limit);
+  const items = page.map((row) => {
+    const fingerprint = evidenceFingerprint(service, row.id);
+    const assessments = service.store.all("SELECT id,payload_json FROM events WHERE partner_id=? AND kind='discovery.assessment' AND json_extract(payload_json,'$.situation_id')=? ORDER BY id DESC LIMIT 1",
+    service.config.partnerId, row.id);
+    const latest = assessments[0] ? { id: String(assessments[0].id), ...parse(assessments[0].payload_json) } : null;
+    const review = service.store.get("SELECT id FROM tasks WHERE partner_id=? AND kind='discovery_review' AND status='proposed' AND evidence=?",
+    service.config.partnerId, latest ? latest.id : '');
+    const state = fresh(service, row);
+    return { situation_id: row.id, status: row.status, revision: row.revision,
+      evidence_fingerprint: fingerprint, freshness: freshnessVerdict(state),
+      assessment_id: latest ? latest.id : null,
+      // A reason decision needs the latest assessment to still be the basis for this revision.
+      reason_available: !!latest && latest.result_revision === row.revision
+        && latest.evidence_fingerprint === fingerprint && state.fresh,
+      review_available: !!review && state.fresh,
+      review_task_id: review ? review.id : null,
+      executable: false, contact_permission: false, allowed_effects: [] };
+  });
+  return { items, next_cursor: rows.length > limit ? page.at(-1).id : null };
+}
 const SITUATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 // Read-only projection of situations whose latest durable reason transition still governs the
 // current basis. It reports what blocks them and never repairs, expires, or unlocks anything.
@@ -886,6 +921,12 @@ function presentationDetail(service, situationId, actor) {
       const legacy = assessment.reasoning_version === 0;
       return {
         id: assessment.id, created_at: assessment.created_at, decision: assessment.decision,
+        // Read-only basis binding. The revision this assessment produced and the fingerprint it
+        // reasoned over: an operator screen needs both to know whether a decision is still possible.
+        result_revision: assessment.result_revision ?? null,
+        // A pre-Stage-1 assessment never recorded a fingerprint, and this contract does not
+        // invent one: the field is explicitly null for legacy, and no reason action is possible.
+        evidence_fingerprint: assessment.evidence_fingerprint ?? null,
         epistemic_status: assessment.epistemic_status, reasoning_version: assessment.reasoning_version,
         hypothesis: { ...hypothesis,
           attributed_claims: (typeof assessment.hypothesis === 'string' ? [] : assessment.hypothesis?.attributed_claims ?? [])
@@ -1080,4 +1121,5 @@ export function discoveryCommand(service, action, payload, actor) {
   return transfer(service, payload);
 }
 
-export { detail as discoveryDetail, reasonStates as discoveryReasonStates, presentationDetail as discoveryPresentationDetail };
+export { detail as discoveryDetail, reasonStates as discoveryReasonStates,
+  presentationDetail as discoveryPresentationDetail, decisionQueue as discoveryDecisionQueue };

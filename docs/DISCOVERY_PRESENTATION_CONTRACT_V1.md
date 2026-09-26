@@ -13,7 +13,8 @@ business read model  →  HTTP presentation boundary  →  future UI
 
 | Surface | Route | Content |
 | --- | --- | --- |
-| List | `GET /api/discovery/reason-states?limit=&cursor=` | Reason-state rows only |
+| Reason states | `GET /api/discovery/reason-states?limit=&cursor=` | Reason-state rows only |
+| Decision queue | `GET /api/discovery/decisions?limit=&cursor=` | Live situations an operator could still act on |
 | Detail | `GET /api/discovery/:id` | Allowlisted situation projection |
 
 The literal `reason-states` path is matched before the `:id` path, so it can never be read as
@@ -67,6 +68,12 @@ leaves the surface.
 
 `freshness` is the verdict only. Evidence stays behind the detail surface.
 
+An assessment also reports `result_revision` and `evidence_fingerprint`. Stage 4E added
+`result_revision` for one reason: the operator screen must know whether the latest assessment
+still produced the situation's current revision, because a reason decision is refused otherwise.
+Offering a decision that is guaranteed to fail is worse than offering none, and the screen has no
+other honest way to tell. It is an additive field on the allowlist, not a new authority.
+
 **Detail** is an allowlist, not the internal projection. It carries `situation_id`, `status`,
 `storage_status`, `revision`, `evidence_fingerprint`, a `basis` of seven situational fields
 (`source_ref`, `subject_ref`, `context_key`, `purpose`, `expires_at`, `created_at`, `updated_at`),
@@ -105,8 +112,16 @@ Reading it must never be presented as any of the following:
 
 ## Non-goals
 
-No UI, no auth subsystem, no scheduler, no model, runtime, Telegram, or live transport, no new
-database table, and no change to any existing detail payload. If a real leak is found in the
-detail payload, narrowing it is its own minimal change with its own review.
+No UI, no auth subsystem, no scheduler, no model, runtime, Telegram, or live transport, and no new
+database table. Existing detail payload fields are never changed, removed, or reinterpreted.
+
+The single exception is additive and bounded: Stage 4E added `result_revision` and
+`evidence_fingerprint` to the assessment projection, because an operator screen must be able to tell
+whether the latest assessment still produced the situation's current revision before offering a
+decision. Both are read-only copies of values already durable in the assessment event. They change
+no authority, no fingerprint semantics, and no command. A pre-Stage-1 assessment recorded no
+fingerprint at all, so it reports `evidence_fingerprint: null` rather than a value the contract
+invents — and a legacy assessment can never carry a reason action. If a real leak is found in the detail
+payload, narrowing it is its own minimal change with its own review.
 
 proof_level=integration; live_proof=false.
