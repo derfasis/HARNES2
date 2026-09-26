@@ -7,8 +7,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { Socket } from 'node:net';
 import { Store } from '../business/store.mjs';
-import { ROOT, readJson } from '../business/config.mjs';
-import { ingestSource, sourceContextState, sourceFreshnessReasons, sourceRows, sourceEvent, finishSource, SOURCE_MESSAGE } from '../business/source-ingestion.mjs';
+import { ROOT, readJson, checkAutomaticPrerequisite } from '../business/config.mjs';
+import { ingestSource, sourceContextState, sourceFreshnessReasons, sourceRows, sourceEvent, finishSource, automaticBoundary, SOURCE_MESSAGE } from '../business/source-ingestion.mjs';
 
 let guards;
 before(() => { guards = [mock.method(globalThis,'fetch', () => { throw Error('Network forbidden'); }), mock.method(Socket.prototype,'connect', () => { throw Error('Network forbidden'); })]; });
@@ -246,4 +246,41 @@ test('source capacity fails closed instead of silently truncating unseen context
 test('oversized relevant context fails explicitly instead of silently losing coverage',t=>{
   const h=harness(t);let s;for(let i=0;i<5;i++)s=h.ingest(input({message_id:`large${i}`,text:'x'.repeat(16000)}));
   assert.throws(()=>sourceContextState(h.service,s.source_event_id),/SOURCE_CONTEXT_CAPACITY_EXCEEDED/);noEffects(h);
+});
+
+test('the shipped config loader agrees with the boundary about a read-only reader',t=>{
+  // Both layers used to refuse telegram.enabled with automatic on, and only the first was fixed.
+  // loadConfig runs at startup, so a rule that disagrees with the boundary makes the product
+  // unstartable on exactly the combination the reader needs.
+  const base = { server: { host: '127.0.0.1', port: 8790 },
+    runtime: { enabled: false, adapter: 'hermes', baseUrl: '', model: '', maxIterations: 12,
+      timeoutSeconds: 180, maxOutputTokens: 3000, maxRunsPerDay: 30, dailyBudgetUsd: 5,
+      inputUsdPerMillion: null, outputUsdPerMillion: null },
+    scheduler: { enabled: true, tickSeconds: 20, dailyPlanning: false, planningHour: 9, timezone: 'Europe/Warsaw' },
+    telegram: { enabled: false, liveSending: false, transport: 'bot_api', allowedChatIds: [], pollSeconds: 20 },
+    context: { maxRecentMessages: 30, maxMessageCharacters: 4000, maxLessons: 5 },
+    opportunity: { automatic: true, telegramSources: [], authorBindings: [], allowedSourceRefs: [],
+      activeOffer: null, goalText: 'g', allowedChannels: ['public'], maxAgeSeconds: 86400 },
+    engagement: { enabled: false }, discovery: { enabled: false }, partnerId: 'partner-001' };
+  const withTelegram = (enabled, liveSending) => {
+    const c = structuredClone(base);
+    c.telegram.enabled = enabled; c.telegram.liveSending = liveSending;
+    return c;
+  };
+  // Same answers from both layers, or the product cannot start on a legal combination.
+  for (const [enabled, liveSending] of [[false, false], [true, false], [true, true], [false, true]]) {
+    const service = { config: withTelegram(enabled, liveSending) };
+    let boundary = null;
+    try { automaticBoundary(service); } catch (error) { boundary = error.message; }
+    let loader = null;
+    try { checkAutomaticPrerequisite(service.config); } catch (error) { loader = error.message; }
+    assert.equal(Boolean(boundary), Boolean(loader),
+      `telegram.enabled=${enabled} liveSending=${liveSending}: boundary and loader disagree`);
+  }
+  // And the read-only reader really is the legal combination.
+  const legal = { config: withTelegram(true, false) };
+  assert.doesNotThrow(() => automaticBoundary(legal));
+  assert.doesNotThrow(() => checkAutomaticPrerequisite(legal.config));
+  assert.throws(() => checkAutomaticPrerequisite(withTelegram(true, true)), /live sending off/);
+  assert.throws(() => checkAutomaticPrerequisite({ ...withTelegram(true, false), runtime: { ...base.runtime, enabled: true } }), /runtime disabled/);
 });
