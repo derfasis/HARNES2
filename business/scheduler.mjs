@@ -7,7 +7,7 @@ import { id } from './store.mjs';
 import { now } from './errors.mjs';
 
 export class Scheduler {
-  constructor(service, runtime, telegram, sourceReaders = []) { this.sourceReaders = sourceReaders; this.service = service; this.runtime = runtime; this.telegram = telegram; this.busy = false; this.stopped = false; this.lastReason = null; this.activeRun = null; }
+  constructor(service, runtime, telegram, sourceReaders = []) { this.sourceReaders = sourceReaders; this.service = service; this.runtime = runtime; this.telegram = telegram; this.busy = false; this.stopped = false; this.lastReason = null; this.activeRun = null; this.readersAbsentReported = false; }
   start() { this.timer = setInterval(() => this.tick().catch(() => { this.lastReason = 'Ошибка обработки очереди; подробности в журнале запуска'; }), this.service.config.scheduler.tickSeconds * 1000); }
   status() { return { enabled: this.service.config.scheduler.enabled, busy: this.busy, active_run: this.activeRun, reason: this.lastReason, model: runtimeReadiness(this.service.config) }; }
   async tick() {
@@ -16,6 +16,24 @@ export class Scheduler {
     try {
       const cfg = this.service.config;
       if (cfg.opportunity?.automatic) {
+        // A source that is configured but has no reader is not a quiet source. The poll loop
+        // below would iterate zero times, the source would sit at its last confirmed cursor
+        // forever, and every other signal would keep saying the transport is fine: the process
+        // answers, the connection is up, and nothing throws. This happened live — the reader
+        // failed to start after a reconnect, and the source froze for an hour looking healthy.
+        // So the absence is recorded once, and named in the status an operator actually reads.
+        let readersAbsent = false;
+        const configured = cfg.opportunity?.telegramSources ?? [];
+        if (configured.length > 0 && this.sourceReaders.length === 0) {
+          readersAbsent = true;
+          if (!this.readersAbsentReported) {
+            this.readersAbsentReported = true;
+            try { await this.service.exclusive(() => this.service.store.transaction(
+              () => this.service.store.event(cfg.partnerId, null, 'source.telegram.readers_absent',
+                'system', { configured_sources: configured.length }))); }
+            catch { /* Telemetry must never stop the queue. */ }
+          }
+        } else if (this.sourceReaders.length > 0) this.readersAbsentReported = false;
         // Empty by default. Only a trusted bootstrap can supply narrowed read-only
         // transport capabilities. Reuse this tick, never the private-chat adapter.
         let sourceReadFailed=false, sourceReadFailure=null;
@@ -47,7 +65,10 @@ export class Scheduler {
           catch { this.lastReason = 'Discovery reconciliation failed; source truth remains durable'; }
         }
         const result = await processSourceOpportunity(this.service, this.runtime);
-        this.lastReason = sourceReadFailed?`source_read_failed:${sourceReadFailure?.code ?? 'UNCLASSIFIED'}`:result.disposition; return;
+        // No reader outranks every other reason: a source nobody is reading makes whatever the
+        // opportunity pass reports about that source worth nothing.
+        this.lastReason = readersAbsent ? 'source_readers_absent'
+          : sourceReadFailed?`source_read_failed:${sourceReadFailure?.code ?? 'UNCLASSIFIED'}`:result.disposition; return;
       }
       if (cfg.discovery?.enabled === true) {
         try { await this.service.reconcileDiscovery(); }
