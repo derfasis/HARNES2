@@ -12,15 +12,22 @@ case, and the protocol. They may not discuss the case before both have submitted
 
 A third adjudicator is added when either condition holds:
 
-- On any axis, the two scores differ by **2 or more points** (`0` vs `2`, `1` vs `3`).
+- **Any** axis where the two scores differ at all, including a one-point gap.
 - One reviewer records `N/A` while the other records `0..3`.
+
+Any difference needs a third person. Leaving room for an "obvious" small gap would leave the rule
+undefined exactly where two tired reviewers are most tempted to skip it.
 
 The adjudicator sees both scorings, the rubric, and the case, and records a `final_axes` score for
 **all six axes** plus a one-line reason. The reason is part of the report: an adjudication without
 a stated reason is itself a finding about the rubric being unclear.
 
 An adjudication never replaces the two original scorings — it is recorded **in addition** to them,
-so a report always shows the disagreement it resolved. A case with no adjudication and a
+so a report always shows the disagreement it resolved.
+
+The published score is never a free choice. Where both reviewers gave the same score, that score is
+what the report carries. Where they differed, the report carries exactly what the adjudicator
+wrote, and the validator refuses anything else: two reviewers scoring `1` cannot publish `3`. A case with no adjudication and a
 disagreement is an incomplete case, not a resolved one, and the validator refuses it.
 
 ## Order of operations

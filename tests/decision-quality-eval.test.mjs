@@ -171,6 +171,63 @@ test('4D0 every report metric must be derivable from the case results', () => {
   assert.ok(validateReport(missingAdjudication).map((e) => e.rule).includes('adjudication_required'));
 });
 
+test('4D0 case ids must be unique in the corpus and in the report', () => {
+  const duplicated = { corpus_id: 'decision-quality-eval-v0', proof_level: 'offline_human_eval',
+    live_proof: false, cases: [realCase(), realCase()] };
+  assert.ok(validateCorpus(duplicated).map((e) => e.rule).includes('case_id_must_be_unique'));
+  const report = validReport();
+  report.case_results = [report.case_results[0], { ...report.case_results[0] }];
+  report.failed_cases = [];
+  report.axis_summary = deriveReportFacts(report).axis_summary;
+  report.scored_cases = 2;
+  report.not_applicable_cases = 0;
+  report.failed_cases = deriveReportFacts(report).failed_cases;
+  assert.ok(validateReport(report).map((e) => e.rule).includes('case_id_must_be_unique'));
+});
+
+test('4D0 a published score is either what both reviewers agreed or what the adjudicator wrote', () => {
+  const agreed = validReport();
+  assert.deepEqual(validateReport(agreed), [], 'an agreed score is publishable as is');
+  const inflated = validReport();
+  inflated.case_results[0].final_axes = axes(3);
+  inflated.failed_cases = [];
+  inflated.axis_summary = deriveReportFacts(inflated).axis_summary;
+  inflated.scored_cases = 1;
+  inflated.not_applicable_cases = 0;
+  inflated.failed_cases = deriveReportFacts(inflated).failed_cases;
+  assert.ok(validateReport(inflated).map((e) => e.rule)
+    .some((r) => r.startsWith('final_axis_')), 'two reviewers scoring 1 cannot publish 3');
+  const diverged = validReport();
+  diverged.case_results[0].reviews[0].axes = axes(3);
+  diverged.case_results[0].adjudication = { reviewer: 'r3', reason: 'Grounding.',
+    final_axes: axes(1) };
+  assert.ok(validateReport(diverged).map((e) => e.rule).includes('adjudication_required') === false);
+  const ignoredAdjudication = validReport();
+  ignoredAdjudication.case_results[0].reviews[0].axes = axes(3);
+  ignoredAdjudication.case_results[0].adjudication = { reviewer: 'r3', reason: 'Grounding.',
+    final_axes: axes(1) };
+  ignoredAdjudication.case_results[0].final_axes = axes(3);
+  ignoredAdjudication.failed_cases = [];
+  ignoredAdjudication.axis_summary = deriveReportFacts(ignoredAdjudication).axis_summary;
+  ignoredAdjudication.scored_cases = 1;
+  ignoredAdjudication.not_applicable_cases = 0;
+  ignoredAdjudication.failed_cases = deriveReportFacts(ignoredAdjudication).failed_cases;
+  assert.ok(validateReport(ignoredAdjudication).map((e) => e.rule)
+    .includes('final_axes_must_be_the_adjudicated_ones'));
+});
+
+test('4D0 the schemas guard the real data too, not only test fixtures', () => {
+  const long = validReport();
+  long.case_results[0].case_id = 'c1';
+  long.case_results[0].failure_tags = 'not-an-array';
+  const rules = validateReport(long).map((e) => e.rule);
+  assert.ok(rules.includes('schema:type'), 'a malformed field is caught by the schema guard');
+  const longText = validateCorpus({ corpus_id: 'decision-quality-eval-v0', proof_level: 'offline_human_eval',
+    live_proof: false, cases: [{ ...realCase(), frozen_input: { ...realCase().frozen_input,
+      source_text: 'x'.repeat(5000) } }] }).map((e) => e.rule);
+  assert.ok(longText.some((rule) => rule.startsWith('schema:')), 'length limits come from the schema');
+});
+
 test('4D0 a real offline evaluation must be backed by a real corpus', () => {
   const corpus = { corpus_id: 'decision-quality-eval-v0', proof_level: 'offline_human_eval',
     live_proof: false, cases: [realCase()] };
@@ -191,8 +248,10 @@ test('4D0 a real offline evaluation must be backed by a real corpus', () => {
   otherCase.case_results[0].case_id = 'real-9';
   assert.ok(validateEvaluation(corpus, otherCase).map((e) => e.rule)
     .includes('report_case_ids_must_match_corpus'));
-  assert.deepEqual(validateEvaluation(JSON.parse(read('corpus.json')), report), [],
-    'the empty protocol corpus makes no claim to check');
+  // The empty protocol corpus cannot back a real measurement, even though it labels itself
+  // synthetic rather than offline: the report's claim is what the corpus must satisfy.
+  assert.ok(validateEvaluation(JSON.parse(read('corpus.json')), report).map((e) => e.rule)
+    .includes('offline_report_requires_offline_corpus'));
 });
 
 test('4D0 the protocol separates proof levels and keeps the real one offline', () => {

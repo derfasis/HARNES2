@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import Ajv from 'ajv';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -18,6 +19,18 @@ const CASE_KEYS = ['case_id', 'provenance', 'frozen_input', 'offer', 'operator_g
   'model_output', 'scores', 'adjudication'];
 const REPORT_KEYS = ['corpus_id', 'proof_level', 'live_proof', 'model', 'scored_cases',
   'not_applicable_cases', 'axis_summary', 'case_results', 'failed_cases'];
+
+// The JSON Schemas are compiled and run as a real second guard on the same data the hand-written
+// invariants see. The hand-written checks stay canonical for cross-field rules; the schemas catch
+// shape and type drift between the two, which is how a dangling $ref would otherwise hide.
+const ajv = new Ajv({ strict: false });
+const compiled = {
+  corpus: ajv.compile(JSON.parse(fs.readFileSync(path.join(HERE, 'corpus.schema.json'), 'utf8'))),
+  report: ajv.compile(JSON.parse(fs.readFileSync(path.join(HERE, 'report.schema.json'), 'utf8'))),
+};
+const schemaProblems = (kind, value, at) => (compiled[kind](value) ? []
+  : (compiled[kind].errors ?? []).map((error) => ({ at: `${at}${error.instancePath || ''}`.trim(),
+    rule: `schema:${error.keyword}` })));
 
 const own = (value, keys) => keys.every((key) => Object.prototype.hasOwnProperty.call(value ?? {}, key));
 const extraKeys = (value, keys) => Object.keys(value ?? {}).filter((key) => !keys.includes(key));
@@ -40,16 +53,14 @@ function validateReviews(reviews, adjudication, at, problems) {
     require_(extraKeys(scoring?.axes, AXES).length === 0, 'scoring_axes_has_extra_fields');
     for (const axis of AXES) require_(own(scoring?.axes, [axis]), `axis_${axis}_required`);
     for (const axis of AXES) require_(validScore(scoring?.axes?.[axis]), `axis_${axis}_score_invalid`);
-    for (const tag of scoring?.failure_tags ?? [])
+    for (const tag of Array.isArray(scoring?.failure_tags) ? scoring.failure_tags : [])
       require_(FAILURE_TAGS.includes(tag), `failure_tag_unknown:${tag}`);
     reviewers.add(scoring?.reviewer);
   }
   require_(reviewers.size === 2, 'two_distinct_reviewers_required');
-  const divergent = list.length === 2 && AXES.some((axis) => {
-    const [a, b] = [list[0]?.axes?.[axis], list[1]?.axes?.[axis]];
-    if (a === 'N/A' || b === 'N/A') return a !== b;
-    return Math.abs(a - b) >= 2;
-  });
+  // Any difference at all needs a third person. Leaving room for an undefined "small" gap is how
+  // two people invent a rule nobody wrote down.
+  const divergent = list.length === 2 && AXES.some((axis) => list[0]?.axes?.[axis] !== list[1]?.axes?.[axis]);
   require_(divergent === !!adjudication, divergent ? 'adjudication_required' : 'adjudication_not_expected');
   if (adjudication) {
     require_(typeof adjudication.reviewer === 'string' && adjudication.reviewer.length > 0,
@@ -66,6 +77,19 @@ function validateReviews(reviews, adjudication, at, problems) {
       require_(validScore(adjudication.final_axes?.[axis]), `adjudication_axis_${axis}_score_invalid`);
   }
   return problems;
+}
+
+// The published final_axes is never a free choice: it is what the two reviewers agreed on, or
+// exactly what the adjudicator wrote. Anything else is a number that appeared from nowhere.
+function checkPublishedAxes(reviews, adjudication, finalAxes, at, problems) {
+  const require_ = (condition, rule) => { if (!condition) problems.push({ at, rule }); };
+  if (adjudication) { require_(sameValue(finalAxes, adjudication.final_axes), 'final_axes_must_be_the_adjudicated_ones'); return; }
+  const [a, b] = reviews ?? [];
+  for (const axis of AXES) {
+    const left = a?.axes?.[axis], right = b?.axes?.[axis];
+    require_(finalAxes?.[axis] === (left === right ? left : undefined),
+      `final_axis_${axis}_must_be_the_agreed_score`);
+  }
 }
 
 export function validateCase(item, at = 'case') {
@@ -114,7 +138,15 @@ export function validateCorpus(corpus) {
   if (!PROOF_LEVELS.includes(corpus.proof_level)) problems.push({ at: 'corpus', rule: 'corpus_proof_level_known' });
   if (corpus.live_proof !== false) problems.push({ at: 'corpus', rule: 'live_proof_must_be_false' });
   if (!Array.isArray(corpus.cases)) problems.push({ at: 'corpus', rule: 'cases_must_be_array' });
-  else for (const item of corpus.cases) problems.push(...validateCase(item, item?.case_id ?? 'case'));
+  else {
+    const seen = new Set();
+    for (const item of corpus.cases) {
+      const id = item?.case_id;
+      if (id) { if (seen.has(id)) problems.push({ at: id, rule: 'case_id_must_be_unique' }); seen.add(id); }
+      problems.push(...validateCase(item, id ?? 'case'));
+    }
+    problems.push(...schemaProblems('corpus', corpus, 'corpus.'));
+  }
   return problems;
 }
 
@@ -136,7 +168,7 @@ export function deriveReportFacts(report) {
       else continue;
       if (axisFailed(score) && result?.case_id) {
         failures.push({ case_id: result.case_id, axis: name, score,
-          failure_tags: [...(result.failure_tags ?? [])].sort() });
+          failure_tags: [...(Array.isArray(result.failure_tags) ? result.failure_tags : [])].sort() });
       }
     }
   }
@@ -170,25 +202,30 @@ export function validateReport(report) {
     problems.push({ at: 'report', rule: 'case_results_required' });
     return problems;
   }
+  const seenCaseIds = new Set();
   report.case_results.forEach((result, index) => {
     const at = `report.case_results[${index}]`;
     if (extraKeys(result ?? {}, ['case_id', 'reviews', 'adjudication', 'final_axes', 'failure_tags', 'failed']).length > 0)
       problems.push({ at, rule: 'case_result_has_extra_fields' });
     if (typeof result?.case_id !== 'string' || result.case_id.length === 0)
       problems.push({ at, rule: 'case_id_required' });
+    if (seenCaseIds.has(result?.case_id)) problems.push({ at, rule: 'case_id_must_be_unique' });
+    seenCaseIds.add(result?.case_id);
     if (extraKeys(result?.final_axes, AXES).length > 0 || !own(result?.final_axes, AXES))
       problems.push({ at, rule: 'final_axes_required' });
     for (const axis of AXES) if (!validScore(result?.final_axes?.[axis]))
       problems.push({ at: axis, rule: 'final_axis_score_invalid' });
     if (!Array.isArray(result?.failure_tags)) problems.push({ at, rule: 'failure_tags_required' });
-    for (const tag of result?.failure_tags ?? [])
+    for (const tag of Array.isArray(result?.failure_tags) ? result.failure_tags : [])
       if (!FAILURE_TAGS.includes(tag)) problems.push({ at, rule: `failure_tag_unknown:${tag}` });
     if (typeof result?.failed !== 'boolean') problems.push({ at, rule: 'failed_flag_required' });
     else if (result.failed !== AXES.some((axis) => axisFailed(result.final_axes?.[axis])))
       problems.push({ at, rule: 'failed_flag_must_match_final_axes' });
     // The same reviewer protocol applies inside a report, not only inside a corpus case.
     validateReviews(result?.reviews, result?.adjudication, at, problems);
+    checkPublishedAxes(result?.reviews, result?.adjudication, result?.final_axes, at, problems);
   });
+  problems.push(...schemaProblems('report', report, 'report.'));
   // A single headline number is exactly what this benchmark refuses to produce.
   if (report.aggregate_score !== undefined) problems.push({ at: 'report', rule: 'no_aggregate_magic_score' });
   for (const axis of AXES)
@@ -218,7 +255,7 @@ export function validateReport(report) {
     if (!validScore(row?.score)) problems.push({ at: 'report.failed_cases', rule: 'failed_case_score_invalid' });
   }
   if (!sameValue([...listed].map((row) => ({ case_id: row?.case_id, axis: row?.axis, score: row?.score,
-    failure_tags: [...(row?.failure_tags ?? [])].sort() })), facts.failed_cases))
+    failure_tags: [...(Array.isArray(row?.failure_tags) ? row.failure_tags : [])].sort() })), facts.failed_cases))
     problems.push({ at: 'report.failed_cases', rule: 'failed_cases_must_be_exactly_derived' });
   return problems;
 }
@@ -227,7 +264,11 @@ export function validateReport(report) {
 export function validateEvaluation(corpus, report) {
   const problems = [];
   const cases = Array.isArray(corpus?.cases) ? corpus.cases : [];
-  if (corpus?.proof_level === 'offline_human_eval') {
+  // The report's claim decides what the corpus must be. A report may not fall back on the corpus
+  // labelling itself synthetic and quietly claim a real measurement.
+  if (report?.proof_level === 'offline_human_eval' && corpus?.proof_level !== 'offline_human_eval')
+    problems.push({ at: 'corpus', rule: 'offline_report_requires_offline_corpus' });
+  if (corpus?.proof_level === 'offline_human_eval' || report?.proof_level === 'offline_human_eval') {
     if (cases.length === 0) problems.push({ at: 'corpus', rule: 'offline_eval_requires_cases' });
     for (const item of cases) {
       const at = item?.case_id ?? 'case';
