@@ -185,6 +185,9 @@ only in the cross-check, so no code path can produce a fixture evaluation wearin
 A non-empty generation input must also name its prompt **before** anything is generated, so real
 calls are never spent against a corpus that could not be closed afterwards.
 
+The adjudicator resolves axes and explains why; it carries no failure tags, because those belong to
+the two human reviewers and widening them would put a third party's vocabulary into the case union.
+
 A model may not be one of the two reviewers, and the adjudicator is held to the same rule. The
 assembler cannot *prove* a person is a person — it can only refuse the identities it can see are a
 machine, and that limit is written down here rather than implied away.

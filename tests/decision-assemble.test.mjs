@@ -226,8 +226,10 @@ test('4D the finished contract itself refuses an empty or unfinished offline eva
     frozen_input: { source_text: 'Как устроено партнёрство?', author: 'user-02', context: 'g',
       known_unknowns: [] },
     offer: 'o', operator_goal: 'g', model_output: JSON.parse(artefact.raw),
-    scores: [{ reviewer: 'anna', protocol: REVIEW_PROTOCOL, axes: axes(), failure_tags: [] },
-      { reviewer: 'boris', protocol: REVIEW_PROTOCOL, axes: axes(), failure_tags: [] }],
+    // The finished corpus stores the reviews; the protocol they were produced under is the
+    // assembler's precondition, not a field the corpus schema carries.
+    scores: [{ reviewer: 'anna', axes: axes(), failure_tags: [] },
+      { reviewer: 'boris', axes: axes(), failure_tags: [] }],
     final_axes: axes(), failure_tags: [], ...over });
 
   const good = { ...base, cases: [caseBody()] };
