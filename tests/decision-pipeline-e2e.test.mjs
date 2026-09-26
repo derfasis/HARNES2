@@ -5,7 +5,11 @@
 //
 // proof_level=synthetic_contract_eval; live_proof=false. Everything here is a CONTRACT TEST fixture
 // marked prov_test_*, exists only inside this file, and is never benchmark material. No model
-// call, no network, no database, no egress, and process.env is never read or written.
+// call, no network, no database, no egress.
+//
+// runGeneration defaults its environment to process.env, so every call below passes one
+// explicitly. Nothing here depends on what the owner has set on the machine, and nothing writes
+// to the environment.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -63,13 +67,15 @@ const stubResponse = (staged) => ({ raw: JSON.stringify(stubOutput(staged)),
 const humanReview = (reviewer, value = 2) => ({ reviewer, protocol: REVIEW_PROTOCOL,
   axes: Object.fromEntries(AXES.map((axis) => [axis, value])), failure_tags: [] });
 
-// The gate is injected, never read from the environment, so this test cannot reach a real runtime
-// even if the owner has since approved one on the machine.
+// The gate is injected, so the real permission check never runs here even if the owner has since
+// approved model calls on this machine. The environment is passed explicitly as empty for the same
+// reason: runGeneration would otherwise default to the process environment of whoever runs it.
 const testOnlyGate = { allowed: true, reasons: [] };
+const NO_ENVIRONMENT = Object.freeze({});
 
 async function runPipeline(directory, input) {
   const calls = [];
-  const run = await runGeneration({ input, gate: testOnlyGate, directory,
+  const run = await runGeneration({ input, environment: NO_ENVIRONMENT, gate: testOnlyGate, directory,
     store: fileStore(directory),
     callModel: async ({ staged }) => { calls.push(staged.case_id); return stubResponse(staged); } });
   return { run, calls };
@@ -166,13 +172,16 @@ test('4D the pipeline breaks on the digest, not on the prose, when the staged ca
   }
 });
 
-test('4D an injected gate is the only thing that let this run, and the environment is never consulted', async () => {
-  // The same staged input with no gate injected refuses, because the real gate reads the owner's
-  // environment. This is the assertion that keeps the end-to-end test honest about its own scope.
+test('4D an injected gate is the only thing that let this run, and an empty environment refuses', async () => {
+  // The same staged input with no gate injected refuses, because the real gate reads the
+  // environment. The environment is passed as an empty object rather than left to default, so this
+  // asserts the gate's behaviour rather than whatever the owner happens to have set on the machine.
+  // This is the assertion that keeps the end-to-end test honest about its own scope.
   const { input } = convert({ source: rawSource(), provenance: CONTRACT_PROVENANCE });
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harnes2-eval-e2e-gate-'));
   try {
-    const refused = await runGeneration({ input, directory, store: fileStore(directory),
+    const refused = await runGeneration({ input, environment: NO_ENVIRONMENT, directory,
+      store: fileStore(directory),
       callModel: async () => { throw new Error('the stub must never be reached'); } });
     assert.equal(refused.exit, EXIT.refused, 'without an injected gate the run is refused');
     assert.ok(refused.reasons.includes('owner_has_not_authorised_model_calls'),
