@@ -1,0 +1,301 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "decision-quality-eval-v0 corpus",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "corpus_id",
+    "proof_level",
+    "live_proof",
+    "cases"
+  ],
+  "properties": {
+    "corpus_id": {
+      "const": "decision-quality-eval-v0"
+    },
+    "proof_level": {
+      "enum": [
+        "synthetic_contract_eval",
+        "offline_human_eval"
+      ]
+    },
+    "live_proof": {
+      "const": false
+    },
+    "cases": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/case"
+      }
+    },
+    "generation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model_id",
+        "model_version",
+        "prompt_ref",
+        "prompt_digest"
+      ],
+      "properties": {
+        "model_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "prompt_ref": {
+          "type": "string",
+          "minLength": 1
+        },
+        "prompt_digest": {
+          "type": "string",
+          "minLength": 16
+        }
+      }
+    }
+  },
+  "$defs": {
+    "score": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3
+        },
+        {
+          "const": "N/A"
+        }
+      ]
+    },
+    "axes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "grounding",
+        "intent_understanding",
+        "calibration",
+        "relevance",
+        "decision_quality",
+        "operator_usefulness"
+      ],
+      "properties": {
+        "grounding": {
+          "$ref": "#/$defs/score"
+        },
+        "intent_understanding": {
+          "$ref": "#/$defs/score"
+        },
+        "calibration": {
+          "$ref": "#/$defs/score"
+        },
+        "relevance": {
+          "$ref": "#/$defs/score"
+        },
+        "decision_quality": {
+          "$ref": "#/$defs/score"
+        },
+        "operator_usefulness": {
+          "$ref": "#/$defs/score"
+        }
+      }
+    },
+    "failure_tags": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "invented_fact",
+          "unsupported_permission",
+          "missed_opportunity",
+          "overclaim",
+          "wrong_intent",
+          "premature_action"
+        ]
+      }
+    },
+    "scoring": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reviewer",
+        "axes",
+        "failure_tags"
+      ],
+      "properties": {
+        "reviewer": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "axes": {
+          "$ref": "#/$defs/axes"
+        },
+        "failure_tags": {
+          "$ref": "#/$defs/failure_tags"
+        }
+      }
+    },
+    "adjudication": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reviewer",
+        "final_axes",
+        "reason"
+      ],
+      "properties": {
+        "reviewer": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "final_axes": {
+          "$ref": "#/$defs/axes"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        }
+      }
+    },
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_id",
+        "provenance",
+        "frozen_input",
+        "offer",
+        "operator_goal",
+        "model_output",
+        "scores"
+      ],
+      "properties": {
+        "case_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 150,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+        },
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "sanitized_fixture",
+                "anonymized_real"
+              ]
+            },
+            "provenance_claim_ref": {
+              "type": "string",
+              "pattern": "^prov_[A-Za-z0-9._-]{1,120}$"
+            }
+          }
+        },
+        "frozen_input": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "source_text",
+            "author",
+            "context",
+            "known_unknowns"
+          ],
+          "properties": {
+            "source_text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4000
+            },
+            "author": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 150
+            },
+            "context": {
+              "type": "string",
+              "maxLength": 1000
+            },
+            "known_unknowns": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              }
+            }
+          }
+        },
+        "offer": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "operator_goal": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "gold_annotations": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "permitted_decisions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 40
+              }
+            }
+          }
+        },
+        "model_output": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "scores": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "$ref": "#/$defs/scoring"
+          }
+        },
+        "adjudication": {
+          "$ref": "#/$defs/adjudication"
+        },
+        "final_axes": {
+          "$ref": "#/$defs/axes"
+        },
+        "failure_tags": {
+          "$ref": "#/$defs/failure_tags"
+        }
+      }
+    }
+  },
+  "if": {
+    "properties": {
+      "proof_level": {
+        "const": "offline_human_eval"
+      }
+    },
+    "required": [
+      "proof_level"
+    ]
+  },
+  "then": {
+    "required": [
+      "generation"
+    ]
+  }
+}
