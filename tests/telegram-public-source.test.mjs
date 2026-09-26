@@ -1383,3 +1383,36 @@ test('bootstrap failure returns while slow teardown retains the existing exclusi
   assert.equal(f.owner.client,f.client);assert.throws(()=>f.owner.connect(),{code:'PUBLIC_TELEGRAM_OWNER_BUSY'});assert.equal(h.state(),null);
   finishTeardown();await flush();assert.equal(f.owner.client,null);noEffects(h);
 });
+
+test('a snapshot conflict names its exact branch, and only a conflict is ever named',async t=>{
+  const h=harness(t);await positive(h);const event=h.rows()[0].event_id;await h.reader.fault();
+  await authorize(h);await h.restart();
+  h.reply(difference(12,[message({message:'Unproven replacement?',editDate:1767225600})]));
+  await assert.rejects(h.poll(),{code:'TELEGRAM_SNAPSHOT_CONFLICT'});
+  assert.equal(h.rows()[0].event_id,event,'native evidence is untouched');
+  assert.equal(h.state().reason,'INTEGRITY_RECONCILIATION_REQUIRED','the refusal is unchanged');
+  const named=h.store.all("SELECT * FROM events WHERE kind='source.telegram.integrity_conflict'");
+  assert.equal(named.length,1,'the branch is named once');
+  const payload=JSON.parse(named[0].payload_json);
+  // The exact branch this fixture exercises, not merely a truthy field.
+  assert.equal(payload.conflict_kind,'snapshot_changed_without_newer_proof');
+  assert.equal(payload.source_id,'telegram:channel:100');
+  // Nothing that could carry material: no text, no endpoint, no session, no digests.
+  const serialised=JSON.stringify(payload);
+  assert.doesNotMatch(serialised,/Unproven replacement/);
+  assert.doesNotMatch(serialised,/https?:\/\//);
+  for(const key of Object.keys(payload)) assert.ok(!/text|body|raw|payload|credential|session|digest/i.test(key),key);
+});
+
+test('an accepted page leaves no branch behind for a later refusal to publish',async t=>{
+  // conflictCheck throws instead of stashing, so a page that succeeded cannot leave anything for
+  // the next failure to inherit. A refusal that is not a conflict therefore names nothing.
+  const h=harness(t);await h.bootstrap();
+  h.reply(difference(11,[message()]));
+  await h.poll();await h.tick();
+  assert.equal(h.state().reason,null,'the first page applied cleanly');
+  h.reply(mappingFailure);
+  await assert.rejects(h.poll(),{code:'TELEGRAM_MAPPING_INTEGRITY'});
+  assert.deepEqual(h.store.all("SELECT * FROM events WHERE kind='source.telegram.integrity_conflict'"),[],
+    'a refusal that is not a snapshot conflict names no branch at all');
+});

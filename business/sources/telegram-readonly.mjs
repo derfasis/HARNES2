@@ -1,6 +1,6 @@
 // No Telegram client, credentials, network, send API or model is imported here.
 // This is a bounded adapter-facing channel difference contract, NOT raw MTProto.
-import { ensure, now } from '../errors.mjs';
+import { AppError, ensure, now } from '../errors.mjs';
 import { automaticBoundary, digest, ingestSource, finishSource, sourceRows, sourceCheckpoint, sourceAllowlist, SOURCE_CHECKPOINT_CHANNEL, validateSourceCheckpoint } from '../source-ingestion.mjs';
 import { markDiscoveryPending } from '../discovery.mjs';
 import { validateTelegramSources } from '../config.mjs';
@@ -12,6 +12,33 @@ const RECOVERY = 'source.telegram.reconciliation';
 const RECOVERY_REQUEST = 'source.telegram.recovery.requested';
 const RECOVERY_FINISHED = 'source.telegram.recovery.finished';
 export const TELEGRAM_RECONCILIATION = 'telegram-reconciliation-v1';
+/** Refuse a delta, and name the branch that refused it.
+ *
+ * The branch travels on the error itself rather than in a module-level slot. An argument to
+ * check() is evaluated on every page, accepted or refused, so a shared stash would be filled by
+ * pages that succeeded and could then be published against an unrelated later failure. The
+ * factory runs only when the check actually fails, so nothing about a good page is recorded, and
+ * the evidence cannot be separated from the failure it describes. Nothing is written here; the
+ * caller publishes it once the outcome is settled.
+ */
+function conflictCheck(ok, kind, detailFactory) {
+  if (ok) return;
+  const error = new AppError(`Telegram source: TELEGRAM_SNAPSHOT_CONFLICT`, 409, 'TELEGRAM_SNAPSHOT_CONFLICT');
+  try {
+    Object.defineProperty(error, 'telegramConflict', {
+      value: { conflict_kind: kind, ...detailFactory() }, enumerable: false });
+  } catch { /* A diagnostic must never replace the failure it describes. */ }
+  throw error;
+}
+function publishConflict(service, record) {
+  if (!record) return;
+  try {
+    service.store.event(service.config.partnerId, null, 'source.telegram.integrity_conflict', 'system', {
+      source_id: record.source_id ?? null, conflict_kind: record.conflict_kind,
+      message_id: record.message_id ?? null, pts: record.pts ?? null, edit_date: record.edit_date ?? null });
+  } catch { /* Evidence must never change what the pipeline accepts. */ }
+}
+
 export const TELEGRAM_COUNTERLESS = 'telegram-reconciliation-v2';
 // A message time may sit marginally ahead of the local clock: senders and the server drift by
 // seconds, and a live group produced a message stamped fifteen seconds in the future, which
@@ -215,9 +242,10 @@ export function telegramRecoveryCoverage(service,p,pts,ptsCount=1) {
   service.config.partnerId,RECOVERY,p.sourceId,pts-ptsCount,pts);
   if(!row)return false;
   const r=JSON.parse(row.payload_json),{batch_id,...body}=r;
-  check([TELEGRAM_RECONCILIATION,TELEGRAM_COUNTERLESS].includes(r.contract_version) && r.account_id===p.accountId && r.channel_id===p.channelId
+  conflictCheck([TELEGRAM_RECONCILIATION,TELEGRAM_COUNTERLESS].includes(r.contract_version) && r.account_id===p.accountId && r.channel_id===p.channelId
     && integer(r.from_pts) && integer(r.watermark_pts) && batch_id===digest(body)
-    && r.watermark_pts<=sourceCheckpoint(service,p.sourceId)?.pts,'TELEGRAM_SNAPSHOT_CONFLICT');
+    && r.watermark_pts<=sourceCheckpoint(service,p.sourceId)?.pts,'recovery_receipt_ahead',
+    ()=>({source_id:p.sourceId,pts:r.watermark_pts}));
   return true;
 }
 function recoveryBody(p,page) {
@@ -242,7 +270,7 @@ function reconcile(service,p,s,page) {
   const snapshots=new Map();
   for(const m of page.snapshots) {
     normalizeTelegramMessage(p,m,1);
-    check(!snapshots.has(m.id),'TELEGRAM_SNAPSHOT_CONFLICT');snapshots.set(m.id,m);
+    conflictCheck(!snapshots.has(m.id),'duplicate_snapshot_id',()=>({source_id:p.sourceId,message_id:m.id,pts:m.pts}));snapshots.set(m.id,m);
   }
   check(page.kind!=='empty' || snapshots.size===0,'INVALID_TELEGRAM_EMPTY');
   const recoveredCoverage=recovered.some(u=>u.pts>page.from_pts && u.pts<=page.to_pts);
@@ -286,16 +314,17 @@ function reconcile(service,p,s,page) {
       // The server may deliver one delete natively (positive count) and again
       // counterless in the difference at the same watermark: equivalent message
       // id sets prove it is one event, not two deletions.
-      check(samePtsPositive.kind==='delete' && samePtsPositive.message_ids.length===u.message_ids.length
+      conflictCheck(samePtsPositive.kind==='delete' && samePtsPositive.message_ids.length===u.message_ids.length
         && [...samePtsPositive.message_ids].sort((a,b)=>a-b).join()===u.message_ids.slice().sort((a,b)=>a-b).join(),
-        'TELEGRAM_SNAPSHOT_CONFLICT');
+        'same_pts_delete_mismatch',()=>({source_id:p.sourceId,pts:u.pts}));
     }
     for(const id of u.message ? [u.message.id] : u.message_ids) {
       check(!targets.has(`${u.pts}:${id}`),'TELEGRAM_PTS_COLLISION');targets.add(`${u.pts}:${id}`);
       if(samePtsPositive)continue;
       const last=updates.filter(v=>v.message?.id===id || v.message_ids?.includes(id)).at(-1);
-      check(!last || last.pts<u.pts || last.pts===u.pts && last.message && u.message
-        && digest(last.message)===digest(u.message),'TELEGRAM_SNAPSHOT_CONFLICT');
+      conflictCheck(!last || last.pts<u.pts || last.pts===u.pts && last.message && u.message
+        && digest(last.message)===digest(u.message),'same_pts_message_digest_mismatch',
+        ()=>({source_id:p.sourceId,message_id:u.message?.id??id,pts:u.pts,edit_date:u.message?.edit_date??null}));
     }
     const old=receipt(service,p,u.pts,key);
     if(old){check(JSON.parse(old.payload_json).fingerprint===fingerprint,'TELEGRAM_PTS_COLLISION');continue;}
@@ -317,18 +346,20 @@ function reconcile(service,p,s,page) {
   for(const [id,m] of snapshots) {
     const last=[...updates.filter(u=>u.pts>page.from_pts),...recovered].sort((a,b)=>a.pts-b.pts)
       .filter(u=>u.message?.id===id || u.message_ids?.includes(id)).at(-1);
-    check(!last || last.message && digest(last.message)===digest(m),'TELEGRAM_SNAPSHOT_CONFLICT');
+    conflictCheck(!last || last.message && digest(last.message)===digest(m),'snapshot_vs_last_update_mismatch',
+      ()=>({source_id:p.sourceId,message_id:m.id,pts:page.pts,edit_date:m.edit_date??null}));
     const old=sourceRows(service,p.sourceId).find(r=>r.message.message_id===`message:${id}`);
     const normalized=normalizeTelegramMessage(p,m,(old?.message.version??0)+1);
-    check(old || page.to_pts>page.from_pts,'TELEGRAM_SNAPSHOT_CONFLICT');
+    conflictCheck(old || page.to_pts>page.from_pts,'snapshot_without_advance',()=>({source_id:p.sourceId,pts:page.to_pts}));
     check(!old || old.message.author_id===normalized.author_id,'TELEGRAM_AUTHOR_IDENTITY_CHANGED');
     check(!deleted(service,p,normalized.message_id) && old?.message.operation!=='delete','TELEGRAM_MESSAGE_DELETED');
     const {version:ignored,...content}=normalized;
     const {version:oldVersion,...oldContent}=old?.message??{};
     const identical=!!old && digest(content)===digest(oldContent);
     const oldProof=old && latestProof(service,p,old.event_id);
-    if(old && !identical)check(oldProof?.kind==='reconciled_snapshot' && page.to_pts>oldProof.watermark_pts
-      && m.edit_date!=null,'TELEGRAM_SNAPSHOT_CONFLICT');
+    if(old && !identical)conflictCheck(oldProof?.kind==='reconciled_snapshot' && page.to_pts>oldProof.watermark_pts
+      && m.edit_date!=null,'snapshot_changed_without_newer_proof',
+      ()=>({source_id:p.sourceId,message_id:m.id,pts:m.pts,edit_date:m.edit_date??null}));
     const saved=identical ? {source_event_id:old.event_id} : ingestSource(service,normalized);
     if (!identical) markDiscoveryPending(service,saved.source_event_id);
     // Preserve native provenance for an identical native-backed version.
@@ -349,14 +380,16 @@ function validateHistoricalUpdate(service,p,u) {
     check(u.message===undefined && Array.isArray(u.message_ids) && u.message_ids.length>0 && u.message_ids.length<=100
       && u.message_ids.every(id=>integer(id)) && new Set(u.message_ids).size===u.message_ids.length,'INVALID_TELEGRAM_DELETE');
     const known=u.message_ids.map(id=>rows.find(r=>r.message.message_id===`message:${id}`));
-    check(known.every(r=>r?.message.operation==='delete'),'TELEGRAM_SNAPSHOT_CONFLICT');
+    conflictCheck(known.every(r=>r?.message.operation==='delete'),'historical_delete_state_mismatch',
+      ()=>({source_id:p.sourceId,message_id:u.message_ids.join(','),pts:u.pts}));
     return known.map(r=>r.event_id);
   } else {
     check(u.message_ids===undefined,'UNSUPPORTED_TELEGRAM_FIELDS');
     const old=rows.find(r=>r.message.message_id===`message:${u.message?.id}`),r=old && latestProof(service,p,old.event_id);
-    check(old && r && (r.watermark_pts??r.pts)>=u.pts,'TELEGRAM_SNAPSHOT_CONFLICT');
+    conflictCheck(old && r && (r.watermark_pts??r.pts)>=u.pts,'historical_proof_missing',()=>({source_id:p.sourceId,pts:u.pts}));
     const m=normalizeTelegramMessage(p,u.message,old.message.version);
-    check(digest(old.message)===digest(m),'TELEGRAM_SNAPSHOT_CONFLICT');
+    conflictCheck(digest(old.message)===digest(m),'historical_digest_mismatch',
+      ()=>({source_id:p.sourceId,message_id:m.id,pts:u.pts,edit_date:m.edit_date??null}));
     return [old.event_id];
   }
 }
@@ -468,6 +501,7 @@ export function applyTelegramDifference(service,sourceId,page,expectedPts=null,c
           reason:s.reason===INTEGRITY || integrityErrors.has(error.code)?INTEGRITY:error.code==='TELEGRAM_CLOCK_SKEW'?error.code:'INTAKE_FAILED'});
         if(authorizationId && telegramRecoveryAuthorization(service,p)===authorizationId)finishRecovery(service,p,authorizationId,'failed');
       });
+      publishConflict(service,error.telegramConflict);
       throw error;
     }
   });
