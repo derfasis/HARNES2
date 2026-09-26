@@ -70,12 +70,20 @@ export function refusalReceipt({ caseId, attempt, failures, raw = null }) {
   };
 }
 
+// The staging contract's own rule for a case id, reproduced here rather than imported: a receipt
+// must never be able to carry an identifier the corpus itself would have refused to stage. The
+// contract permits a `user-02` shape as readily as a pseudonymous `live-ddX-013`, so this is a
+// floor and not a guarantee — what it does guarantee is that the sidecar is no wider than the
+// inputs it describes.
+const CASE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,149}$/;
+
 // Fail closed on the way in: a receipt that is not one of the closed shapes is not written at all,
 // because a record the reader cannot trust is worse than no record.
 export function validateReceipt(receipt) {
   if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt)) return 'receipt_must_be_an_object';
   if (!REFUSAL_REASONS.includes(receipt.reason)) return `refusal_reason_must_be_one_of:${REFUSAL_REASONS.join('|')}`;
-  if (typeof receipt.case_id !== 'string' || !receipt.case_id) return 'receipt_case_id_must_be_a_string';
+  if (typeof receipt.case_id !== 'string' || !CASE_ID.test(receipt.case_id))
+    return 'receipt_case_id_must_match_the_staging_contract_pattern';
   if (!Number.isInteger(receipt.attempt) || receipt.attempt < 1) return 'receipt_attempt_must_be_a_positive_integer';
   const shapes = { code: CODE, instance_path: PATH, schema_path: PATH,
     keyword: NAME, expected_type: NAME, actual_type: NAME };

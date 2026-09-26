@@ -187,6 +187,14 @@ test('a malformed receipt is refused on the way in, and a damaged line is report
     assert.throws(() => recordRefusal(temp('bad'), { case_id: 'c', attempt: 0, reason: 'schema',
       code: null, instance_path: null, schema_path: null, keyword: null, expected_type: null,
       actual_type: null }), /malformed refusal receipt/);
+    // A case id the staging contract would have refused to stage cannot reach the sidecar either:
+    // the record is never wider than the inputs it describes.
+    for (const caseId of ['', ' ', 'live ddX-013', '../escape', 'имя', 'a'.repeat(151), 42, null])
+      assert.equal(validateReceipt({ ...refusalReceipt({ caseId: 'live-ddX-013', attempt: 1,
+        failures: ['output_is_not_json'] }), case_id: caseId }),
+      'receipt_case_id_must_match_the_staging_contract_pattern', `${String(caseId)} should be refused`);
+    assert.equal(validateReceipt({ ...refusalReceipt({ caseId: 'live-ddX-013', attempt: 1,
+      failures: ['output_is_not_json'] }), case_id: 'live-ddX-013' }), null);
     const directory = temp('damaged');
     fs.writeFileSync(path.join(directory, REFUSAL_FILE),
       '{"attempt":1,"case_id":"c","reason":"schema","code":"output_schema:type","instance_path":"/a",'
