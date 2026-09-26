@@ -1383,3 +1383,26 @@ test('bootstrap failure returns while slow teardown retains the existing exclusi
   assert.equal(f.owner.client,f.client);assert.throws(()=>f.owner.connect(),{code:'PUBLIC_TELEGRAM_OWNER_BUSY'});assert.equal(h.state(),null);
   finishTeardown();await flush();assert.equal(f.owner.client,null);noEffects(h);
 });
+
+// The branch diagnostic must be free to exist without ever changing what the pipeline accepts.
+// These two assertions are the whole point: the refusal is exactly the one from before, and the
+// operator gets the place as well. If the evidence could influence the decision, this fails.
+test('a snapshot conflict still latches as integrity, and now also names the branch',async t=>{
+  const h=harness(t);await positive(h);const event=h.rows()[0].event_id;await h.reader.fault();
+  await authorize(h);await h.restart();
+  h.reply(difference(12,[message({message:'Unproven replacement?',editDate:1767225600})]));
+  await assert.rejects(h.poll(),{code:'TELEGRAM_SNAPSHOT_CONFLICT'});
+  // Unchanged semantics: the source latches and native evidence is untouched.
+  assert.equal(h.rows()[0].event_id,event);
+  assert.equal(h.state().reason,'INTEGRITY_RECONCILIATION_REQUIRED');
+  const named=h.store.all("SELECT * FROM events WHERE kind='source.telegram.integrity_conflict'");
+  assert.equal(named.length,1,'the branch is named for the operator');
+  const payload=JSON.parse(named[0].payload_json);
+  assert.equal(payload.source_id,'telegram:channel:100');
+  assert.ok(payload.conflict_kind,'and the kind is present');
+  // Nothing that could carry material: no text, no endpoint, no session.
+  const serialised=JSON.stringify(payload);
+  assert.doesNotMatch(serialised,/Unproven replacement/);
+  assert.doesNotMatch(serialised,/https?:\/\//);
+  for(const key of Object.keys(payload)) assert.ok(!/text|body|raw|payload|credential|session/i.test(key),key);
+});
