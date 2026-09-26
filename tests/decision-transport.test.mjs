@@ -16,6 +16,16 @@ const RUNTIME = { model: 'configured-model', provider: 'configured-provider', ap
   baseUrl: 'https://example.invalid/v1', maxOutputTokens: 2000, timeoutSeconds: 30 };
 const WITH_CREDENTIAL = { PARTNER_MODEL_API_KEY: 'key' };
 
+const validOutput = (over = {}) => ({
+  hypothesis: { text: 'Возможно, нужен разбор.', evidence: [
+    { source_event_id: 'ev-1', author_id: 'user-02', version: 1, text: 'Как устроено партнёрство?',
+      kind: 'question', attribution: 'author_statement' }], contradictions: [], unknowns: [] },
+  next_action: { schema_version: 1, situation_id: 'sit-1', decision: 'WAIT', confidence: 0.4,
+    strategy: 'Подождать.', reason: 'Нужны детали.', evidence_message_ids: ['ev-1'], unknowns: [],
+    risk_flags: [], draft: null, review: { required: true, status: 'pending', authorization: 'none' },
+    reevaluate_after: null },
+  authority: { contact_permission: false, allowed_effects: [] }, ...over });
+
 const stagedCase = {
   case_id: 'case-1',
   provenance: { kind: 'sanitized_fixture' },
@@ -222,5 +232,30 @@ test('4D the canonical entrypoint cannot be used without the readiness check', a
   const { readLedger } = await import('../docs/benchmarks/decision-quality-eval-v0/generation/run.mjs');
   assert.equal(readLedger(directory).calls, 0, 'the ledger never moved');
   assert.equal(fs.existsSync(path.join(directory, 'attempts.json')), false);
+  fs.rmSync(directory, { recursive: true, force: true });
+});
+
+test('4D the canonical path runs end to end in the directory it was given', async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harnes2-eval-e2e-'));
+  const input = { input_id: 'd4-generation-v0', live_proof: false, cases: [stagedCase] };
+  const environment = { ...WITH_CREDENTIAL, HARNES_OWNER_APPROVED_MODEL_CALLS: 'yes' };
+  let calls = 0;
+  const serving = fakeSpawn(() => JSON.stringify({ completed: true,
+    final_response: JSON.stringify(validOutput()), model_identity: { model_id: 'served-model', model_version: 'served-1' } }));
+  const spawner = () => { calls += 1; return serving(); };
+  const first = await runWithTransport({ runtime: RUNTIME, environment, directory, input, spawnFn: spawner });
+  assert.equal(first.exit, 0, JSON.stringify(first.summary));
+  assert.equal(calls, 1);
+  // The ledger and the output must land in the directory the caller named, not the default one.
+  assert.ok(fs.existsSync(path.join(directory, 'attempts.json')), 'the ledger lands in the given directory');
+  assert.ok(fs.existsSync(path.join(directory, 'case-1.json')), 'the output lands in the given directory');
+  const { readLedger } = await import('../docs/benchmarks/decision-quality-eval-v0/generation/run.mjs');
+  assert.equal(readLedger(directory).calls, 1);
+
+  // A second run of the same directory finds the case complete and calls nothing.
+  const second = await runWithTransport({ runtime: RUNTIME, environment, directory, input, spawnFn: spawner });
+  assert.equal(second.exit, 3, JSON.stringify(second.summary));
+  assert.equal(calls, 1, 'a completed case is never called again');
+  assert.equal(readLedger(directory).calls, 1, 'and no attempt is spent either');
   fs.rmSync(directory, { recursive: true, force: true });
 });

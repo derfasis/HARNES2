@@ -105,8 +105,10 @@ export const readiness = (runtime = {}, environment = process.env) => transportP
 
 // The one way to run an evaluation. Wiring a transport into runGeneration directly would leave the
 // readiness check optional, and a forgotten preflight costs a real call, so the binding lives here.
-export async function runWithTransport({ runtime, environment = process.env, directory, ...rest } = {}) {
-  const { runGeneration, EXIT } = await import('./run.mjs');
+export async function runWithTransport({ runtime, environment = process.env, ...rest } = {}) {
+  const { runGeneration } = await import('./run.mjs');
+  // Every option is forwarded, including the output directory: dropping it here would send a real
+  // run to the default outputs folder and leave the caller's directory empty.
   return runGeneration({ ...rest, environment,
     readiness: readiness(runtime, environment),
     callModel: createTransport({ runtime, environment, ...rest }) });
