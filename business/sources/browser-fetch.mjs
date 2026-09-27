@@ -145,18 +145,21 @@ const inIpv4Range = (octets, network, bits) => {
   }
   return true;
 };
-// Prefixes in the IPv6 special-purpose registry, as (groups, prefix length) — the same shape as
-// the IPv4 table, so neither needs a hand-computed constant to get a nibble wrong.
+// Global unicast for IPv6 is 2000::/3 and nothing else. Requiring it first turns the whole
+// question "is this reserved?" into "is this inside the one range that is public, minus the parts
+// reserved inside it" — which is a question with an answer, rather than a list of things to
+// remember. The entries below are therefore only the reservations *inside* 2000::/3; everything
+// else, including the translation and discard prefixes, is refused by the outer rule.
+const IPV6_GLOBAL_UNICAST = 0x2000;
+const IPV6_GLOBAL_MASK = 0xe000;
 const IPV6_SPECIAL = [
-  [[0x0064, 0xff9b, 0, 0, 0, 0, 0, 0], 96, 'IPv4/IPv6 translation'],
-  [[0x0064, 0xff9b, 0x0001, 0, 0, 0, 0, 0], 48, 'local-use IPv4/IPv6 translation'],
-  [[0x0100, 0, 0, 0, 0, 0, 0, 0], 64, 'discard-only'],
-  [[0x2001, 0, 0, 0, 0, 0, 0, 0], 23, 'IETF protocol assignments'],
+  [[0x2001, 0x0000, 0, 0, 0, 0, 0, 0], 23, 'IETF protocol assignments'],
   [[0x2001, 0x0002, 0, 0, 0, 0, 0, 0], 48, 'benchmarking'],
   [[0x2001, 0x0010, 0, 0, 0, 0, 0, 0], 28, 'ORCHID'],
   [[0x2001, 0x0db8, 0, 0, 0, 0, 0, 0], 32, 'documentation'],
   [[0x2001, 0x0020, 0, 0, 0, 0, 0, 0], 28, 'ORCHIDv2'],
   [[0x2002, 0, 0, 0, 0, 0, 0, 0], 16, '6to4'],
+  [[0x3ffe, 0, 0, 0, 0, 0, 0, 0], 16, 'reserved, formerly 6bone'],
   [[0x3fff, 0, 0, 0, 0, 0, 0, 0], 20, 'documentation'],
 ];
 
@@ -189,12 +192,11 @@ export const isPrivateAddress = (address) => {
     if (!groups) return true;
     const embedded = mappedIpv4(groups);
     if (embedded) return isPrivateAddress(embedded);
-    if (groups.every((g) => g === 0)) return true;                           // ::
-    if (groups.slice(0, 7).every((g) => g === 0) && groups[7] === 1) return true; // ::1
-    const first = groups[0];
-    if ((first & 0xffc0) === 0xfe80) return true;                            // fe80::/10 link-local
-    if ((first & 0xfe00) === 0xfc00) return true;                            // fc00::/7 unique local
-    if ((first & 0xff00) === 0xff00) return true;                            // ff00::/8 multicast
+    // Outside 2000::/3 there is no global unicast at all: loopback, unspecified, link-local,
+    // unique local, multicast, the translation and discard prefixes, and everything unallocated.
+    // Refusing the whole outside is what makes the answer to "is this reserved?" checkable —
+    // enumerating the exceptions is how 4000:: and 8000:: came to be treated as public.
+    if ((groups[0] & IPV6_GLOBAL_MASK) !== IPV6_GLOBAL_UNICAST) return true;
     for (const [network, bits] of IPV6_SPECIAL) if (sharesPrefix(groups, network, bits)) return true;
     return false;
   }

@@ -123,11 +123,25 @@ test('every non-public address is refused, in every notation a URL parser can pr
   for (const address of ['127.0.0.1', '10.1.2.3', '172.16.0.1', '192.168.1.1', '169.254.169.254',
     '0.0.0.0', '100.64.0.1', '224.0.0.1', '::1', '[::1]', 'fe80::1', 'fd00::1', 'fc00::1',
     '::ffff:127.0.0.1', '[::ffff:127.0.0.1]', '::ffff:7f00:1', '[::ffff:7f00:1]',
-    '::ffff:169.254.169.254', '[::ffff:a9fe:a9fe]', '::ffff:0a00:1', '[::1]', '::', 'localhost']) {
-    assert.equal(isPrivateAddress(address), true, `${address} must be private`);
+    '::ffff:169.254.169.254', '[::ffff:a9fe:a9fe]', '::ffff:0a00:1', '[::1]', '::', 'localhost',
+    // The IANA special-purpose registries, which a version of this that checked only RFC1918 and
+    // loopback happily called public.
+    '198.18.0.1', '198.19.255.255', '198.51.100.1', '203.0.113.1', '192.0.2.1', '192.88.99.1',
+    '240.1.1.1', '192.0.0.1',
+    '2001:db8::1', '2001:2::1', '2001:10::1', '2001:1::1', '2002::1', '3fff::1', '100::1',
+    '64:ff9b::1', '5f00::1',
+    // Outside 2000::/3 there is no global unicast at all. These three were the regression: the
+    // boundary used to accept anything it had not been told about, and 4000:: and 8000:: are
+    // unallocated space, not addresses.
+    '4000::1', '8000::1', '3ffe::1']) {
+    assert.equal(isPrivateAddress(address), true, `${address} must be refused`);
   }
-  for (const address of ['93.184.216.34', '8.8.8.8', '2606:2800:220:1:248:1893:25c8:1946',
-    '::ffff:5db8:d822', '[::ffff:5db8:d822]']) {
+  for (const address of ['93.184.216.34', '8.8.8.8', '1.1.1.1',
+    '172.32.0.1', '100.128.0.1', '198.20.0.1', '2606:2800:220:1:248:1893:25c8:1946',
+    '::ffff:5db8:d822', '[::ffff:5db8:d822]',
+    // Inside 2000::/3 and not reserved: the addresses a real page is served from.
+    '2001:4860:4860::8888', '2606:4700:4700::1111', '2000::1', '2003::1', '2a00:1450:4001:80f::200e',
+    '2620:fe::fe', '2a03:2880:f003:83::200e']) {
     assert.equal(isPrivateAddress(address), false, `${address} must be public`);
   }
   assert.equal(isPrivateAddress('example.com'), null, 'a name is not a verdict');
