@@ -9,10 +9,10 @@ import { now } from './errors.mjs';
 export class Scheduler {
   constructor(service, runtime, telegram, sourceReaders = []) { this.sourceReaders = sourceReaders; this.service = service; this.runtime = runtime; this.telegram = telegram; this.busy = false; this.stopped = false; this.lastReason = null; this.activeRun = null; this.readersAbsentReported = false; this.sourceReadersState = null; }
   start() { this.timer = setInterval(() => this.tick().catch(() => { this.lastReason = 'Ошибка обработки очереди; подробности в журнале запуска'; }), this.service.config.scheduler.tickSeconds * 1000); }
-  // `reason` is the pipeline's business disposition and stays exactly that. A missing reader is a
-  // transport condition and is reported beside it rather than in place of it: an operator reading
-  // `waiting_source` learns what the partner is waiting for, and a narrower transport message in
-  // that slot would take that away.
+  // `reason` normally carries the pipeline's business disposition; a source poll that was actually
+  // attempted and failed may override it, because a failed poll is why the partner is doing
+  // nothing. Reader absence is reported separately and never takes this slot: it is a transport
+  // condition, and replacing the disposition there took away the reason an operator needs most.
   status() { return { enabled: this.service.config.scheduler.enabled, busy: this.busy, active_run: this.activeRun, reason: this.lastReason, model: runtimeReadiness(this.service.config), source_readers: this.sourceReadersState }; }
   async tick() {
     if (this.busy || this.stopped || !this.service.config.scheduler.enabled) return;
