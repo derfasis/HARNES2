@@ -45,17 +45,21 @@ const failing = (code) => ({ sourceId, transport: { readDifference: async () => 
   throw Object.assign(Error('down'), code ? { code } : {}); } } });
 
 test('a configured source with no reader is reported, not silently skipped', async (t) => {
-  // The live shape: the channel connected, the reader failed to start, and the scheduler was
-  // handed an empty list. The poll loop then has nothing to iterate, so the failure telemetry
-  // never fires either — and a source nobody is reading looks exactly like a quiet source.
+  // The shape: the channel connected, the reader failed to start, and the scheduler was handed an
+  // empty list. The poll loop then has nothing to iterate, so the failure telemetry never fires
+  // either — and a source nobody is reading looks exactly like a quiet source.
   const { store, scheduler } = await harness(t, { readers: [] });
   await scheduler.tick();
   const rows = events(store, 'source.telegram.readers_absent');
   assert.equal(rows.length, 1, 'the absence of a reader is evidence, and it is recorded');
   assert.deepEqual(JSON.parse(rows[0].payload_json), { configured_sources: 1, active_readers: 0,
     missing_readers: 1, cause_code: 'SOURCE_READER_BOOTSTRAP_FAILED' });
-  assert.equal(scheduler.lastReason, 'source_readers_absent:SOURCE_READER_BOOTSTRAP_FAILED',
-    'the operator sees it in the status, not only in a table');
+  // The operator sees it in the status, in its own field. It does not take over `reason`: that
+  // slot answers "what is the partner doing", and a narrower transport message there would replace
+  // the answer the operator actually needs.
+  assert.equal(scheduler.lastReason, 'idle', 'the business disposition is left alone');
+  assert.deepEqual(scheduler.status().source_readers, { configured_sources: 1, active_readers: 0,
+    missing_readers: 1, cause_code: 'SOURCE_READER_BOOTSTRAP_FAILED' });
   // The failure telemetry must not also claim a poll failed: no poll was attempted.
   assert.equal(events(store, 'source.telegram.poll.failed').length, 0);
   assert.equal(scheduler.busy, false, 'the tick finished');
@@ -70,7 +74,10 @@ test('one live reader among several does not make a dead source look healthy', a
   const [row] = events(store, 'source.telegram.readers_absent');
   assert.deepEqual(JSON.parse(row.payload_json), { configured_sources: 2, active_readers: 1,
     missing_readers: 1, cause_code: 'SOURCE_READER_BOOTSTRAP_FAILED' });
-  assert.equal(scheduler.lastReason, 'source_readers_absent:SOURCE_READER_BOOTSTRAP_FAILED');
+  // The one dead source is reported beside the reason, and the failed poll keeps the reason slot:
+  // a poll that ran and failed is precisely why the partner is not doing anything.
+  assert.equal(scheduler.lastReason, 'source_read_failed:UPSTREAM_DOWN');
+  assert.equal(scheduler.status().source_readers.missing_readers, 1);
   // The reader that did come up is still polled, and its own failure is still reported.
   assert.equal(events(store, 'source.telegram.poll.failed').length, 1);
 });
@@ -110,7 +117,7 @@ test('the cause shown is a code, and the message behind it never leaves', async 
   const { store, scheduler } = await harness(t, { readers: [],
     lastSourceCode: 'CHANNEL_INVALID' });
   await scheduler.tick();
-  assert.equal(scheduler.lastReason, 'source_readers_absent:CHANNEL_INVALID');
+  assert.equal(scheduler.status().source_readers.cause_code, 'CHANNEL_INVALID');
   assert.equal(JSON.parse(events(store, 'source.telegram.readers_absent')[0].payload_json).cause_code,
     'CHANNEL_INVALID');
   for (const code of ['provider said no: sk-live-abcdef', 'lowercase_code', '', 'X', null, 42])
@@ -127,9 +134,9 @@ test('telemetry that cannot be written does not stop the tick', async (t) => {
     return original(...args);
   };
   await scheduler.tick();
-  assert.equal(scheduler.lastReason, 'source_readers_absent:SOURCE_READER_BOOTSTRAP_FAILED',
-    'the reason still reaches the operator');
   assert.equal(scheduler.busy, false, 'the tick finished');
+  assert.equal(scheduler.status().source_readers.missing_readers, 1,
+    'the absence still reaches the operator through the status, even when the event could not be written');
   store.event = original;
 });
 
@@ -190,7 +197,7 @@ test('one dead source does not cost the live ones their chance to start', async 
   const [row] = events(store, 'source.telegram.readers_absent');
   assert.deepEqual(JSON.parse(row.payload_json), { configured_sources: 3, active_readers: 2,
     missing_readers: 1, cause_code: 'PEER_ID_INVALID' });
-  assert.equal(scheduler.lastReason, 'source_readers_absent:PEER_ID_INVALID');
+  assert.equal(scheduler.status().source_readers.cause_code, 'PEER_ID_INVALID');
   for (const entry of channel.sourceReaders) await entry.transport.close().catch(() => {});
 });
 
