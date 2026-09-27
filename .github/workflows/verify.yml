@@ -1,0 +1,66 @@
+# The pre-merge gate: the same command a developer runs, on every pull request.
+#
+# Three times in one day a change looked fine locally and left main red. Two of the
+# three causes were things a machine catches and a diff review does not, so the check
+# is a machine now. This workflow runs `npm run verify` and nothing else: if CI and a
+# developer ever disagree, the fix is the command, never a second CI-only path.
+#
+# What this run may not touch: production credentials, model calls, Telegram access.
+# Installing dependencies does need the network — setup fetches the pinned Hermes
+# revision, runs `npm ci` and `uv sync` — so this is not an offline runner. What it
+# must never do is carry a key or a session into that, and the steps below are what
+# make that true rather than merely intended.
+name: verify
+
+on:
+  pull_request:
+
+# Read-only, and stated at the job rather than trusted from a default. A verification
+# run has no reason to write to the repository, and a narrower token is a smaller thing
+# to have leaked from a log.
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    # Windows because that is the platform the project is set up on: `test:credentials`
+    # invokes `.venv\Scripts\python.exe` and setup is a PowerShell script. Running the
+    # same installer and the same commands here means CI cannot pass while the developer's
+    # own machine fails, which is the whole point of the gate.
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Without this the token is written into the local git config, and every later
+          # step — including the ones that reach the network — runs with a repository
+          # credential in scope. A read-only verification run has no use for one.
+          persist-credentials: false
+
+      # After checkout, before setup-node, setup-uv and `npm run setup`. Those are the
+      # project-controlled steps that reach the network: setup fetches the pinned Hermes
+      # revision and runs `npm ci` and `uv sync`. A credential already on the runner would
+      # have been live on them before a later check ever looked. Checkout itself has already
+      # run by now, with a read-only token and persist-credentials off. This is the guard; the
+      # one after install is a confirmation that installing changed nothing.
+      - name: Guard before install
+        shell: pwsh
+        run: ./.github/scripts/assert-no-credentials.ps1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: astral-sh/setup-uv@v3
+
+      - name: Install
+        run: npm run setup
+
+      - name: Guard after install
+        shell: pwsh
+        run: ./.github/scripts/assert-no-credentials.ps1 -RequireEnvFile
+
+      - name: Verify
+        run: npm run verify
