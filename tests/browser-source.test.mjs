@@ -74,14 +74,15 @@ const fakeRequest = (handler) => {
 const textResponse = (body, type = 'text/html') => new FakeResponse({ headers: { 'content-type': type }, body });
 const redirectResponse = (location, status = 302) => new FakeResponse({ status, headers: { location }, body: null });
 
-const service = (t, { url = 'https://example.com/page', sourceId = 'browser:example', maxLagSeconds = 300,
-  sourceKind = 'live_snapshot' } = {}) => {
+const service = (t, { url = 'https://example.com/page', sourceId = 'browser:example', maxLagSeconds = 900,
+  pollEverySeconds = 300, sourceKind = 'live_snapshot' } = {}) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harnes2-browser-'));
   const store = new Store(directory);
   t.after(() => { store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
   const loaded = loadConfig();
   const cfg = { ...loaded, opportunity: { ...loaded.opportunity, automatic: true,
-    browserSources: [{ sourceId, url, maxLagSeconds, processingBasis: 'Local fixtures only', sourceKind }],
+    browserSources: [{ sourceId, url, maxLagSeconds, pollEverySeconds,
+      processingBasis: 'Local fixtures only', sourceKind }],
     allowedSourceRefs: [sourceId] },
   runtime: { ...loaded.runtime, enabled: false },
   telegram: { ...loaded.telegram, enabled: false, liveSending: false } };
@@ -309,9 +310,10 @@ test('the browser checkpoint is written with the intake, and a blocked source re
   assert.match(confirmed.confirmed_at, /^\d{4}-\d{2}-\d{2}T/);
   assert.match(confirmed.policy_hash, /^[a-f0-9]{64}$/);
 
-  // A source whose checkpoint belongs to a different policy is not silently accepted.
+  // A source whose checkpoint belongs to a different policy is not silently accepted. The drift is
+  // the URL: that is part of what the source *is*, where the reading interval is not.
   const drifted = { ...svc, config: { ...svc.config, opportunity: { ...svc.config.opportunity,
-    browserSources: [{ ...svc.config.opportunity.browserSources[0], maxLagSeconds: 900 }] } } };
+    browserSources: [{ ...svc.config.opportunity.browserSources[0], url: 'https://example.com/other' }] } } };
   await assert.rejects(() => pollBrowserSource(drifted, 'browser:example', reader),
     (error) => error.code === 'BROWSER_POLICY_CHANGED_SINCE_CONFIRMATION');
 
@@ -337,7 +339,10 @@ test('the reader offers reading and nothing else', async (t) => {
   assert.equal(typeof reader.readPage, 'function');
   for (const method of ['submit', 'post', 'send', 'click', 'type', 'login', 'write', 'request', 'post_'])
     assert.equal(reader[method], undefined, `the reader must not offer ${method}`);
-  assert.deepEqual(Object.keys(browserPolicy(svc, 'browser:example')).sort(), ['maxLagSeconds', 'sourceId', 'url']);
+  // The policy carries a URL, a freshness budget and a reading interval — and nothing that could
+  // be turned into a write.
+  assert.deepEqual(Object.keys(browserPolicy(svc, 'browser:example')).sort(),
+    ['maxLagSeconds', 'pollEverySeconds', 'sourceId', 'url']);
 });
 
 test('the transport is chosen by configuration, and an ambiguous source is refused', (t) => {
@@ -369,7 +374,8 @@ test('the real startup composes both transports, and Telegram cannot evict the b
     server: { ...loaded.server, port: 0 },
     opportunity: { ...loaded.opportunity, automatic: true,
       browserSources: [{ sourceId: 'browser:example', url: 'https://example.com/page',
-        maxLagSeconds: 300, processingBasis: 'Startup fixture only', sourceKind: 'live_snapshot' }],
+        maxLagSeconds: 900, pollEverySeconds: 300, processingBasis: 'Startup fixture only',
+        sourceKind: 'live_snapshot' }],
       allowedSourceRefs: ['browser:example'] },
     runtime: { ...loaded.runtime, enabled: false },
     telegram: { ...loaded.telegram, enabled: false, liveSending: false } };

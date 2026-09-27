@@ -19,11 +19,16 @@ import { sanitizeHtml } from './browser-sanitize.mjs';
 export const browserPolicy = (service, sourceId) => {
   const configured = (service.config.opportunity?.browserSources ?? []).find((entry) => entry.sourceId === sourceId);
   ensure(configured, 'BROWSER_SOURCE_NOT_CONFIGURED');
-  const { sourceId: id, url, maxLagSeconds } = configured;
+  const { sourceId: id, url, maxLagSeconds, pollEverySeconds } = configured;
   ensure(typeof id === 'string' && id.length > 0 && id.length <= 300, 'BROWSER_POLICY_INVALID');
   ensure(typeof url === 'string' && url.length > 0 && url.length <= 2000, 'BROWSER_POLICY_INVALID');
   ensure(Number.isInteger(maxLagSeconds) && maxLagSeconds > 0 && maxLagSeconds <= 3600, 'BROWSER_POLICY_INVALID');
-  return Object.freeze(browserPolicyShape({ sourceId: id, url, maxLagSeconds }));
+  ensure(Number.isInteger(pollEverySeconds) && pollEverySeconds > 0 && pollEverySeconds <= 3600, 'BROWSER_POLICY_INVALID');
+  // The interval is carried but deliberately outside the hashed shape. How often we choose to
+  // look is an operational decision; what the source *is* — same URL, same freshness budget — is
+  // the identity. Folding the interval in would make changing a reading schedule look like
+  // changing the source, and the boundary would refuse it as a different one.
+  return Object.freeze({ ...browserPolicyShape({ sourceId: id, url, maxLagSeconds }), pollEverySeconds });
 };
 
 const digest = (value) => createHash('sha256').update(typeof value === 'string' ? value : JSON.stringify(value)).digest('hex');

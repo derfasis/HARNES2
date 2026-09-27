@@ -2,12 +2,14 @@ import { contextFor } from './context.mjs';
 import { runtimeReadiness, usageAccounting } from './config.mjs';
 import { processSourceOpportunity } from './opportunity-pipeline.mjs';
 import { pollSource, pollFailureKind } from './source-transport.mjs';
+import { dueBrowserSources, markBrowserAttempted } from './browser-polling.mjs';
+import { sourceTransportKind } from './source-ingestion.mjs';
 import { sourceCheckpointState } from './source-ingestion.mjs';
 import { id } from './store.mjs';
 import { now } from './errors.mjs';
 
 export class Scheduler {
-  constructor(service, runtime, telegram, sourceReaders = []) { this.sourceReaders = sourceReaders; this.service = service; this.runtime = runtime; this.telegram = telegram; this.busy = false; this.stopped = false; this.lastReason = null; this.activeRun = null; this.readersAbsentReported = false; this.sourceReadersState = null; }
+  constructor(service, runtime, telegram, sourceReaders = []) { this.sourceReaders = sourceReaders; this.service = service; this.runtime = runtime; this.telegram = telegram; this.busy = false; this.stopped = false; this.lastReason = null; this.activeRun = null; this.readersAbsentReported = false; this.sourceReadersState = null; this.browserPolls = new Map(); }
   start() { this.timer = setInterval(() => this.tick().catch(() => { this.lastReason = 'Ошибка обработки очереди; подробности в журнале запуска'; }), this.service.config.scheduler.tickSeconds * 1000); }
   // `reason` normally carries the pipeline's business disposition; a source poll that was actually
   // attempted and failed may override it, because a failed poll is why the partner is doing
@@ -68,7 +70,17 @@ export class Scheduler {
         // Empty by default. Only a trusted bootstrap can supply narrowed read-only
         // transport capabilities. Reuse this tick, never the private-chat adapter.
         let sourceReadFailed=false, sourceReadFailure=null;
+        // Telegram is polled exactly as before, every tick, all of it. Browser sources are chosen
+        // by their own interval and capped per tick, because a page that has not changed in five
+        // minutes does not need to be fetched every twenty seconds — and a page that is down must
+        // not be retried on every tick for being down.
+        const dueBrowser = dueBrowserSources(this.service, this.sourceReaders, this.browserPolls);
         for (const { sourceId, transport } of this.sourceReaders) {
+          if (dueBrowser.length && !dueBrowser.some((entry) => entry.sourceId === sourceId)) {
+            const kind = (() => { try { return sourceTransportKind(this.service, sourceId); }
+              catch { return 'unknown'; } })();
+            if (kind === 'browser') continue;   // not due yet, or over the tick's budget
+          }
           try { await pollSource(this.service, sourceId, transport); }
           catch (error) {
             // A poll that fails silently is a source that can end up blocked with no evidence
@@ -77,6 +89,12 @@ export class Scheduler {
             // own state, and nothing else: no message
             // text, no provider payload, no stack, no credentials.
             sourceReadFailed=true;
+            // Stamped here, on the failure path as well as the success path, and before the
+            // telemetry is written: a source that only backed off on success would back off never,
+            // and a site that is down would be re-read on every tick for the rest of the day.
+            if (sourceTransportKind(this.service, sourceId) === 'browser') {
+              markBrowserAttempted(this.browserPolls, sourceId);
+            }
             // Reading the checkpoint can itself fail on a corrupt row, and telemetry that throws
             // while reporting a failure would abort the very tick it is reporting about. The
             // checkpoint is the one for the transport that failed: a browser source has no pts at
@@ -94,6 +112,12 @@ export class Scheduler {
               // recorded as a Telegram one and the two histories stay separately readable.
               () => this.service.store.event(cfg.partnerId, null, pollFailureKind(this.service, sourceId), 'system', sourceReadFailure))); }
             catch { /* Telemetry must never stop the queue. */ }
+          }
+          // Stamped after the attempt, success or failure alike. Kept separate from the catch above
+          // so the two paths cannot drift: a stamp only in the failure branch would make a healthy
+          // page look permanently due, and a stamp only on success would make a broken one so.
+          if (sourceTransportKind(this.service, sourceId) === 'browser') {
+            try { markBrowserAttempted(this.browserPolls, sourceId); } catch { /* the tick still counts */ }
           }
         }
         if (cfg.discovery?.enabled === true) {

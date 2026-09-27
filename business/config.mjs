@@ -50,6 +50,10 @@ export function validateTelegramSources(config) {
 // fetches a URL that appears here. Validated the way the Telegram list is — exact key set, no
 // duplicates, and the source must be on the allowlist like any other source — so a policy cannot be
 // added that the intake would later refuse.
+// The tick is what the scheduler runs on, and a source cannot be read more often than that, so
+// it is the floor for how often anybody may ask for it. Read once here rather than assumed.
+const schedulerTickSeconds = (config) =>
+  Number.isInteger(config?.scheduler?.tickSeconds) ? config.scheduler.tickSeconds : 20;
 export function validateBrowserSources(config) {
   const sources = config.opportunity?.browserSources;
   if (!Array.isArray(sources)) {
@@ -59,7 +63,7 @@ export function validateBrowserSources(config) {
   }
   const refs = validateAllowedSourceRefs(config), seen = new Set();
   for (const source of sources) {
-    const keys = ['maxLagSeconds', 'processingBasis', 'sourceId', 'sourceKind', 'url'];
+    const keys = ['maxLagSeconds', 'pollEverySeconds', 'processingBasis', 'sourceId', 'sourceKind', 'url'];
     const valid = source && typeof source === 'object' && !Array.isArray(source)
       && Object.keys(source).length === keys.length && Object.keys(source).every(key => keys.includes(key))
       && typeof source.sourceId === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,149}$/.test(source.sourceId)
@@ -70,6 +74,12 @@ export function validateBrowserSources(config) {
       && source.sourceKind === 'live_snapshot'
       && typeof source.processingBasis === 'string' && source.processingBasis.trim().length > 0 && source.processingBasis.length <= 1000
       && Number.isInteger(source.maxLagSeconds) && source.maxLagSeconds >= 1 && source.maxLagSeconds <= 3600
+      // How often the page is read. A page that changes every twenty seconds does not exist, so
+      // the floor is the tick: anything faster would be re-reading the same bytes for nothing.
+      && Number.isInteger(source.pollEverySeconds) && source.pollEverySeconds >= 20 && source.pollEverySeconds <= 3600
+      // A source read slower than its own freshness budget can never be fresh. This is refused at
+      // load rather than left to be discovered as a mysterious staleness at runtime.
+      && source.pollEverySeconds + schedulerTickSeconds(config) <= source.maxLagSeconds
       && refs.includes(source.sourceId) && !seen.has(source.sourceId);
     if (!valid) {
       const error = new Error('Invalid opportunity.browserSources');
