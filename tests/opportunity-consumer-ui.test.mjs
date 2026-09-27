@@ -147,7 +147,14 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // Reviewed R8 extension: the channel now bootstraps read-only public sources over the client
     // it already owns, and releases them without disconnecting that client. No send path changed;
     // sendApproved still requires liveSending and is untouched.
-    "business/channels/telegram-mtproto.mjs": "ea830de4d2d32b97a32b42956e27b4e5613f146b",
+    // Reviewed reader-observability extension: startSourceReaders hands the scheduler what
+    // actually came up from a `finally`, so a reader that failed to start no longer leaves the
+    // scheduler holding the empty list it was constructed with, and each policy is started
+    // independently so one dead source cannot cost the live ones their chance. A failure still
+    // propagates: this publishes state, it does not swallow the fault. The only message that
+    // leaves the channel is a code already shaped like one of ours. Behaviour is exercised by
+    // tests/absent-source-readers.test.mjs.
+    "business/channels/telegram-mtproto.mjs": "b850cbae6030080695a668e22927bc7a0a075e69",
     "benchmarks/situation-router/README.md": "0da57bf3fcb53bbec5713f6a44c48654b16270b8",
     "benchmarks/situation-router/control-v1.json": "2c6265460c6ae6cc1de9b25fa978ba25d0e66236",
     "benchmarks/situation-router/synthetic/case-01-ignore.json": "f9fe79537ac036e32bbb547961901190b3f08007",

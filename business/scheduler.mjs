@@ -7,9 +7,13 @@ import { id } from './store.mjs';
 import { now } from './errors.mjs';
 
 export class Scheduler {
-  constructor(service, runtime, telegram, sourceReaders = []) { this.sourceReaders = sourceReaders; this.service = service; this.runtime = runtime; this.telegram = telegram; this.busy = false; this.stopped = false; this.lastReason = null; this.activeRun = null; this.readersAbsentReported = false; }
+  constructor(service, runtime, telegram, sourceReaders = []) { this.sourceReaders = sourceReaders; this.service = service; this.runtime = runtime; this.telegram = telegram; this.busy = false; this.stopped = false; this.lastReason = null; this.activeRun = null; this.readersAbsentReported = false; this.sourceReadersState = null; }
   start() { this.timer = setInterval(() => this.tick().catch(() => { this.lastReason = 'Ошибка обработки очереди; подробности в журнале запуска'; }), this.service.config.scheduler.tickSeconds * 1000); }
-  status() { return { enabled: this.service.config.scheduler.enabled, busy: this.busy, active_run: this.activeRun, reason: this.lastReason, model: runtimeReadiness(this.service.config) }; }
+  // `reason` normally carries the pipeline's business disposition; a source poll that was actually
+  // attempted and failed may override it, because a failed poll is why the partner is doing
+  // nothing. Reader absence is reported separately and never takes this slot: it is a transport
+  // condition, and replacing the disposition there took away the reason an operator needs most.
+  status() { return { enabled: this.service.config.scheduler.enabled, busy: this.busy, active_run: this.activeRun, reason: this.lastReason, model: runtimeReadiness(this.service.config), source_readers: this.sourceReadersState }; }
   async tick() {
     if (this.busy || this.stopped || !this.service.config.scheduler.enabled) return;
     this.busy = true;
@@ -19,8 +23,9 @@ export class Scheduler {
         // A source that is configured but has no reader is not a quiet source. The poll loop
         // below skips it, it sits at its last confirmed cursor forever, and every other signal
         // keeps saying the transport is fine: the process answers, the connection is up, and
-        // nothing throws. This happened live — the reader failed to start after a reconnect, and
-        // the source froze for an hour looking healthy.
+        // nothing throws. No live incident of this has been observed — the one soak that looked
+        // like one turned out to be a misread on our side. It is a failure mode the code admits
+        // and the diagnostics could not previously see, which is why it is reported now.
         //
         // The test is per source, not per list length. Two configured sources with one reader
         // alive is one dead source, and a system that only counted readers would call that fine.
@@ -29,15 +34,16 @@ export class Scheduler {
         const missing = configured.filter((sourceId) => !active.has(sourceId));
         const readersAbsent = missing.length > 0;
         // Numbers and a code, never a source id and never the message behind the failure.
-        this.lastReadersAbsentCause = typeof this.telegram?.lastSourceCode === 'string'
+        const causeCode = typeof this.telegram?.lastSourceCode === 'string'
           && /^[A-Z][A-Z0-9_]{1,63}$/.test(this.telegram.lastSourceCode)
           ? this.telegram.lastSourceCode : 'SOURCE_READER_BOOTSTRAP_FAILED';
+        this.sourceReadersState = { configured_sources: configured.length, active_readers: active.size,
+          missing_readers: missing.length, cause_code: readersAbsent ? causeCode : null };
         if (readersAbsent && !this.readersAbsentReported) {
           this.readersAbsentReported = true;
           try { await this.service.exclusive(() => this.service.store.transaction(
             () => this.service.store.event(cfg.partnerId, null, 'source.telegram.readers_absent',
-              'system', { configured_sources: configured.length, active_readers: active.size,
-                missing_readers: missing.length, cause_code: this.lastReadersAbsentCause }))); }
+              'system', { ...this.sourceReadersState }))); }
           catch { /* Telemetry must never stop the queue. */ }
         } else if (!readersAbsent) this.readersAbsentReported = false;
         // Empty by default. Only a trusted bootstrap can supply narrowed read-only
@@ -47,8 +53,9 @@ export class Scheduler {
           try { await pollTelegramSource(this.service, sourceId, transport); }
           catch (error) {
             // A poll that fails silently is a source that can end up blocked with no evidence
-            // left behind, which is exactly what happened live. Record the class of failure, the
-            // cursor it read at and the checkpoint's own state, and nothing else: no message
+            // left behind, which would otherwise leave the source failure without durable
+            // evidence. Record the class of failure, the cursor it read at and the checkpoint's
+            // own state, and nothing else: no message
             // text, no provider payload, no stack, no credentials.
             sourceReadFailed=true;
             // Reading the checkpoint can itself fail on a corrupt row, and telemetry that throws
@@ -71,10 +78,12 @@ export class Scheduler {
           catch { this.lastReason = 'Discovery reconciliation failed; source truth remains durable'; }
         }
         const result = await processSourceOpportunity(this.service, this.runtime);
-        // No reader outranks every other reason: a source nobody is reading makes whatever the
-        // opportunity pass reports about that source worth nothing.
-        this.lastReason = readersAbsent ? `source_readers_absent:${this.lastReadersAbsentCause ?? 'SOURCE_READER_BOOTSTRAP_FAILED'}`
-          : sourceReadFailed?`source_read_failed:${sourceReadFailure?.code ?? 'UNCLASSIFIED'}`:result.disposition; return;
+        // The disposition is the answer to "what is the partner doing", and a failed poll is
+        // reported in that same slot because it *is* why the partner is not doing anything. A
+        // missing reader is deliberately not: it is a transport fact, already recorded as an event
+        // and exposed in status().source_readers, and overwriting the disposition here took away
+        // the reason an operator needs most.
+        this.lastReason = sourceReadFailed ? `source_read_failed:${sourceReadFailure?.code ?? 'UNCLASSIFIED'}` : result.disposition; return;
       }
       if (cfg.discovery?.enabled === true) {
         try { await this.service.reconcileDiscovery(); }
