@@ -2,12 +2,14 @@ import { contextFor } from './context.mjs';
 import { runtimeReadiness, usageAccounting } from './config.mjs';
 import { processSourceOpportunity } from './opportunity-pipeline.mjs';
 import { pollSource, pollFailureKind } from './source-transport.mjs';
+import { dueBrowserSources, markBrowserConsidered, markBrowserRead } from './browser-polling.mjs';
+import { sourceTransportKind } from './source-ingestion.mjs';
 import { sourceCheckpointState } from './source-ingestion.mjs';
 import { id } from './store.mjs';
 import { now } from './errors.mjs';
 
 export class Scheduler {
-  constructor(service, runtime, telegram, sourceReaders = []) { this.sourceReaders = sourceReaders; this.service = service; this.runtime = runtime; this.telegram = telegram; this.busy = false; this.stopped = false; this.lastReason = null; this.activeRun = null; this.readersAbsentReported = false; this.sourceReadersState = null; }
+  constructor(service, runtime, telegram, sourceReaders = []) { this.sourceReaders = sourceReaders; this.service = service; this.runtime = runtime; this.telegram = telegram; this.busy = false; this.stopped = false; this.lastReason = null; this.activeRun = null; this.readersAbsentReported = false; this.sourceReadersState = null; this.browserPolls = new Map(); }
   start() { this.timer = setInterval(() => this.tick().catch(() => { this.lastReason = 'Ошибка обработки очереди; подробности в журнале запуска'; }), this.service.config.scheduler.tickSeconds * 1000); }
   // `reason` normally carries the pipeline's business disposition; a source poll that was actually
   // attempted and failed may override it, because a failed poll is why the partner is doing
@@ -68,7 +70,29 @@ export class Scheduler {
         // Empty by default. Only a trusted bootstrap can supply narrowed read-only
         // transport capabilities. Reuse this tick, never the private-chat adapter.
         let sourceReadFailed=false, sourceReadFailure=null;
+        // Telegram is polled exactly as before, every tick, all of it. Browser sources are chosen
+        // by their own interval and capped per tick, because a page that has not changed in five
+        // minutes does not need to be fetched every twenty seconds — and a page that is down must
+        // not be retried on every tick for being down.
+        const { selected: dueBrowser, considered } = dueBrowserSources(this.service, this.sourceReaders, this.browserPolls);
+        const dueBrowserIds = new Set(dueBrowser.map((entry) => entry.sourceId));
+        // Everything the tick looked at is stamped, read or not: a source that was due and
+        // passed over because the budget was spent is not due again on the next tick, or the
+        // budget would drain the whole list in a minute and the interval would mean nothing.
+        for (const sourceId of considered) markBrowserConsidered(this.browserPolls, sourceId);
         for (const { sourceId, transport } of this.sourceReaders) {
+          // Membership decides, full stop. An earlier version guarded the skip with
+          // `dueBrowser.length && …`, which meant that on a tick where nothing was due the guard
+          // was false, no source was skipped, and the whole cadence was skipped with it: every page
+          // was re-read on every tick until one happened to be due. A set has no empty case.
+          const isBrowser = sourceTransportKind(this.service, sourceId) === 'browser';
+          if (isBrowser && !dueBrowserIds.has(sourceId)) continue;
+          // Read sources carry a second stamp: a source that was read is older than one that was
+          // merely passed over, and that is what makes the next round reach a different pair.
+          if (isBrowser) markBrowserRead(this.browserPolls, sourceId);
+          // Stamped once, before the attempt rather than in one branch after another, so the two
+          // outcomes cannot stamp differently and so a source that fails waits exactly as long as
+          // one that succeeds.
           try { await pollSource(this.service, sourceId, transport); }
           catch (error) {
             // A poll that fails silently is a source that can end up blocked with no evidence
