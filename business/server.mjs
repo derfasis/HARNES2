@@ -12,6 +12,7 @@ import { HermesAdapter } from './runtime.mjs';
 import { Scheduler } from './scheduler.mjs';
 import { TelegramChannel } from './channels/telegram.mjs';
 import { MtprotoTelegramChannel } from './channels/telegram-mtproto.mjs';
+import { BrowserSourceReader, browserPolicy } from './sources/browser-readonly.mjs';
 import { toolDefinitions, callTool } from './tools.mjs';
 import { exportPartner } from './export.mjs';
 import { AppError, ensure, requiredText } from './errors.mjs';
@@ -70,10 +71,19 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
   const operatorToken = randomBytes(32).toString('hex'), mcpToken = randomBytes(32).toString('hex'), runTokens = new Map();
   const telegram = config.telegram.transport === 'mtproto' ? new MtprotoTelegramChannel(service) : new TelegramChannel(service);
   const runtime = new HermesAdapter(service,runTokens);
-  // The scheduler polls whatever readers the channel established. Without this the list is empty
-  // and the automatic pipeline never reads, whatever the configuration says.
+  // The scheduler polls whatever readers exist, and they arrive from two places on two timelines:
+  // browser readers are built here, Telegram readers only once the channel has connected. The list
+  // is composed rather than assigned, because assigning would drop the browser readers the moment
+  // Telegram reported in — the same shape of bug as an empty reader list, only harder to notice,
+  // because the source is simply never read and nothing anywhere says so.
+  const browserReaders = (config.opportunity?.browserSources ?? [])
+    .map((source) => ({ sourceId: source.sourceId,
+      transport: new BrowserSourceReader(browserPolicy(service, source.sourceId)) }));
+  let telegramReaders = [];
+  const composeReaders = () => { scheduler.sourceReaders = [...telegramReaders, ...browserReaders]; };
   const scheduler = new Scheduler(service,runtime,telegram,[]);
-  telegram.onSourcesReady = readers => { scheduler.sourceReaders = readers ?? []; };
+  telegram.onSourcesReady = readers => { telegramReaders = readers ?? []; composeReaders(); };
+  composeReaders();
   let shuttingDown = false;
   const server = http.createServer(async (req,res) => {
     const send = (code,value) => { res.writeHead(code, {'Content-Type':'application/json; charset=utf-8'}); res.end(JSON.stringify(value)); };
@@ -175,6 +185,8 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
     await closed; await telegram.stop(); store.close();
   };
   for (const signal of ['SIGINT','SIGTERM']) process.once(signal,()=>close().then(()=>process.exit(0)));
-  return {server,store,service,close};
+  // The scheduler and the channel are returned so the wiring itself can be tested: a test that
+  // copies this composition is a copy, and a copy stays green when the original is rewired.
+  return {server,store,service,scheduler,telegram,close};
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) start().catch(error=>{console.error(`Startup failed: ${error.message}`);process.exitCode=1;});

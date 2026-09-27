@@ -40,6 +40,7 @@
   "opportunity": {
     "automatic": false,
     "telegramSources": [],
+    "browserSources": [],
     "authorBindings": [],
     "allowedSourceRefs": [],
     "activeOffer": null,

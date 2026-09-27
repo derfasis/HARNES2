@@ -46,6 +46,40 @@ export function validateTelegramSources(config) {
   }
   return sources;
 }
+// Browser sources are configuration, not a capability the model can reach: the reader only ever
+// fetches a URL that appears here. Validated the way the Telegram list is — exact key set, no
+// duplicates, and the source must be on the allowlist like any other source — so a policy cannot be
+// added that the intake would later refuse.
+export function validateBrowserSources(config) {
+  const sources = config.opportunity?.browserSources;
+  if (!Array.isArray(sources)) {
+    const error = new Error('Invalid opportunity.browserSources');
+    error.code = 'INVALID_BROWSER_SOURCES';
+    throw error;
+  }
+  const refs = validateAllowedSourceRefs(config), seen = new Set();
+  for (const source of sources) {
+    const keys = ['maxLagSeconds', 'processingBasis', 'sourceId', 'sourceKind', 'url'];
+    const valid = source && typeof source === 'object' && !Array.isArray(source)
+      && Object.keys(source).length === keys.length && Object.keys(source).every(key => keys.includes(key))
+      && typeof source.sourceId === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,149}$/.test(source.sourceId)
+      && typeof source.url === 'string' && source.url.length > 0 && source.url.length <= 2000
+      // A real page is a live snapshot. Allowing `sanitized_fixture` here would be a claim the
+      // envelope cannot honour: the reader always emits `live_snapshot`, so the two would disagree
+      // and the first ingest would be refused by the pipeline's own kind check.
+      && source.sourceKind === 'live_snapshot'
+      && typeof source.processingBasis === 'string' && source.processingBasis.trim().length > 0 && source.processingBasis.length <= 1000
+      && Number.isInteger(source.maxLagSeconds) && source.maxLagSeconds >= 1 && source.maxLagSeconds <= 3600
+      && refs.includes(source.sourceId) && !seen.has(source.sourceId);
+    if (!valid) {
+      const error = new Error('Invalid opportunity.browserSources');
+      error.code = 'INVALID_BROWSER_SOURCES';
+      throw error;
+    }
+    seen.add(source.sourceId);
+  }
+  return sources;
+}
 // The startup half of the automatic boundary. It must agree with automaticBoundary in
 // source-ingestion.mjs: the loader refuses to start on a combination the pipeline would have
 // accepted. A read-only reader may run with automatic on, because it is how permitted material
@@ -86,6 +120,7 @@ export function loadConfig() {
   if (typeof cfg.opportunity?.automatic !== 'boolean') throw new Error('Invalid opportunity.automatic');
   validateAllowedSourceRefs(cfg);
   validateTelegramSources(cfg);
+  validateBrowserSources(cfg);
   // This must agree with automaticBoundary, or the application refuses to start on a combination
   // the pipeline would have accepted. A read-only reader may run with automatic on: it is how
   // permitted material reaches the pipeline and it cannot send. Agent runs and live sending are

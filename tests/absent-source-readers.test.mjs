@@ -20,20 +20,25 @@ const otherSourceId = 'telegram:channel:200';
 const policy = (id, accountId = '999') => ({ accountId, channelId: id.split(':').at(-1), sourceId: id,
   sourceKind: 'sanitized_fixture', processingBasis: 'Invented offline test only', maxLagSeconds: 120 });
 
-const harness = async (t, { readers = [], configured = [sourceId], lastSourceCode = null } = {}) => {
+const browserSourceId = 'browser:example';
+const browserPolicy = (id = browserSourceId) => ({ sourceId: id, url: 'https://example.com/page',
+  maxLagSeconds: 300, processingBasis: 'Invented offline test only', sourceKind: 'live_snapshot' });
+
+const harness = async (t, { readers = [], configured = [sourceId], lastSourceCode = null, browser = false } = {}) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harnes2-absent-'));
   const store = new Store(directory);
   t.after(() => { store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
   const loaded = loadConfig();
   const cfg = { ...loaded, opportunity: { ...loaded.opportunity, automatic: true,
-    telegramSources: configured.map((id) => policy(id)) },
+    telegramSources: browser ? [] : configured.map((id) => policy(id)),
+    browserSources: browser ? configured.map((id) => browserPolicy(id)) : [] },
     runtime: { ...loaded.runtime, enabled: false },
     telegram: { ...loaded.telegram, enabled: true, liveSending: false } };
   cfg.opportunity.allowedSourceRefs = configured;
   const service = new BusinessService(store, cfg);
   // A source that is not configured cannot be bootstrapped, and does not need to be: the point
   // of that case is that nothing was asked for in the first place.
-  for (const id of configured) await bootstrapTelegramSource(service, id, { pts: 10, history: [] });
+  if (!browser) for (const id of configured) await bootstrapTelegramSource(service, id, { pts: 10, history: [] });
   const telegram = { lastSourceCode, readiness: () => ({ enabled: false, live_sending: false,
     connected: true, configured: true }) };
   const scheduler = new Scheduler(service, { close() {} }, telegram, readers);
@@ -53,13 +58,15 @@ test('a configured source with no reader is reported, not silently skipped', asy
   const rows = events(store, 'source.telegram.readers_absent');
   assert.equal(rows.length, 1, 'the absence of a reader is evidence, and it is recorded');
   assert.deepEqual(JSON.parse(rows[0].payload_json), { configured_sources: 1, active_readers: 0,
-    missing_readers: 1, cause_code: 'SOURCE_READER_BOOTSTRAP_FAILED' });
+    missing_readers: 1, missing_telegram: 1, missing_browser: 0,
+    cause_code: 'SOURCE_READER_BOOTSTRAP_FAILED' });
   // The operator sees it in the status, in its own field. It does not take over `reason`: that
   // slot answers "what is the partner doing", and a narrower transport message there would replace
   // the answer the operator actually needs.
   assert.equal(scheduler.lastReason, 'idle', 'the business disposition is left alone');
   assert.deepEqual(scheduler.status().source_readers, { configured_sources: 1, active_readers: 0,
-    missing_readers: 1, cause_code: 'SOURCE_READER_BOOTSTRAP_FAILED' });
+    missing_readers: 1, missing_telegram: 1, missing_browser: 0,
+    cause_code: 'SOURCE_READER_BOOTSTRAP_FAILED' });
   // The failure telemetry must not also claim a poll failed: no poll was attempted.
   assert.equal(events(store, 'source.telegram.poll.failed').length, 0);
   assert.equal(scheduler.busy, false, 'the tick finished');
@@ -73,7 +80,8 @@ test('one live reader among several does not make a dead source look healthy', a
   await scheduler.tick();
   const [row] = events(store, 'source.telegram.readers_absent');
   assert.deepEqual(JSON.parse(row.payload_json), { configured_sources: 2, active_readers: 1,
-    missing_readers: 1, cause_code: 'SOURCE_READER_BOOTSTRAP_FAILED' });
+    missing_readers: 1, missing_telegram: 1, missing_browser: 0,
+    cause_code: 'SOURCE_READER_BOOTSTRAP_FAILED' });
   // The one dead source is reported beside the reason, and the failed poll keeps the reason slot:
   // a poll that ran and failed is precisely why the partner is not doing anything.
   assert.equal(scheduler.lastReason, 'source_read_failed:UPSTREAM_DOWN');
@@ -196,7 +204,8 @@ test('one dead source does not cost the live ones their chance to start', async 
   await scheduler.tick();
   const [row] = events(store, 'source.telegram.readers_absent');
   assert.deepEqual(JSON.parse(row.payload_json), { configured_sources: 3, active_readers: 2,
-    missing_readers: 1, cause_code: 'PEER_ID_INVALID' });
+    missing_readers: 1, missing_telegram: 1, missing_browser: 0,
+    cause_code: 'PEER_ID_INVALID' });
   assert.equal(scheduler.status().source_readers.cause_code, 'PEER_ID_INVALID');
   for (const entry of channel.sourceReaders) await entry.transport.close().catch(() => {});
 });
@@ -213,4 +222,21 @@ test('a source belonging to another account is named, and does not throw', async
   assert.deepEqual(published, [[]]);
   assert.equal(channel.lastSourceCode, 'SOURCE_ACCOUNT_MISMATCH',
     'a fixed code, never the message that names the source');
+});
+
+test('a missing browser reader is reported as a browser one, not filed under Telegram', async (t) => {
+  // Counting only `telegramSources` is what made a lost browser reader invisible, and it was the
+  // same blind spot this file was written to close for Telegram.
+  const { store, scheduler } = await harness(t, { readers: [], configured: [browserSourceId], browser: true });
+  await scheduler.tick();
+  const rows = events(store, 'source.browser.readers_absent');
+  assert.equal(rows.length, 1, 'the absence is recorded under the transport that went missing');
+  assert.equal(events(store, 'source.telegram.readers_absent').length, 0);
+  const payload = JSON.parse(rows[0].payload_json);
+  assert.equal(payload.configured_sources, 1);
+  assert.equal(payload.missing_browser, 1);
+  assert.equal(payload.missing_telegram, 0);
+  // A missing browser reader has no Telegram bootstrap code to report, and borrowing one would file
+  // one transport's silence under another transport's name.
+  assert.equal(payload.cause_code, 'BROWSER_READER_ABSENT');
 });
