@@ -38,10 +38,12 @@ jobs:
           # credential in scope. A read-only verification run has no use for one.
           persist-credentials: false
 
-      # Before anything reaches the network. Setup fetches the pinned Hermes revision and runs
-      # `npm ci` and `uv sync`, so a credential already on the runner would be live on the
-      # network before a later check ever looked. This is the guard; the one after install is
-      # a confirmation that installing changed nothing.
+      # After checkout, before setup-node, setup-uv and `npm run setup`. Those are the
+      # project-controlled steps that reach the network: setup fetches the pinned Hermes
+      # revision and runs `npm ci` and `uv sync`. A credential already on the runner would
+      # have been live on them before a later check ever looked. Checkout itself has already
+      # run by now, with a read-only token and persist-credentials off. This is the guard; the
+      # one after install is a confirmation that installing changed nothing.
       - name: Guard before install
         shell: pwsh
         run: ./.github/scripts/assert-no-credentials.ps1

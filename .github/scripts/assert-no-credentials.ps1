@@ -1,10 +1,12 @@
-# The credential guard, run twice around the install: once before anything reaches the network,
-# and once after.
+# The credential guard, run twice around the install: once after checkout and before
+# setup-node, setup-uv and `npm run setup`, and once after the install.
 #
-# One script, two invocations, so the two cannot drift apart. The pre-install run is the one
-# that matters: `npm run setup` fetches the pinned Hermes revision, runs `npm ci` and `uv sync`,
-# so a credential already sitting on the runner would otherwise be live on the network before
-# anybody looked. A check placed after the install is a report, not a guard.
+# One script, two invocations, so the two cannot drift apart. The first is the one that matters:
+# those three are the project-controlled steps that reach the network, so a credential already
+# sitting on the runner would be live on them before anyone looked. A check placed after the
+# install is a report, not a guard. Checkout has already run by the time this executes, with a
+# read-only token and persist-credentials off, which is why this is a boundary and not an
+# absolute.
 param(
     # Before install, `.env` is legitimately absent: it is gitignored and setup writes it from
     # the example. After install it must exist, and a run that has no `.env` at that point is
