@@ -185,6 +185,8 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
     await closed; await telegram.stop(); store.close();
   };
   for (const signal of ['SIGINT','SIGTERM']) process.once(signal,()=>close().then(()=>process.exit(0)));
-  return {server,store,service,close};
+  // The scheduler and the channel are returned so the wiring itself can be tested: a test that
+  // copies this composition is a copy, and a copy stays green when the original is rewired.
+  return {server,store,service,scheduler,telegram,close};
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) start().catch(error=>{console.error(`Startup failed: ${error.message}`);process.exitCode=1;});

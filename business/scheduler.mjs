@@ -2,7 +2,7 @@ import { contextFor } from './context.mjs';
 import { runtimeReadiness, usageAccounting } from './config.mjs';
 import { processSourceOpportunity } from './opportunity-pipeline.mjs';
 import { pollSource, pollFailureKind } from './source-transport.mjs';
-import { sourceCheckpoint } from './source-ingestion.mjs';
+import { sourceCheckpointState } from './source-ingestion.mjs';
 import { id } from './store.mjs';
 import { now } from './errors.mjs';
 
@@ -29,20 +29,39 @@ export class Scheduler {
         //
         // The test is per source, not per list length. Two configured sources with one reader
         // alive is one dead source, and a system that only counted readers would call that fine.
-        const configured = (cfg.opportunity?.telegramSources ?? []).map((policy) => policy.sourceId);
+        // Both transports are counted: a browser source that lost its reader is as unread as a
+        // Telegram one, and counting only Telegram made exactly that invisible.
+        const configured = [
+          ...(cfg.opportunity?.telegramSources ?? []).map((policy) => ({ sourceId: policy.sourceId, kind: 'telegram' })),
+          ...(cfg.opportunity?.browserSources ?? []).map((policy) => ({ sourceId: policy.sourceId, kind: 'browser' })),
+        ];
         const active = new Set(this.sourceReaders.map((entry) => entry.sourceId));
-        const missing = configured.filter((sourceId) => !active.has(sourceId));
+        const missing = configured.filter((entry) => !active.has(entry.sourceId));
         const readersAbsent = missing.length > 0;
-        // Numbers and a code, never a source id and never the message behind the failure.
-        const causeCode = typeof this.telegram?.lastSourceCode === 'string'
-          && /^[A-Z][A-Z0-9_]{1,63}$/.test(this.telegram.lastSourceCode)
-          ? this.telegram.lastSourceCode : 'SOURCE_READER_BOOTSTRAP_FAILED';
-        this.sourceReadersState = { configured_sources: configured.length, active_readers: active.size,
-          missing_readers: missing.length, cause_code: readersAbsent ? causeCode : null };
+        // The class of the failure, per kind of what went missing. A missing browser reader has no
+        // Telegram bootstrap code to report, and inventing one would file a transport's silence
+        // under another transport's name.
+        const causeFor = (kind) => {
+          if (kind === 'browser') return 'BROWSER_READER_ABSENT';
+          return typeof this.telegram?.lastSourceCode === 'string'
+            && /^[A-Z][A-Z0-9_]{1,63}$/.test(this.telegram.lastSourceCode)
+            ? this.telegram.lastSourceCode : 'SOURCE_READER_BOOTSTRAP_FAILED';
+        };
+        const missingKinds = [...new Set(missing.map((entry) => entry.kind))].sort();
+        this.sourceReadersState = {
+          configured_sources: configured.length, active_readers: active.size,
+          missing_readers: missing.length,
+          missing_telegram: missing.filter((entry) => entry.kind === 'telegram').length,
+          missing_browser: missing.filter((entry) => entry.kind === 'browser').length,
+          cause_code: readersAbsent ? causeFor(missingKinds[0]) : null,
+        };
         if (readersAbsent && !this.readersAbsentReported) {
           this.readersAbsentReported = true;
+          // Filed under the transport that went missing, so the two histories stay separately
+          // readable and a Telegram reader coming back does not clear a browser reader's absence.
+          const kind = missingKinds.length === 1 ? missingKinds[0] : 'source';
           try { await this.service.exclusive(() => this.service.store.transaction(
-            () => this.service.store.event(cfg.partnerId, null, 'source.telegram.readers_absent',
+            () => this.service.store.event(cfg.partnerId, null, `source.${kind}.readers_absent`,
               'system', { ...this.sourceReadersState }))); }
           catch { /* Telemetry must never stop the queue. */ }
         } else if (!readersAbsent) this.readersAbsentReported = false;
@@ -59,9 +78,11 @@ export class Scheduler {
             // text, no provider payload, no stack, no credentials.
             sourceReadFailed=true;
             // Reading the checkpoint can itself fail on a corrupt row, and telemetry that throws
-            // while reporting a failure would abort the very tick it is reporting about.
+            // while reporting a failure would abort the very tick it is reporting about. The
+            // checkpoint is the one for the transport that failed: a browser source has no pts at
+            // all, so reading the Telegram cursor for it reported numbers belonging to nothing.
             let state=null;
-            try { state=sourceCheckpoint(this.service, sourceId); } catch { state=null; }
+            try { state = sourceCheckpointState(this.service, sourceId); } catch { state=null; }
             const raw=String(error?.code ?? '');
             // Only something shaped like a code is recorded. Anything else could be a provider
             // message carrying payload, and this lands in durable storage.

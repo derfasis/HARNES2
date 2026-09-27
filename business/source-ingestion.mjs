@@ -76,6 +76,30 @@ export function sourceTransportKind(service, sourceId) {
   return 'fixture';
 }
 
+// The checkpoint that belongs to this source's transport. Reading the Telegram cursor for a browser
+// source would report a cursor and a pts that belong to a different source entirely.
+export function sourceCheckpointState(service, sourceId) {
+  return sourceTransportKind(service, sourceId) === 'browser'
+    ? browserCheckpoint(service, sourceId) : sourceCheckpoint(service, sourceId);
+}
+
+// Read-time validation. The write path checks what it writes, but a row can also arrive damaged or
+// hand-edited, and a boundary that accepted `{phase:"current"}` with no `confirmed_at` would treat
+// a source with no evidence of freshness as fresh. So the same shape is checked on the way in.
+export function validateBrowserCheckpoint(state, sourceId) {
+  const keys = ['source_id', 'policy_hash', 'phase', 'confirmed_at', 'reason'];
+  check(state && typeof state === 'object' && !Array.isArray(state)
+    && Object.keys(state).length === keys.length && Object.keys(state).every((key) => keys.includes(key))
+    && state.source_id === sourceId
+    && typeof state.policy_hash === 'string' && /^[a-f0-9]{64}$/.test(state.policy_hash)
+    && ['current', 'blocked'].includes(state.phase)
+    && (state.phase === 'current'
+      ? state.reason === null && typeof state.confirmed_at === 'string' && Number.isFinite(Date.parse(state.confirmed_at))
+      : state.confirmed_at === null && typeof state.reason === 'string' && state.reason.length > 0 && state.reason.length <= 100),
+  'BROWSER_CHECKPOINT_CORRUPT');
+  return state;
+}
+
 // The freshness rule, per transport. A browser source has no pts and no baseline, so it is checked
 // against its own checkpoint and the hash of its *normalised* policy — the same object the reader
 // acts on. Hashing the raw config entry instead compares two different things and refuses a
@@ -84,10 +108,18 @@ function browserTransportBoundary(service, sourceId) {
   validateBrowserSources(service.config);
   const configured = service.config.opportunity.browserSources.filter((p) => p.sourceId === sourceId);
   check(configured.length === 1, 'BROWSER_POLICY_UNAVAILABLE');
+  const policy = configured[0];
   const state = browserCheckpoint(service, sourceId);
   check(state, 'SOURCE_TRANSPORT_NOT_READY');
-  check(state.policy_hash === browserPolicyHash(configured[0]), 'SOURCE_TRANSPORT_NOT_READY');
+  validateBrowserCheckpoint(state, sourceId);
+  check(state.policy_hash === browserPolicyHash(policy), 'SOURCE_TRANSPORT_NOT_READY');
   check(state.phase === 'current', 'SOURCE_TRANSPORT_NOT_CURRENT');
+  // The age, which is the whole point of `maxLagSeconds`. Without it a checkpoint stays `current`
+  // for ever: nothing has to fail for the source to stop being read, and a reader that silently
+  // stopped would leave a source looking confirmed indefinitely.
+  const age = Date.now() - Date.parse(state.confirmed_at);
+  check(Number.isInteger(policy.maxLagSeconds) && policy.maxLagSeconds > 0 && policy.maxLagSeconds <= 3600
+    && Number.isFinite(age) && age >= 0 && age <= policy.maxLagSeconds * 1000, 'SOURCE_TRANSPORT_STALE');
   return state;
 }
 function telegramTransportBoundary(service, sourceId) {

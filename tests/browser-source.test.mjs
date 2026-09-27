@@ -18,6 +18,7 @@ import { BrowserSourceReader, browserPolicy, pollBrowserSource, markBrowserSourc
 import { sourceTransportKind, pollSource, pollFailureKind } from '../business/source-transport.mjs';
 import { browserCheckpoint, sourceContextState } from '../business/source-ingestion.mjs';
 import { Scheduler } from '../business/scheduler.mjs';
+import { start } from '../business/server.mjs';
 import { Store } from '../business/store.mjs';
 import { BusinessService } from '../business/service.mjs';
 import { loadConfig, validateBrowserSources } from '../business/config.mjs';
@@ -344,23 +345,32 @@ test('a source nobody configured has no transport to poll through', async (t) =>
     (error) => error.code === 'SOURCE_TRANSPORT_UNAVAILABLE');
 });
 
-test('production composition: browser readers survive a Telegram reader arriving', (t) => {
-  // The wiring the server does, exercised directly. Assigning instead of composing drops the
-  // browser readers the moment the channel reports in, and nothing anywhere says the source is
-  // unread — the same shape of failure as an empty reader list.
-  const { service: svc, cfg } = service(t);
-  const telegram = { onSourcesReady: null, lastSourceCode: null, readiness: () => ({ connected: false }) };
-  const browserReaders = cfg.opportunity.browserSources.map((source) => ({ sourceId: source.sourceId,
-    transport: new BrowserSourceReader(browserPolicy(svc, source.sourceId)) }));
-  let telegramReaders = [];
-  const scheduler = new Scheduler(svc, { close() {} }, telegram, []);
-  const compose = () => { scheduler.sourceReaders = [...telegramReaders, ...browserReaders]; };
-  telegram.onSourcesReady = (readers) => { telegramReaders = readers ?? []; compose(); };
-  compose();
-  assert.equal(scheduler.sourceReaders.length, 1, 'the browser reader is present before Telegram connects');
-  telegram.onSourcesReady([{ sourceId: 'telegram:channel:2', transport: {} }]);
-  assert.deepEqual(scheduler.sourceReaders.map((entry) => entry.sourceId), ['telegram:channel:2', 'browser:example'],
-    'both transports are polled, and neither list overwrites the other');
+test('the real startup composes both transports, and Telegram cannot evict the browser', async (t) => {
+  // This runs `start()` itself rather than reproducing what start() does. The previous version of
+  // this test copied the composition, which meant a rewired server would leave it green — the exact
+  // gap the review named.
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harnes2-startup-'));
+  const loaded = loadConfig();
+  const config = { ...loaded,
+    server: { ...loaded.server, port: 0 },
+    opportunity: { ...loaded.opportunity, automatic: true,
+      browserSources: [{ sourceId: 'browser:example', url: 'https://example.com/page',
+        maxLagSeconds: 300, processingBasis: 'Startup fixture only', sourceKind: 'live_snapshot' }],
+      allowedSourceRefs: ['browser:example'] },
+    runtime: { ...loaded.runtime, enabled: false },
+    telegram: { ...loaded.telegram, enabled: false, liveSending: false } };
+  const app = await start({ config, directory });
+  // Closed before the directory is removed, or the store still holds the files and Windows
+  // refuses the delete.
+  t.after(async () => { await app.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  assert.equal(app.scheduler.sourceReaders.length, 1, 'the browser reader is composed at startup');
+  assert.equal(app.scheduler.sourceReaders[0].sourceId, 'browser:example');
+  // The channel reporting in must not take the browser readers with it.
+  app.telegram.onSourcesReady([{ sourceId: 'telegram:channel:2', transport: {} }]);
+  assert.deepEqual(app.scheduler.sourceReaders.map((entry) => entry.sourceId),
+    ['telegram:channel:2', 'browser:example'], 'both transports are polled after a Telegram reader arrives');
+  assert.equal(app.scheduler.sourceReaders[1].transport instanceof BrowserSourceReader, true,
+    'the browser entry is a reader, not a placeholder');
 });
 
 test('the context state a browser source reports is the one the pipeline reads', async (t) => {

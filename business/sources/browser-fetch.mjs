@@ -5,16 +5,15 @@
 // comes from the operator's configuration — but "configured" is not a defence on its own, because
 // a configured page can redirect, and a redirect target is chosen by the page, not by us.
 //
-// Every hop is therefore checked with the same rules, and the answers to "private" include the
-// ranges a public page uses to reach a machine on the network it sits on: loopback, RFC1918,
-// link-local, and the cloud metadata address, which is a credential store reachable without
-// authentication.
+// Every hop is therefore checked with the same rules, against the IANA special-purpose registries
+// rather than against the few ranges that come to mind: loopback, RFC1918, link-local, the cloud
+// metadata address that hands out credentials without authentication, and the benchmarking,
+// documentation, translation and transition ranges that are not routable either.
 //
-// One honest limit. Name resolution happens before the connection, so an attacker who controls
-// DNS for a configured hostname could in principle answer a public address here and a private one
-// to the connection that follows. Closing that needs a pinned-address connection, which v0 does
-// not have. The boundary is therefore strong against redirects, literals and ordinary names, and
-// stated rather than overstated.
+// What "checked" means for a name, precisely: the name is resolved, every answer is checked, and
+// the address that was checked is the one the socket is given. A second, different answer from
+// DNS has nothing left to influence, because there is no second resolution. That is a guarantee
+// about the address the connection reaches, not about the name, and it is not a claim about DNSSEC.
 import dns from 'node:dns/promises';
 import net from 'node:net';
 import http from 'node:http';
@@ -25,7 +24,7 @@ import https from 'node:https';
 // hostname still drives TLS and the Host header, so nothing about the request is spoofed. This is
 // the whole reason the module does not use `fetch`, which would resolve the name again and connect
 // to whatever that second answer happened to be.
-const nodeRequest = (url, address, signal) => new Promise((resolve, reject) => {
+export const browserRequest = (url, address, signal) => new Promise((resolve, reject) => {
   const transport = url.protocol === 'https:' ? https : http;
   const request = transport.request({
     protocol: url.protocol,
@@ -45,11 +44,16 @@ const nodeRequest = (url, address, signal) => new Promise((resolve, reject) => {
       'user-agent': 'digital-ai-partner/0.1 read-only source reader',
     },
   }, resolve);
+  // The abort stays wired until the body has been read. Removing it on `response` — the natural
+  // place, since that is when the promise resolves — leaves a server that sent headers and then
+  // held the connection open holding it for ever, which is exactly the case the deadline exists
+  // for. Destroying the request is what makes the stalled response emit, and the reader turns that
+  // into BROWSER_TIMEOUT.
   const onAbort = () => { request.destroy(signal.reason ?? new Error('aborted')); };
   if (signal.aborted) onAbort();
   else signal.addEventListener('abort', onAbort, { once: true });
   request.on('error', (error) => { signal.removeEventListener('abort', onAbort); reject(error); });
-  request.on('response', (response) => signal.removeEventListener('abort', onAbort));
+  request.on('close', () => signal.removeEventListener('abort', onAbort));
   request.end();
 });
 
@@ -108,6 +112,66 @@ const mappedIpv4 = (groups) => {
   return `${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`;
 };
 
+// The ranges IANA registers as special-purpose, as [network, prefix length]. Listing the
+// registries rather than testing the few ranges that come to mind is the point: a version of this
+// that checked only RFC1918 and loopback called the benchmarking range, the documentation ranges
+// and Teredo public, and each of those is somewhere a page could be sent that should not be
+// reachable. When a registry grows, the answer is to add it here — the default stays "not public".
+const IPV4_SPECIAL = [
+  [['0', '0', '0', '0'], 8, 'this network'],
+  [['10', '0', '0', '0'], 8, 'private'],
+  [['100', '64', '0', '0'], 10, 'carrier NAT'],
+  [['127', '0', '0', '0'], 8, 'loopback'],
+  [['169', '254', '0', '0'], 16, 'link-local, includes the cloud metadata address'],
+  [['172', '16', '0', '0'], 12, 'private'],
+  [['192', '0', '0', '0'], 24, 'IETF protocol assignments'],
+  [['192', '0', '2', '0'], 24, 'documentation TEST-NET-1'],
+  [['192', '88', '99', '0'], 24, 'deprecated 6to4 relay anycast'],
+  [['192', '168', '0', '0'], 16, 'private'],
+  [['198', '18', '0', '0'], 15, 'benchmarking'],
+  [['198', '51', '100', '0'], 24, 'documentation TEST-NET-2'],
+  [['203', '0', '113', '0'], 24, 'documentation TEST-NET-3'],
+  [['240', '0', '0', '0'], 4, 'reserved'],
+];
+
+const inIpv4Range = (octets, network, bits) => {
+  let remaining = bits;
+  for (let index = 0; index < 4; index += 1) {
+    if (remaining <= 0) return true;
+    const take = Math.min(8, remaining);
+    const mask = take === 8 ? 0xff : (0xff << (8 - take)) & 0xff;
+    if ((octets[index] & mask) !== (Number(network[index]) & mask)) return false;
+    remaining -= take;
+  }
+  return true;
+};
+// Prefixes in the IPv6 special-purpose registry, as (groups, prefix length) — the same shape as
+// the IPv4 table, so neither needs a hand-computed constant to get a nibble wrong.
+const IPV6_SPECIAL = [
+  [[0x0064, 0xff9b, 0, 0, 0, 0, 0, 0], 96, 'IPv4/IPv6 translation'],
+  [[0x0064, 0xff9b, 0x0001, 0, 0, 0, 0, 0], 48, 'local-use IPv4/IPv6 translation'],
+  [[0x0100, 0, 0, 0, 0, 0, 0, 0], 64, 'discard-only'],
+  [[0x2001, 0, 0, 0, 0, 0, 0, 0], 23, 'IETF protocol assignments'],
+  [[0x2001, 0x0002, 0, 0, 0, 0, 0, 0], 48, 'benchmarking'],
+  [[0x2001, 0x0010, 0, 0, 0, 0, 0, 0], 28, 'ORCHID'],
+  [[0x2001, 0x0db8, 0, 0, 0, 0, 0, 0], 32, 'documentation'],
+  [[0x2001, 0x0020, 0, 0, 0, 0, 0, 0], 28, 'ORCHIDv2'],
+  [[0x2002, 0, 0, 0, 0, 0, 0, 0], 16, '6to4'],
+  [[0x3fff, 0, 0, 0, 0, 0, 0, 0], 20, 'documentation'],
+];
+
+// True when the first `bits` of both group arrays agree.
+const sharesPrefix = (groups, network, bits) => {
+  let remaining = bits;
+  for (let index = 0; index < 8 && remaining > 0; index += 1) {
+    const take = Math.min(16, remaining);
+    const mask = take === 16 ? 0xffff : (0xffff << (16 - take)) & 0xffff;
+    if ((groups[index] & mask) !== (network[index] & mask)) return false;
+    remaining -= take;
+  }
+  return true;
+};
+
 // True for any address that is not routable on the public internet. Anything not confidently
 // public is treated as private: an unrecognised form must fail closed, not be assumed safe.
 export const isPrivateAddress = (address) => {
@@ -115,15 +179,9 @@ export const isPrivateAddress = (address) => {
   if (!value) return true;
   if (FORBIDDEN_LITERALS.has(value)) return true;
   if (net.isIP(value) === 4) {
-    const [a, b] = value.split('.').map(Number);
-    if (a === 0 || a === 10 || a === 127) return true;                       // this network, this network, loopback
-    if (a === 169 && b === 254) return true;                                 // link-local, includes the metadata address
-    if (a === 172 && b >= 16 && b <= 31) return true;                        // RFC1918
-    if (a === 192 && b === 168) return true;                                 // RFC1918
-    if (a === 100 && b >= 64 && b <= 127) return true;                       // RFC6598 carrier NAT
-    if (a === 192 && b === 0) return true;                                   // RFC6890, including 192.0.0.170/171
-    if (a >= 224) return true;                                                // multicast and reserved
-    return false;
+    const octets = value.split('.').map(Number);
+    for (const [network, bits] of IPV4_SPECIAL) if (inIpv4Range(octets, network, bits)) return true;
+    return octets[0] >= 224;                                                 // multicast
   }
   if (value.includes(':')) {
     const groups = expandIpv6(value);
@@ -137,6 +195,7 @@ export const isPrivateAddress = (address) => {
     if ((first & 0xffc0) === 0xfe80) return true;                            // fe80::/10 link-local
     if ((first & 0xfe00) === 0xfc00) return true;                            // fc00::/7 unique local
     if ((first & 0xff00) === 0xff00) return true;                            // ff00::/8 multicast
+    for (const [network, bits] of IPV6_SPECIAL) if (sharesPrefix(groups, network, bits)) return true;
     return false;
   }
   // Not an address at all: a name. It is checked by resolution instead, so this is not a verdict,
@@ -222,7 +281,8 @@ const contentTypeOf = (headers) => String(headers['content-type'] ?? '').split('
 // already checked, rather than through `fetch`, which would resolve the name a second time and
 // connect to whatever the second answer said. The hostname is still what TLS validates and what
 // the `Host` header carries, so pinning the address costs nothing in correctness.
-export async function fetchPublicPage(rawUrl, { request = nodeRequest, lookup = dns.lookup } = {}) {
+export async function fetchPublicPage(rawUrl, { request = browserRequest, lookup = dns.lookup,
+  timeoutMs = LIMITS.timeoutMs } = {}) {
   let current = assertUrlAllowed(rawUrl);
   const seen = new Set();
   for (let hop = 0; hop <= LIMITS.maxRedirects; hop += 1) {
@@ -231,7 +291,7 @@ export async function fetchPublicPage(rawUrl, { request = nodeRequest, lookup = 
     const address = await resolvePublic(current.hostname, lookup);
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(new BrowserFetchError('BROWSER_TIMEOUT')), LIMITS.timeoutMs);
+    const timer = setTimeout(() => controller.abort(new BrowserFetchError('BROWSER_TIMEOUT')), timeoutMs);
     let response;
     try {
       response = await request(current, address, controller.signal);
