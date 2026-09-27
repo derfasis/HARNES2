@@ -213,10 +213,21 @@ test('a source the budget left out waits its turn rather than draining the list'
   const all = cfg.opportunity.browserSources.map((entry) => entry.sourceId);
   for (let round = 0; round < 2; round += 1) {
     for (const id of [...scheduler.browserPolls.keys()]) {
-      markBrowserConsidered(scheduler.browserPolls, id, scheduler.browserPolls.get(id) - 400_000);
+      // The record is an object; subtracting from the object itself yields NaN, a NaN stamp
+      // compares false against the interval, and the source then looks permanently due. That is
+      // how this test was green for the wrong reason: it never aged anything at all.
+      const record = scheduler.browserPolls.get(id);
+      markBrowserConsidered(scheduler.browserPolls, id, record.consideredAt - 400_000);
     }
     await scheduler.tick();
   }
   assert.equal(read.length, 6, 'two more rounds of two');
-  assert.deepEqual(new Set(read), new Set(all), 'every source is read within the rounds, and none twice');
+  assert.deepEqual(new Set(read), new Set(all), 'every source is read at least once across the rounds');
+  // Six reads over five sources cannot all be equal, and must not be lopsided either: the most
+  // and least read differ by at most one, which is what an honest rotation looks like.
+  const counts = new Map();
+  for (const id of read) counts.set(id, (counts.get(id) ?? 0) + 1);
+  const values = [...counts.values()];
+  assert.ok(Math.max(...values) - Math.min(...values) <= 1,
+    `reads are spread across the sources, not concentrated: ${JSON.stringify([...counts])}`);
 });
