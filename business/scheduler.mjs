@@ -1,7 +1,7 @@
 import { contextFor } from './context.mjs';
 import { runtimeReadiness, usageAccounting } from './config.mjs';
 import { processSourceOpportunity } from './opportunity-pipeline.mjs';
-import { pollTelegramSource } from './sources/telegram-readonly.mjs';
+import { pollSource, pollFailureKind } from './source-transport.mjs';
 import { sourceCheckpoint } from './source-ingestion.mjs';
 import { id } from './store.mjs';
 import { now } from './errors.mjs';
@@ -50,7 +50,7 @@ export class Scheduler {
         // transport capabilities. Reuse this tick, never the private-chat adapter.
         let sourceReadFailed=false, sourceReadFailure=null;
         for (const { sourceId, transport } of this.sourceReaders) {
-          try { await pollTelegramSource(this.service, sourceId, transport); }
+          try { await pollSource(this.service, sourceId, transport); }
           catch (error) {
             // A poll that fails silently is a source that can end up blocked with no evidence
             // left behind, which would otherwise leave the source failure without durable
@@ -69,7 +69,9 @@ export class Scheduler {
             sourceReadFailure={ source_id:sourceId, code,
               checkpoint_pts:state?.pts ?? null, phase:state?.phase ?? null, reason:state?.reason ?? null };
             try { await this.service.exclusive(() => this.service.store.transaction(
-              () => this.service.store.event(cfg.partnerId, null, 'source.telegram.poll.failed', 'system', sourceReadFailure))); }
+              // Filed under the transport that actually failed, so a browser failure is never
+              // recorded as a Telegram one and the two histories stay separately readable.
+              () => this.service.store.event(cfg.partnerId, null, pollFailureKind(this.service, sourceId), 'system', sourceReadFailure))); }
             catch { /* Telemetry must never stop the queue. */ }
           }
         }
