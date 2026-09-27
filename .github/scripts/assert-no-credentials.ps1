@@ -61,3 +61,9 @@ if ($problems.Count) {
 
 $phase = if ($RequireEnvFile) { 'after install' } else { 'before install' }
 Write-Host "No production credential, model key, Telegram session or persisted token is reachable ($phase)."
+
+# The git lookup above exits 1 when the key is simply absent, which is the expected case. Under
+# `pwsh -command ". script.ps1"` that leaks into the process exit code and fails a run that just
+# passed its checks — which is exactly what the first real CI run did. State the outcome instead
+# of inheriting whatever a native command left behind.
+exit 0
