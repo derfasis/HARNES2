@@ -35,7 +35,17 @@ export const browserRequest = (url, address, signal) => new Promise((resolve, re
     // The pinned address, and the host the certificate is checked against: they are different
     // things and Node supports having both.
     servername: url.hostname,
-    lookup: (hostname, options, callback) => callback(null, address, address.includes(':') ? 6 : 4),
+    // Node asks for one address or for a list, depending on `options.all` (address
+    // auto-selection sets it). Answering with a scalar when it wants a list makes it read
+    // `.address` off a string and fail with ERR_INVALID_IP_ADDRESS — so every real hostname
+    // was unreadable, while every test passed, because a test that connects to an IP literal
+    // never calls this at all. Both shapes are answered, from the one address already checked.
+    lookup: (hostname, options, callback) => {
+      const family = address.includes(':') ? 6 : 4;
+      if (options?.all) callback(null, [{ address, family }]);
+      else callback(null, address, family);
+      return undefined;
+    },
     headers: {
       // A plain read: no cookies, no authorization, no ambient state of any kind. The request says
       // who it is by being a GET on a public page and nothing else.
