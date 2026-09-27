@@ -1,0 +1,63 @@
+# The pre-merge gate: the same command a developer runs, on every pull request.
+#
+# Three times in one day a change looked fine locally and left main red. Two of the
+# three causes were things a machine catches and a diff review does not, so the check
+# is a machine now. This workflow runs `npm run verify` and nothing else: if CI and a
+# developer ever disagree, the fix is the command, never a second CI-only path.
+#
+# It is deliberately offline. There is no `secrets:` block anywhere in this file, the
+# setup script writes `.env` from `.env.example`, and the step below fails the run if
+# anything that looks like a real credential is present. A verification gate that
+# could read a production key would be a way to leak one into a log.
+name: verify
+
+on:
+  pull_request:
+
+jobs:
+  verify:
+    # Windows because that is the platform the project is set up on: `test:credentials`
+    # invokes `.venv\Scripts\python.exe` and setup is a PowerShell script. Running the
+    # same installer and the same commands here means CI cannot pass while the developer's
+    # own machine fails, which is the whole point of the gate.
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: astral-sh/setup-uv@v3
+
+      - name: Install
+        run: npm run setup
+
+      - name: Confirm nothing secret is present
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $problems = @()
+          # A Telegram session or a real key must never be reachable from a verification run.
+          foreach ($secret in @('data/secrets', 'data/secrets/telegram.session')) {
+            if (Test-Path -LiteralPath $secret) { $problems += "secret path present: $secret" }
+          }
+          if (Test-Path -LiteralPath '.env') {
+            $example = (Get-Content -Raw -LiteralPath '.env.example') -replace "`r`n", "`n"
+            $actual = (Get-Content -Raw -LiteralPath '.env') -replace "`r`n", "`n"
+            if ($example.Trim() -ne $actual.Trim()) { $problems += '.env differs from .env.example' }
+          } else {
+            $problems += '.env is missing; setup should have written it from the example'
+          }
+          foreach ($name in @('PARTNER_MODEL_API_KEY', 'PARTNER_TELEGRAM_SESSION')) {
+            $value = [Environment]::GetEnvironmentVariable($name)
+            if ($value) { $problems += "environment carries $name" }
+          }
+          if ($problems.Count) { $problems | ForEach-Object { Write-Error $_ }; exit 1 }
+          Write-Host 'No credentials, sessions or real .env are reachable from this run.'
+
+      - name: Verify
+        run: npm run verify
