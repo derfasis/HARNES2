@@ -35,7 +35,17 @@ export const browserRequest = (url, address, signal) => new Promise((resolve, re
     // The pinned address, and the host the certificate is checked against: they are different
     // things and Node supports having both.
     servername: url.hostname,
-    lookup: (hostname, options, callback) => callback(null, address, address.includes(':') ? 6 : 4),
+    // Node asks for one address or for a list, depending on `options.all` (address
+    // auto-selection sets it). Answering with a scalar when it wants a list makes it read
+    // `.address` off a string and fail with ERR_INVALID_IP_ADDRESS — so every real hostname
+    // was unreadable, while every test passed, because a test that connects to an IP literal
+    // never calls this at all. Both shapes are answered, from the one address already checked.
+    lookup: (hostname, options, callback) => {
+      const family = address.includes(':') ? 6 : 4;
+      if (options?.all) callback(null, [{ address, family }]);
+      else callback(null, address, family);
+      return undefined;
+    },
     headers: {
       // A plain read: no cookies, no authorization, no ambient state of any kind. The request says
       // who it is by being a GET on a public page and nothing else.
@@ -71,11 +81,62 @@ const ALLOWED_CONTENT_TYPES = ['text/html', 'text/plain'];
 // credentials to whoever asks. Both are refused by the same rule as any private range.
 const FORBIDDEN_LITERALS = new Set(['localhost', '::1', '0.0.0.0', '169.254.169.254', 'fd00:ec2::254']);
 
+// The classes a caller may see. This list is the whole vocabulary: a refusal that is not one of
+// these is a programming error, caught below rather than passed on. The reason it is closed is
+// that the alternative is a message, and a message from a fetch carries the host, the address, the
+// status line and whatever the TLS stack felt like saying — none of which belongs in a record
+// that an operator will read and a log might keep.
+export const SAFE_CLASSES = Object.freeze([
+  'BROWSER_DNS_FAILED',
+  'BROWSER_TLS_FAILED',
+  'BROWSER_CONNECTION_REFUSED',
+  'BROWSER_CONNECTION_FAILED',
+  'BROWSER_TIMEOUT',
+  'BROWSER_BODY_TOO_LARGE',
+  'BROWSER_CONTENT_TYPE_REFUSED',
+  'BROWSER_STATUS_REFUSED',
+  'BROWSER_SCHEME_REFUSED',
+  'BROWSER_ADDRESS_REFUSED',
+  'BROWSER_URL_REFUSED',
+  'BROWSER_REDIRECT_LOOP',
+  'BROWSER_REDIRECT_WITHOUT_LOCATION',
+  'BROWSER_TOO_MANY_REDIRECTS',
+  'BROWSER_FETCH_FAILED',
+]);
+
+// Node's own error codes, mapped to the class an operator can act on. Only the code is read, never
+// the message: `connect ECONNREFUSED 93.184.216.34:443` tells the operator where to look, and it
+// also tells anyone reading the record which host the partner was configured to reach.
+const NODE_CODE_CLASSES = new Map(Object.entries({
+  ENOTFOUND: 'BROWSER_DNS_FAILED', EAI_AGAIN: 'BROWSER_DNS_FAILED', EAI_NODATA: 'BROWSER_DNS_FAILED',
+  ECONNREFUSED: 'BROWSER_CONNECTION_REFUSED',
+  ECONNRESET: 'BROWSER_CONNECTION_FAILED', EPIPE: 'BROWSER_CONNECTION_FAILED',
+  EHOSTUNREACH: 'BROWSER_CONNECTION_FAILED', ENETUNREACH: 'BROWSER_CONNECTION_FAILED',
+  EHOSTDOWN: 'BROWSER_CONNECTION_FAILED', ERR_SOCKET_CONNECTION_TIMEOUT: 'BROWSER_TIMEOUT',
+  EPROTO: 'BROWSER_TLS_FAILED', CERT_HAS_EXPIRED: 'BROWSER_TLS_FAILED',
+  DEPTH_ZERO_SELF_SIGNED_CERT: 'BROWSER_TLS_FAILED', SELF_SIGNED_CERT_IN_CHAIN: 'BROWSER_TLS_FAILED',
+  UNABLE_TO_VERIFY_LEAF_SIGNATURE: 'BROWSER_TLS_FAILED', UNABLE_TO_GET_ISSUER_CERT: 'BROWSER_TLS_FAILED',
+  ERR_TLS_CERT_ALTNAME_INVALID: 'BROWSER_TLS_FAILED', ERR_SSL_WRONG_VERSION_NUMBER: 'BROWSER_TLS_FAILED',
+}));
+
+// Anything not in the table becomes the fallback. A refusal that names itself after a library
+// error we did not anticipate would be a new channel out, and the fallback loses nothing an
+// operator needed: it says the read failed, and the class above says why when we know.
+export const classifyTransportError = (error) => {
+  if (error?.code === 'BROWSER_TIMEOUT' || error?.name === 'AbortError') return 'BROWSER_TIMEOUT';
+  return NODE_CODE_CLASSES.get(String(error?.code ?? '')) ?? 'BROWSER_FETCH_FAILED';
+};
+
 export class BrowserFetchError extends Error {
-  constructor(code, message) { super(message ?? code); this.code = code; }
+  constructor(code) {
+    // The message is the code. Not a convenience: it is what makes it impossible for a detail to
+    // reach a caller, a log or a record through the one field every error has.
+    super(SAFE_CLASSES.includes(code) ? code : 'BROWSER_FETCH_FAILED');
+    this.code = this.message;
+  }
 }
 
-const refuse = (code, message) => { throw new BrowserFetchError(code, message); };
+const refuse = (code) => { throw new BrowserFetchError(code); };
 
 // Expand an IPv6 address to its eight groups, so classification is done on numbers rather than on
 // the notation. A URL parser rewrites `::ffff:127.0.0.1` into `::ffff:7f00:1` before we ever see
@@ -207,12 +268,12 @@ export const isPrivateAddress = (address) => {
 
 export const assertUrlAllowed = (raw) => {
   let url;
-  try { url = new URL(String(raw)); } catch { refuse('BROWSER_URL_INVALID'); }
-  if (!ALLOWED_SCHEMES.has(url.protocol)) refuse('BROWSER_SCHEME_REFUSED', `scheme ${url.protocol} is not read-only`);
-  if (url.username || url.password) refuse('BROWSER_URL_CREDENTIALS_REFUSED');
-  if (!url.hostname) refuse('BROWSER_URL_INVALID');
+  try { url = new URL(String(raw)); } catch { refuse('BROWSER_URL_REFUSED'); }
+  if (!ALLOWED_SCHEMES.has(url.protocol)) refuse('BROWSER_SCHEME_REFUSED');
+  if (url.username || url.password) refuse('BROWSER_URL_REFUSED');
+  if (!url.hostname) refuse('BROWSER_URL_REFUSED');
   const literal = isPrivateAddress(url.hostname);
-  if (literal === true) refuse('BROWSER_ADDRESS_REFUSED', 'the URL names a non-public address');
+  if (literal === true) refuse('BROWSER_ADDRESS_REFUSED');
   return url;
 };
 
@@ -228,10 +289,10 @@ const resolvePublic = async (hostname, resolve) => {
   let addresses;
   try { addresses = await resolve(hostname, { all: true, verbatim: true }); }
   catch { refuse('BROWSER_DNS_FAILED'); }
-  if (!addresses.length) refuse('BROWSER_DNS_EMPTY');
+  if (!addresses.length) refuse('BROWSER_DNS_FAILED');
   for (const entry of addresses) {
     if (isPrivateAddress(entry.address) === true)
-      refuse('BROWSER_ADDRESS_REFUSED', 'the host resolves to a non-public address');
+      refuse('BROWSER_ADDRESS_REFUSED');
   }
   // The first checked address is the one the socket is given, so the address that was verified is
   // the address that is used. One connection attempt only: retrying on a second answer would
@@ -299,8 +360,7 @@ export async function fetchPublicPage(rawUrl, { request = browserRequest, lookup
       response = await request(current, address, controller.signal);
     } catch (error) {
       clearTimeout(timer);
-      if (error?.code === 'BROWSER_TIMEOUT') refuse('BROWSER_TIMEOUT');
-      refuse('BROWSER_FETCH_FAILED');
+      refuse(classifyTransportError(error));
     }
 
     try {
@@ -315,11 +375,11 @@ export async function fetchPublicPage(rawUrl, { request = browserRequest, lookup
       }
       if (response.statusCode < 200 || response.statusCode >= 300) {
         response.resume();
-        refuse('BROWSER_STATUS_REFUSED', `status ${response.statusCode}`);
+        refuse('BROWSER_STATUS_REFUSED');
       }
       if (!ALLOWED_CONTENT_TYPES.includes(contentTypeOf(response.headers))) {
         response.resume();
-        refuse('BROWSER_CONTENT_TYPE_REFUSED', `content type ${contentTypeOf(response.headers) || 'absent'} is not text`);
+        refuse('BROWSER_CONTENT_TYPE_REFUSED');
       }
       // The deadline is still running here, and covers the body as well as the headers.
       const body = await readBounded(response, { aborted: controller.signal.aborted, reason: new BrowserFetchError('BROWSER_TIMEOUT') });
@@ -328,8 +388,7 @@ export async function fetchPublicPage(rawUrl, { request = browserRequest, lookup
     } catch (error) {
       clearTimeout(timer);
       if (error instanceof BrowserFetchError) throw error;
-      if (controller.signal.aborted) refuse('BROWSER_TIMEOUT');
-      refuse('BROWSER_BODY_FAILED');
+      refuse(controller.signal.aborted ? 'BROWSER_TIMEOUT' : classifyTransportError(error));
     }
   }
   refuse('BROWSER_TOO_MANY_REDIRECTS');

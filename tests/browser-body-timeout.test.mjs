@@ -95,3 +95,30 @@ test('the deadline is a parameter, and the boundary default is the documented on
   assert.equal(typeof LIMITS.maxRedirects, 'number');
   assert.ok(LIMITS.maxBytes > 0 && LIMITS.maxTextChars > 0);
 });
+
+test('a hostname is connected to the address the boundary checked, not resolved again', async (t) => {
+  // The regression the live smoke found, and the reason no test could have found it: the pinned
+  // `lookup` answered with a scalar where Node asks for a list when address auto-selection is on,
+  // so every real hostname failed with ERR_INVALID_IP_ADDRESS. A test connecting to an IP literal
+  // never calls `lookup` at all, so a suite full of them stayed green against a browser that could
+  // not read anything.
+  //
+  // The host here is deliberately unresolvable. If the pinned address were ignored, or the lookup
+  // answered in the wrong shape, the connection would fail to resolve — so passing proves both that
+  // the address handed in is the address used, and that the answer has the shape Node asked for.
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'content-type': 'text/plain' });
+    res.end('reached through the pinned address');
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const port = server.address().port;
+
+  const url = new URL(`http://host-that-does-not-resolve.invalid:${port}/page`);
+  const response = await browserRequest(url, '127.0.0.1', new AbortController().signal);
+  assert.equal(response.statusCode, 200, 'the pinned address was used, not a fresh resolution');
+  const body = await new Promise((resolve) => { let data = ''; response.on('data', (c) => { data += c; }); response.on('end', () => resolve(data)); });
+  assert.equal(body, 'reached through the pinned address');
+  response.destroy();
+});
