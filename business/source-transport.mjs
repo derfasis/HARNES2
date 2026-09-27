@@ -8,23 +8,20 @@
 // while everything reports that it is fine.
 import { pollTelegramSource } from './sources/telegram-readonly.mjs';
 import { pollBrowserSource } from './sources/browser-readonly.mjs';
+import { sourceTransportKind } from './source-ingestion.mjs';
 
-// A source is a browser source when the operator configured it as one, and a Telegram source when
-// it appears in the Telegram policy list. Configuration decides, not a name that looks like one:
-// a browser source called `telegram:...` is still a browser source, and that is the operator's
-// decision to make rather than a heuristic's.
-export function sourceTransportKind(service, sourceId) {
-  if ((service.config.opportunity?.browserSources ?? []).some((entry) => entry.sourceId === sourceId)) return 'browser';
-  if ((service.config.opportunity?.telegramSources ?? []).some((entry) => entry.sourceId === sourceId)) return 'telegram';
-  return 'fixture';
-}
+// The kind is decided in one place — the ingestion module, where the freshness boundary needs it
+// too — and re-exported here, so the poller and the boundary cannot disagree about what a source
+// is. Two independent decisions would eventually differ, and a source would be polled by one
+// transport while judged by the other's rules.
+export { sourceTransportKind };
 
 // The one poll entry point. The scheduler calls this and nothing else.
 export async function pollSource(service, sourceId, transport) {
   const kind = sourceTransportKind(service, sourceId);
   if (kind === 'browser') return pollBrowserSource(service, sourceId, transport);
   if (kind === 'telegram') return pollTelegramSource(service, sourceId, transport);
-  const error = new Error(`No read-only transport is configured for ${kind === 'fixture' ? 'this' : kind} source`);
+  const error = new Error(`No read-only transport is configured for ${kind} source`);
   error.code = 'SOURCE_TRANSPORT_UNAVAILABLE';
   throw error;
 }

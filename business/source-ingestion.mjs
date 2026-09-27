@@ -1,6 +1,6 @@
 import { hash } from './store.mjs';
 import { ensure } from './errors.mjs';
-import { validateTelegramSources } from './config.mjs';
+import { validateTelegramSources, validateBrowserSources } from './config.mjs';
 
 export const SOURCE_MESSAGE = 'source.message';
 export const PIPELINE_FINISHED = 'opportunity.pipeline.finished';
@@ -10,10 +10,38 @@ export const digest = value => hash(stable(value));
 const check = (condition, code) => ensure(condition, `Source pipeline: ${code}`, 409, code);
 // Dedicated read-only source cursors share the existing offset table, not private-chat offsets.
 export const SOURCE_CHECKPOINT_CHANNEL = 'telegram-source-v0';
+// A browser source has no pts and no baseline: what it records is when it was last confirmed and
+// under which policy. It gets its own channel so that reading a page and reading a channel can
+// never overwrite one another's cursor, and so that a Telegram checkpoint left behind by an
+// earlier revision cannot be mistaken for a browser one.
+export const BROWSER_CHECKPOINT_CHANNEL = 'browser-source-v0';
 export function sourceCheckpoint(service, sourceId) {
   const row = service.store.get('SELECT cursor FROM channel_offsets WHERE channel=? AND account_id=?',
     SOURCE_CHECKPOINT_CHANNEL, digest([service.config.partnerId, sourceId]));
   return row ? JSON.parse(row.cursor) : null;
+}
+
+// The browser cursor is written by the reader, in the same transaction that ingests the page, so
+// "the page was ingested" and "the source is current" can never disagree.
+export function browserCheckpoint(service, sourceId) {
+  const row = service.store.get('SELECT cursor FROM channel_offsets WHERE channel=? AND account_id=?',
+    BROWSER_CHECKPOINT_CHANNEL, digest([service.config.partnerId, sourceId]));
+  return row ? JSON.parse(row.cursor) : null;
+}
+export function writeBrowserCheckpoint(service, sourceId, state) {
+  const keys = ['source_id', 'policy_hash', 'phase', 'confirmed_at', 'reason'];
+  check(state && typeof state === 'object' && !Array.isArray(state)
+    && Object.keys(state).length === keys.length && Object.keys(state).every((key) => keys.includes(key))
+    && state.source_id === sourceId
+    && typeof state.policy_hash === 'string' && /^[a-f0-9]{64}$/.test(state.policy_hash)
+    && ['current', 'blocked'].includes(state.phase)
+    && (state.phase === 'current'
+      ? state.reason === null && typeof state.confirmed_at === 'string' && Number.isFinite(Date.parse(state.confirmed_at))
+      : state.confirmed_at === null && typeof state.reason === 'string' && state.reason.length > 0 && state.reason.length <= 100),
+  'BROWSER_CHECKPOINT_CORRUPT');
+  service.store.run('INSERT OR REPLACE INTO channel_offsets(channel,account_id,cursor) VALUES(?,?,?)',
+    BROWSER_CHECKPOINT_CHANNEL, digest([service.config.partnerId, sourceId]), JSON.stringify(state));
+  return state;
 }
 export function validateSourceCheckpoint(state, p) {
   const keys=['source_id','account_id','channel_id','policy_hash','baseline_hash','pts','phase','confirmed_at','reason'];
@@ -27,12 +55,47 @@ export function validateSourceCheckpoint(state, p) {
     && (state.phase==='current' ? typeof state.confirmed_at==='string' && Number.isFinite(Date.parse(state.confirmed_at))
       : state.confirmed_at===null), 'SOURCE_TRANSPORT_CORRUPT_CHECKPOINT');
 }
-function sourceTransportBoundary(service, sourceId) {
+// The browser policy, reduced to the three fields a reader acts on. Defined here rather than in
+// the reader so that the hash a checkpoint records and the hash the boundary compares are the hash
+// of one object instead of two that happen to look alike.
+export const browserPolicyShape = (p) =>
+  ({ sourceId: p.sourceId, url: p.url, maxLagSeconds: p.maxLagSeconds });
+export const browserPolicyHash = (p) => digest(browserPolicyShape(p));
+
+// Which transport a source is read through, decided by configuration. It lives here rather than in
+// the polling module because the freshness boundary below needs it, and a boundary that asked the
+// poller which transport it was would be a cycle between two things that must agree.
+export function sourceTransportKind(service, sourceId) {
+  const browser = (service.config.opportunity?.browserSources ?? []).some((e) => e.sourceId === sourceId);
+  const telegram = (service.config.opportunity?.telegramSources ?? []).some((e) => e.sourceId === sourceId);
+  // A source id in both lists does not say which transport is meant, and picking one silently makes
+  // the choice depend on the order of two conditions. It is refused instead.
+  check(!(browser && telegram), 'SOURCE_TRANSPORT_AMBIGUOUS');
+  if (browser) return 'browser';
+  if (telegram) return 'telegram';
+  return 'fixture';
+}
+
+// The freshness rule, per transport. A browser source has no pts and no baseline, so it is checked
+// against its own checkpoint and the hash of its *normalised* policy — the same object the reader
+// acts on. Hashing the raw config entry instead compares two different things and refuses a
+// source that has not changed at all.
+function browserTransportBoundary(service, sourceId) {
+  validateBrowserSources(service.config);
+  const configured = service.config.opportunity.browserSources.filter((p) => p.sourceId === sourceId);
+  check(configured.length === 1, 'BROWSER_POLICY_UNAVAILABLE');
+  const state = browserCheckpoint(service, sourceId);
+  check(state, 'SOURCE_TRANSPORT_NOT_READY');
+  check(state.policy_hash === browserPolicyHash(configured[0]), 'SOURCE_TRANSPORT_NOT_READY');
+  check(state.phase === 'current', 'SOURCE_TRANSPORT_NOT_CURRENT');
+  return state;
+}
+function telegramTransportBoundary(service, sourceId) {
   validateTelegramSources(service.config);
   const bindings = service.config.opportunity.telegramSources;
   const configured = bindings.filter(p => p.sourceId === sourceId);
   const state = sourceCheckpoint(service, sourceId);
-  if (!configured.length && !state) return; // Existing operator/fixture sources remain unchanged.
+  if (!configured.length && !state) return null; // Existing operator/fixture sources remain unchanged.
   check(configured.length === 1, 'SOURCE_TRANSPORT_POLICY_UNAVAILABLE');
   const p = configured[0];
   check(state && state.policy_hash === digest(p), 'SOURCE_TRANSPORT_NOT_READY');
@@ -40,9 +103,24 @@ function sourceTransportBoundary(service, sourceId) {
   check(state.phase === 'current', 'SOURCE_TRANSPORT_NOT_CURRENT');
   const liveHealth = service.sourceTransportHealth?.get(sourceId);
   check(!liveHealth || liveHealth() === true, 'SOURCE_TRANSPORT_DIRTY');
-  const age = Date.now() - Date.parse(state.confirmed_at);
-  check(Number.isInteger(p.maxLagSeconds) && p.maxLagSeconds > 0 && p.maxLagSeconds <= 3600
-    && Number.isFinite(age) && age >= 0 && age <= p.maxLagSeconds * 1000, 'SOURCE_TRANSPORT_STALE');
+  return { policy: p, state };
+}
+// One boundary, chosen by the source's own kind, so a browser source is held to the same freshness
+// rule as a Telegram one and neither is judged by the other's policy.
+export function sourceTransportBoundary(service, sourceId) {
+  const kind = sourceTransportKind(service, sourceId);
+  if (kind === 'browser') return browserTransportBoundary(service, sourceId);
+  if (kind === 'fixture') {
+    const bindings = service.config.opportunity?.telegramSources ?? [];
+    if (!bindings.some((p) => p.sourceId === sourceId) && !sourceCheckpoint(service, sourceId)) return null;
+  }
+  const telegram = telegramTransportBoundary(service, sourceId);
+  if (!telegram) return null;
+  const age = Date.now() - Date.parse(telegram.state.confirmed_at);
+  check(Number.isInteger(telegram.policy.maxLagSeconds) && telegram.policy.maxLagSeconds > 0
+    && telegram.policy.maxLagSeconds <= 3600
+    && Number.isFinite(age) && age >= 0 && age <= telegram.policy.maxLagSeconds * 1000, 'SOURCE_TRANSPORT_STALE');
+  return telegram.state;
 }
 export function sourceTransportReadiness(service, sourceId) {
   try {

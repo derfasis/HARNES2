@@ -64,7 +64,10 @@ export function validateBrowserSources(config) {
       && Object.keys(source).length === keys.length && Object.keys(source).every(key => keys.includes(key))
       && typeof source.sourceId === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,149}$/.test(source.sourceId)
       && typeof source.url === 'string' && source.url.length > 0 && source.url.length <= 2000
-      && ['sanitized_fixture', 'live_snapshot'].includes(source.sourceKind)
+      // A real page is a live snapshot. Allowing `sanitized_fixture` here would be a claim the
+      // envelope cannot honour: the reader always emits `live_snapshot`, so the two would disagree
+      // and the first ingest would be refused by the pipeline's own kind check.
+      && source.sourceKind === 'live_snapshot'
       && typeof source.processingBasis === 'string' && source.processingBasis.trim().length > 0 && source.processingBasis.length <= 1000
       && Number.isInteger(source.maxLagSeconds) && source.maxLagSeconds >= 1 && source.maxLagSeconds <= 3600
       && refs.includes(source.sourceId) && !seen.has(source.sourceId);

@@ -11,7 +11,8 @@
 // anything; the only operation available is reading a page the operator configured.
 import { createHash } from 'node:crypto';
 import { AppError, ensure } from '../errors.mjs';
-import { ingestSource, sourceCheckpoint, sourceRows } from '../source-ingestion.mjs';
+import { ingestSource, sourceRows, browserCheckpoint, writeBrowserCheckpoint, browserPolicyHash,
+  browserPolicyShape, BROWSER_CHECKPOINT_CHANNEL } from '../source-ingestion.mjs';
 import { fetchPublicPage, LIMITS } from './browser-fetch.mjs';
 import { sanitizeHtml } from './browser-sanitize.mjs';
 
@@ -22,7 +23,7 @@ export const browserPolicy = (service, sourceId) => {
   ensure(typeof id === 'string' && id.length > 0 && id.length <= 300, 'BROWSER_POLICY_INVALID');
   ensure(typeof url === 'string' && url.length > 0 && url.length <= 2000, 'BROWSER_POLICY_INVALID');
   ensure(Number.isInteger(maxLagSeconds) && maxLagSeconds > 0 && maxLagSeconds <= 3600, 'BROWSER_POLICY_INVALID');
-  return Object.freeze({ sourceId: id, url, maxLagSeconds });
+  return Object.freeze(browserPolicyShape({ sourceId: id, url, maxLagSeconds }));
 };
 
 const digest = (value) => createHash('sha256').update(typeof value === 'string' ? value : JSON.stringify(value)).digest('hex');
@@ -37,13 +38,16 @@ const identities = (policy) => ({
 });
 
 export class BrowserSourceReader {
-  #policy; #fetch;
-  constructor(policy, { fetchImpl = fetch, lookup } = {}) { this.#policy = policy; this.#fetch = { fetchImpl, lookup }; }
+  #policy; #transport;
+  // `request` and `lookup` are the boundary's seams. Both default to the real ones, so a reader
+  // built in production opens a real socket, and a test can state what a host resolves to and how
+  // a socket behaves without either reaching a network.
+  constructor(policy, { request, lookup } = {}) { this.#policy = policy; this.#transport = { request, lookup }; }
   policy() { return this.#policy; }
 
   // The only thing this class can do. There is deliberately no write counterpart.
   async readPage() {
-    const page = await fetchPublicPage(this.#policy.url, this.#fetch);
+    const page = await fetchPublicPage(this.#policy.url, this.#transport);
     const { text, truncated, originalLength } = sanitizeHtml(page.body.toString('utf8'), LIMITS.maxTextChars);
     if (!text) { const error = new AppError('The page yielded no readable text', 422, 'BROWSER_EMPTY_PAGE'); error.code = 'BROWSER_EMPTY_PAGE'; throw error; }
     return { text, truncated, originalLength, finalUrl: page.finalUrl, status: page.status };
@@ -82,21 +86,46 @@ const envelopeFor = (service, policy, page) => {
 };
 
 // Read one configured page and feed it through the same intake every other source uses.
+//
+// The network read happens outside any lock, because holding a transaction open across a socket is
+// how a slow page becomes a blocked service. Everything after it — reading the source's history,
+// deriving the version, ingesting, and marking the source current — happens inside one exclusive
+// transaction, so a crash can never leave "the page was ingested" and "the source is current" as
+// two different facts.
 export async function pollBrowserSource(service, sourceId, transport) {
-  ensure(transport && typeof transport.readPage === 'function', 'BROWSER_READER_REQUIRED');
+  ensure(transport && typeof transport.readPage === 'function', 'The browser reader is required', 409, 'BROWSER_READER_REQUIRED');
   const policy = browserPolicy(service, sourceId);
-  // The same freshness rule the Telegram transport enforces, so a stale page cannot be ingested as
-  // if it were current. The Telegram boundary is not reused: it validates Telegram policies and
-  // has no meaning for a URL, and borrowing it would couple this reader to the other transport's
-  // checkpoint shape.
-  const checkpoint = sourceCheckpoint(service, sourceId);
-  if (checkpoint) {
-    const age = Date.now() - Date.parse(checkpoint.confirmed_at ?? 0);
-    ensure(Number.isFinite(age) && age >= 0 && age <= policy.maxLagSeconds * 1000, 'BROWSER_SOURCE_STALE');
-  }
+
+  // A source that has been blocked stays blocked until something clears it. A failed poll marks the
+  // reason, and the next poll is refused rather than quietly reading on as if nothing had happened.
+  const existing = browserCheckpoint(service, sourceId);
+  if (existing && existing.policy_hash !== browserPolicyHash(policy))
+    ensure(false, 'The browser policy changed since the source was last confirmed', 409, 'BROWSER_POLICY_CHANGED_SINCE_CONFIRMATION');
+  if (existing?.phase === 'blocked') ensure(false, 'The browser source is blocked', 409, 'BROWSER_SOURCE_BLOCKED');
 
   const page = await transport.readPage();
-  const envelope = envelopeFor(service, policy, page);
-  const result = ingestSource(service, envelope);
+
+  const result = await service.exclusive(() => service.store.transaction(() => {
+    const envelope = envelopeFor(service, policy, page);
+    const ingested = ingestSource(service, envelope);
+    // Written with the intake, never after it: a page that was ingested and a source that was not
+    // marked current would read as a failure that never happened.
+    writeBrowserCheckpoint(service, sourceId, { source_id: sourceId, policy_hash: browserPolicyHash(policy),
+      phase: 'current', confirmed_at: new Date().toISOString(), reason: null });
+    return ingested;
+  }));
   return { ...result, disposition: result.disposition, browser: { truncated: page.truncated, final_url: page.finalUrl } };
+}
+
+// A failed read is recorded as a blocked source with its class of failure, so the next poll refuses
+// rather than pretending the page is still fresh. Only a code leaves this function: a provider or
+// network message can carry detail, and this lands in durable storage.
+export function markBrowserSourceBlocked(service, sourceId, code) {
+  const policy = browserPolicy(service, sourceId);
+  const clean = /^[A-Z][A-Z0-9_]{1,63}$/.test(String(code)) ? String(code) : 'BROWSER_READ_FAILED';
+  service.store.run('INSERT OR REPLACE INTO channel_offsets(channel,account_id,cursor) VALUES(?,?,?)',
+    BROWSER_CHECKPOINT_CHANNEL, digest([service.config.partnerId, sourceId]),
+    JSON.stringify({ source_id: sourceId, policy_hash: browserPolicyHash(policy), phase: 'blocked',
+      confirmed_at: null, reason: clean }));
+  return clean;
 }
