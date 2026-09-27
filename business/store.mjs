@@ -6,10 +6,11 @@ import { ROOT, DATA, readJson } from './config.mjs';
 import { now } from './errors.mjs';
 import { ENGAGEMENT_TABLES } from './engagement-tables.mjs';
 import { DISCOVERY_TABLES } from './discovery-tables.mjs';
+import { CONTINUITY_TABLES } from './continuity-tables.mjs';
 
 export const id = () => randomUUID();
 export const hash = value => createHash('sha256').update(value).digest('hex');
-export const TABLES = ['partners','persons','channel_identities','conversations','messages','facts','tasks','runs','drafts','draft_versions','approvals','delivery_attempts','outcome_events','lessons','capability_proposals','skill_versions','events','command_receipts','channel_offsets','tool_calls',...ENGAGEMENT_TABLES,...DISCOVERY_TABLES];
+export const TABLES = ['partners','persons','channel_identities','conversations','messages','facts','tasks','runs','drafts','draft_versions','approvals','delivery_attempts','outcome_events','lessons','capability_proposals','skill_versions','events','command_receipts','channel_offsets','tool_calls',...ENGAGEMENT_TABLES,...DISCOVERY_TABLES,...CONTINUITY_TABLES];
 export class Store {
   constructor(directory = DATA) {
     fs.mkdirSync(directory, { recursive: true });
@@ -38,6 +39,7 @@ export class Store {
   }
   recover() {
     this.transaction(() => {
+      this.run("UPDATE partner_turns SET status='interrupted' WHERE status='running'");
       // A persisted last-seen timestamp is not proof of connection after a restart.
       this.run("UPDATE channel_offsets SET cursor=json_set(cursor,'$.phase','catching_up','$.confirmed_at',NULL,'$.reason','PROCESS_RESTART') WHERE channel='telegram-source-v0' AND json_extract(cursor,'$.reason') IS NOT 'INTEGRITY_RECONCILIATION_REQUIRED'");
       this.run("UPDATE delivery_attempts SET status='delivery_unknown',error='Service restarted during delivery',finished_at=? WHERE status='sending'", now());

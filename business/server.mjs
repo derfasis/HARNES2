@@ -115,6 +115,15 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
         return send(404,{error:'not found'});
       }
       ensure(tokenEquals(req.headers['x-partner-token'],operatorToken), 'Перезагрузите страницу для обновления сессии', 403);
+      if (req.method === 'GET' && url.pathname.startsWith('/api/continuity/')) {
+        if (url.pathname === '/api/continuity/threads') {
+          ensure([...url.searchParams.keys()].every(k => ['limit','cursor'].includes(k))
+            && [...url.searchParams.keys()].every(k => url.searchParams.getAll(k).length === 1), 'Invalid continuity query', 400);
+          return send(200, service.continuity.list({ limit: Number(url.searchParams.get('limit') ?? 20), cursor: url.searchParams.get('cursor') ?? '' }));
+        }
+        if (url.pathname.startsWith('/api/continuity/turns/')) return send(200, service.continuity.turn(decodeURIComponent(url.pathname.split('/').at(-1))));
+        if (url.pathname.startsWith('/api/continuity/threads/')) return send(200, service.continuity.detail(decodeURIComponent(url.pathname.split('/').at(-1))));
+      }
       if (req.method === 'GET' && url.pathname === '/api/state') return send(200,{...service.snapshot(),
         runtime:runtimeReadiness(config), scheduler:scheduler.status(), telegram:telegram.readiness(),
         capabilities:readJson(path.join(ROOT,'partner/capabilities.json')),
@@ -169,6 +178,8 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
   // Recovery occurs only after acquiring this server port; a duplicate launch cannot interrupt the live instance.
   store.recover();
   invalidateRevokedDiscoverySources(service);
+  try { service.continuity.reconcile(); }
+  catch { scheduler.continuityState = { disposition: 'reconciliation_failed' }; }
   fs.mkdirSync(path.join(directory,'runtime'),{recursive:true});
   fs.writeFileSync(path.join(directory,'runtime/mcp-connection.json'),JSON.stringify({url:`http://127.0.0.1:${config.server.port}`,token:mcpToken}),{mode:0o600});
   fs.writeFileSync(path.join(directory,'runtime/service.json'),JSON.stringify({pid:process.pid,port:config.server.port,started_at:new Date().toISOString()}));

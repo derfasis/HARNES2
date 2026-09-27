@@ -136,7 +136,9 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     "scripts/situation_router_worker.py": "29453f5084a80d040ac1e1e776fcd87fdeec5d3a",
     // Reviewed extension: invalidate read-only source checkpoints on process recovery.
     // textBlobHash normalizes CRLF, so this is the LF-normalized R7 blob hash.
-    "business/store.mjs": "0f173b662506808a76766c12bc38d3e14b026865",
+    // Continuity adds export tables and recovers its running turns as interrupted.
+    // The real child-process crash + restore tests in continuity.test.mjs cover both.
+    "business/store.mjs": "c1d45dff5d57f639a1191ce80886f28ac2319cb7",
     "adapters/hermes/credentials.py": "2797bd89081eaf4a950178cec3d637015ee8f45f",
     "adapters/hermes/runner.py": "e631237829d9b7a4521799b4a19c4c500b33f5aa",
     // Deliberate v0 extension: existing worker, no-tool envelope tested in opportunity-runtime.test.mjs.

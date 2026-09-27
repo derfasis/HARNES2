@@ -7,6 +7,7 @@ import { sourceTransportKind } from './source-ingestion.mjs';
 import { sourceCheckpointState } from './source-ingestion.mjs';
 import { id } from './store.mjs';
 import { now } from './errors.mjs';
+import { processContinuity } from './continuity-reasoning.mjs';
 
 export class Scheduler {
   constructor(service, runtime, telegram, sourceReaders = []) { this.sourceReaders = sourceReaders; this.service = service; this.runtime = runtime; this.telegram = telegram; this.busy = false; this.stopped = false; this.lastReason = null; this.activeRun = null; this.readersAbsentReported = false; this.sourceReadersState = null; this.browserPolls = new Map(); }
@@ -15,12 +16,17 @@ export class Scheduler {
   // attempted and failed may override it, because a failed poll is why the partner is doing
   // nothing. Reader absence is reported separately and never takes this slot: it is a transport
   // condition, and replacing the disposition there took away the reason an operator needs most.
-  status() { return { enabled: this.service.config.scheduler.enabled, busy: this.busy, active_run: this.activeRun, reason: this.lastReason, model: runtimeReadiness(this.service.config), source_readers: this.sourceReadersState }; }
+  status() { return { enabled: this.service.config.scheduler.enabled, busy: this.busy, active_run: this.activeRun, reason: this.lastReason, model: runtimeReadiness(this.service.config), source_readers: this.sourceReadersState, continuity: this.continuityState ?? { disposition: 'not_run' } }; }
   async tick() {
     if (this.busy || this.stopped || !this.service.config.scheduler.enabled) return;
     this.busy = true;
     try {
       const cfg = this.service.config;
+      // No model is needed to preserve watch cursors, revoke old scope, or notice a
+      // deadline. Disabled continuity still retires revoked historical watches.
+      let continuityHealthy = true;
+      try { await this.service.exclusive(() => this.service.continuity.reconcile()); }
+      catch { continuityHealthy = false; this.continuityState = { disposition: 'reconciliation_failed' }; }
       if (cfg.opportunity?.automatic) {
         // A source that is configured but has no reader is not a quiet source. The poll loop
         // below skips it, it sits at its last confirmed cursor forever, and every other signal
@@ -123,6 +129,10 @@ export class Scheduler {
         if (cfg.discovery?.enabled === true) {
           try { await this.service.reconcileDiscovery(); }
           catch { this.lastReason = 'Discovery reconciliation failed; source truth remains durable'; }
+        }
+        if (continuityHealthy) {
+          try { this.continuityState = await processContinuity(this.service, this.runtime); }
+          catch { this.continuityState = { disposition: 'reasoning_failed' }; }
         }
         const result = await processSourceOpportunity(this.service, this.runtime);
         // The disposition is the answer to "what is the partner doing", and a failed poll is

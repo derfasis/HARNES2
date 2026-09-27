@@ -54,6 +54,10 @@
   "engagement": {
     "enabled": false
   },
+  "continuity": {
+    "enabled": false,
+    "modelEnabled": false
+  },
   "discovery": {
     "enabled": false,
     "maxEvidence": 20,
