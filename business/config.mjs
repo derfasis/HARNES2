@@ -74,9 +74,11 @@ export function validateBrowserSources(config) {
       && source.sourceKind === 'live_snapshot'
       && typeof source.processingBasis === 'string' && source.processingBasis.trim().length > 0 && source.processingBasis.length <= 1000
       && Number.isInteger(source.maxLagSeconds) && source.maxLagSeconds >= 1 && source.maxLagSeconds <= 3600
-      // How often the page is read. A page that changes every twenty seconds does not exist, so
-      // the floor is the tick: anything faster would be re-reading the same bytes for nothing.
-      && Number.isInteger(source.pollEverySeconds) && source.pollEverySeconds >= 20 && source.pollEverySeconds <= 3600
+      // How often the page is read. The floor is the configured tick, not a constant: a source
+      // scheduled faster than the scheduler runs cannot be honoured, and such a configuration would
+      // sit there looking configured while quietly being read at the tick's pace.
+      && Number.isInteger(source.pollEverySeconds) && source.pollEverySeconds >= schedulerTickSeconds(config)
+      && source.pollEverySeconds <= 3600
       // A source read slower than its own freshness budget can never be fresh. This is refused at
       // load rather than left to be discovered as a mysterious staleness at runtime.
       && source.pollEverySeconds + schedulerTickSeconds(config) <= source.maxLagSeconds

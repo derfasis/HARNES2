@@ -2,7 +2,7 @@ import { contextFor } from './context.mjs';
 import { runtimeReadiness, usageAccounting } from './config.mjs';
 import { processSourceOpportunity } from './opportunity-pipeline.mjs';
 import { pollSource, pollFailureKind } from './source-transport.mjs';
-import { dueBrowserSources, markBrowserAttempted } from './browser-polling.mjs';
+import { dueBrowserSources, markBrowserConsidered, markBrowserRead } from './browser-polling.mjs';
 import { sourceTransportKind } from './source-ingestion.mjs';
 import { sourceCheckpointState } from './source-ingestion.mjs';
 import { id } from './store.mjs';
@@ -74,13 +74,25 @@ export class Scheduler {
         // by their own interval and capped per tick, because a page that has not changed in five
         // minutes does not need to be fetched every twenty seconds — and a page that is down must
         // not be retried on every tick for being down.
-        const dueBrowser = dueBrowserSources(this.service, this.sourceReaders, this.browserPolls);
+        const { selected: dueBrowser, considered } = dueBrowserSources(this.service, this.sourceReaders, this.browserPolls);
+        const dueBrowserIds = new Set(dueBrowser.map((entry) => entry.sourceId));
+        // Everything the tick looked at is stamped, read or not: a source that was due and
+        // passed over because the budget was spent is not due again on the next tick, or the
+        // budget would drain the whole list in a minute and the interval would mean nothing.
+        for (const sourceId of considered) markBrowserConsidered(this.browserPolls, sourceId);
         for (const { sourceId, transport } of this.sourceReaders) {
-          if (dueBrowser.length && !dueBrowser.some((entry) => entry.sourceId === sourceId)) {
-            const kind = (() => { try { return sourceTransportKind(this.service, sourceId); }
-              catch { return 'unknown'; } })();
-            if (kind === 'browser') continue;   // not due yet, or over the tick's budget
-          }
+          // Membership decides, full stop. An earlier version guarded the skip with
+          // `dueBrowser.length && …`, which meant that on a tick where nothing was due the guard
+          // was false, no source was skipped, and the whole cadence was skipped with it: every page
+          // was re-read on every tick until one happened to be due. A set has no empty case.
+          const isBrowser = sourceTransportKind(this.service, sourceId) === 'browser';
+          if (isBrowser && !dueBrowserIds.has(sourceId)) continue;
+          // Read sources carry a second stamp: a source that was read is older than one that was
+          // merely passed over, and that is what makes the next round reach a different pair.
+          if (isBrowser) markBrowserRead(this.browserPolls, sourceId);
+          // Stamped once, before the attempt rather than in one branch after another, so the two
+          // outcomes cannot stamp differently and so a source that fails waits exactly as long as
+          // one that succeeds.
           try { await pollSource(this.service, sourceId, transport); }
           catch (error) {
             // A poll that fails silently is a source that can end up blocked with no evidence
@@ -89,12 +101,6 @@ export class Scheduler {
             // own state, and nothing else: no message
             // text, no provider payload, no stack, no credentials.
             sourceReadFailed=true;
-            // Stamped here, on the failure path as well as the success path, and before the
-            // telemetry is written: a source that only backed off on success would back off never,
-            // and a site that is down would be re-read on every tick for the rest of the day.
-            if (sourceTransportKind(this.service, sourceId) === 'browser') {
-              markBrowserAttempted(this.browserPolls, sourceId);
-            }
             // Reading the checkpoint can itself fail on a corrupt row, and telemetry that throws
             // while reporting a failure would abort the very tick it is reporting about. The
             // checkpoint is the one for the transport that failed: a browser source has no pts at
@@ -112,12 +118,6 @@ export class Scheduler {
               // recorded as a Telegram one and the two histories stay separately readable.
               () => this.service.store.event(cfg.partnerId, null, pollFailureKind(this.service, sourceId), 'system', sourceReadFailure))); }
             catch { /* Telemetry must never stop the queue. */ }
-          }
-          // Stamped after the attempt, success or failure alike. Kept separate from the catch above
-          // so the two paths cannot drift: a stamp only in the failure branch would make a healthy
-          // page look permanently due, and a stamp only on success would make a broken one so.
-          if (sourceTransportKind(this.service, sourceId) === 'browser') {
-            try { markBrowserAttempted(this.browserPolls, sourceId); } catch { /* the tick still counts */ }
           }
         }
         if (cfg.discovery?.enabled === true) {
