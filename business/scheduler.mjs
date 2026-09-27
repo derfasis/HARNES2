@@ -53,8 +53,9 @@ export class Scheduler {
           try { await pollTelegramSource(this.service, sourceId, transport); }
           catch (error) {
             // A poll that fails silently is a source that can end up blocked with no evidence
-            // left behind, which is exactly what happened live. Record the class of failure, the
-            // cursor it read at and the checkpoint's own state, and nothing else: no message
+            // left behind, which would otherwise leave the source failure without durable
+            // evidence. Record the class of failure, the cursor it read at and the checkpoint's
+            // own state, and nothing else: no message
             // text, no provider payload, no stack, no credentials.
             sourceReadFailed=true;
             // Reading the checkpoint can itself fail on a corrupt row, and telemetry that throws
