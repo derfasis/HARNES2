@@ -11,7 +11,7 @@ import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fetchPublicPage, isPrivateAddress, LIMITS } from '../business/sources/browser-fetch.mjs';
+import { fetchPublicPage, isPrivateAddress, classifyTransportError, SAFE_CLASSES, LIMITS } from '../business/sources/browser-fetch.mjs';
 import { sanitizeHtml } from '../business/sources/browser-sanitize.mjs';
 import { BrowserSourceReader, browserPolicy, pollBrowserSource, markBrowserSourceBlocked }
   from '../business/sources/browser-readonly.mjs';
@@ -154,7 +154,7 @@ test('the scheme, credentials and address rules refuse before a socket is opened
     ['ftp://example.com/x', 'BROWSER_SCHEME_REFUSED'],
     ['data:text/html,<p>x', 'BROWSER_SCHEME_REFUSED'],
     ['javascript:alert(1)', 'BROWSER_SCHEME_REFUSED'],
-    ['https://user:pass@example.com/x', 'BROWSER_URL_CREDENTIALS_REFUSED'],
+    ['https://user:pass@example.com/x', 'BROWSER_URL_REFUSED'],
     ['http://127.0.0.1/x', 'BROWSER_ADDRESS_REFUSED'],
     ['http://localhost/x', 'BROWSER_ADDRESS_REFUSED'],
     ['http://169.254.169.254/latest/meta-data/', 'BROWSER_ADDRESS_REFUSED'],
@@ -397,4 +397,63 @@ test('the context state a browser source reports is the one the pipeline reads',
   assert.ok(state, 'a confirmed browser source has context state');
   assert.match(JSON.stringify(state), /browser:example/);
   assert.equal(store.get('SELECT COUNT(*) AS n FROM events WHERE kind=\'source.telegram.poll.failed\'').n, 0);
+});
+
+test('a Node error becomes a fixed class, and nothing of it survives', () => {
+  // The rule the review asked for: the operator learns where to look, and no part of the failure
+  // leaves. "connect ECONNREFUSED 93.184.216.34:443" would be the wrong answer twice over — it is
+  // a message in a record, and it names the host the partner was configured to reach.
+  for (const [nodeCode, expected] of Object.entries({
+    ECONNREFUSED: 'BROWSER_CONNECTION_REFUSED',
+    ENOTFOUND: 'BROWSER_DNS_FAILED',
+    EAI_AGAIN: 'BROWSER_DNS_FAILED',
+    ECONNRESET: 'BROWSER_CONNECTION_FAILED',
+    EHOSTUNREACH: 'BROWSER_CONNECTION_FAILED',
+    EPROTO: 'BROWSER_TLS_FAILED',
+    CERT_HAS_EXPIRED: 'BROWSER_TLS_FAILED',
+    DEPTH_ZERO_SELF_SIGNED_CERT: 'BROWSER_TLS_FAILED',
+    ERR_TLS_CERT_ALTNAME_INVALID: 'BROWSER_TLS_FAILED',
+  })) {
+    const classified = classifyTransportError(Object.assign(new Error(`connect ${nodeCode} 93.184.216.34:443`), { code: nodeCode }));
+    assert.equal(classified, expected, nodeCode);
+    assert.ok(SAFE_CLASSES.includes(classified), `${classified} must be a class we declared`);
+  }
+  // An abort is the deadline whatever Node called it.
+  assert.equal(classifyTransportError(Object.assign(new Error('aborted'), { name: 'AbortError' })), 'BROWSER_TIMEOUT');
+  // Anything we did not anticipate becomes the fallback rather than a new channel out.
+  for (const unknown of [{ code: 'ERR_SOMETHING_NEW' }, {}, new Error('no code at all'), null]) {
+    const classified = classifyTransportError(unknown);
+    assert.ok(SAFE_CLASSES.includes(classified), 'every outcome is a declared class');
+    if (unknown?.code !== 'ERR_SOMETHING_NEW') assert.equal(classified, 'BROWSER_FETCH_FAILED', 'an unanticipated error is the fallback');
+  }
+});
+
+test('no refusal carries a message, an address, a host or a status', async () => {
+  // A thrown refusal is the only thing that can travel: to a caller, to a log, to durable storage.
+  // If its message is its code, there is nothing else it can leak.
+  const detail = ['93.184.216.34', 'example.com', 'connect ', 'cert', '93.184'];
+  const refusals = [
+    () => fetchPublicPage('file:///etc/passwd', { request: async () => ({}) }),
+    () => fetchPublicPage('https://user:pass@example.com/x', { request: async () => ({}) }),
+    () => fetchPublicPage('http://127.0.0.1/x', { request: async () => ({}) }),
+    () => fetchPublicPage('https://sneaky.example/x', { request: async () => ({}) }),
+    () => fetchPublicPage('https://public.example/x', { lookup: async () => { throw Object.assign(new Error('resolver said no: host example.com'), { code: 'ENOTFOUND' }); }, request: async () => ({}) }),
+    () => fetchPublicPage('https://public.example/x', { lookup: async () => [{ address: '93.184.216.34', family: 4 }],
+      request: async () => { throw Object.assign(new Error('connect ECONNREFUSED 93.184.216.34:443'), { code: 'ECONNREFUSED' }); } }),
+    () => fetchPublicPage('https://public.example/x', { lookup: async () => [{ address: '93.184.216.34', family: 4 }],
+      request: async () => ({ ok: true, statusCode: 503, headers: {}, body: null }) }),
+    () => fetchPublicPage('https://public.example/x', { lookup: async () => [{ address: '93.184.216.34', family: 4 }],
+      request: async () => ({ ok: true, statusCode: 200, headers: { 'content-type': 'application/json' }, body: null }) }),
+  ];
+  for (const run of refusals) {
+    const error = await run().then(() => null, (thrown) => thrown);
+    assert.ok(error, 'each of these must refuse');
+    assert.ok(SAFE_CLASSES.includes(error.code), `${error.code} is not a declared class`);
+    assert.equal(error.message, error.code, 'the message is the code and nothing else');
+    for (const token of detail) {
+      assert.ok(!error.message.includes(token), `the message must not contain ${token}`);
+      assert.ok(!JSON.stringify({ code: error.code, message: error.message, stack: error.stack ?? '' }).includes(token),
+        `nothing about the failure may carry ${token}`);
+    }
+  }
 });
