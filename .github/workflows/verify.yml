@@ -38,6 +38,14 @@ jobs:
           # credential in scope. A read-only verification run has no use for one.
           persist-credentials: false
 
+      # Before anything reaches the network. Setup fetches the pinned Hermes revision and runs
+      # `npm ci` and `uv sync`, so a credential already on the runner would be live on the
+      # network before a later check ever looked. This is the guard; the one after install is
+      # a confirmation that installing changed nothing.
+      - name: Guard before install
+        shell: pwsh
+        run: ./.github/scripts/assert-no-credentials.ps1
+
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -48,45 +56,9 @@ jobs:
       - name: Install
         run: npm run setup
 
-      - name: Confirm no production credential is reachable
+      - name: Guard after install
         shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $problems = @()
-          # Every real variable the project's own .env.example names. Anything set in the
-          # environment is a value this run must not be able to see.
-          $secretNames = @(
-            'PARTNER_MODEL_API_KEY',
-            'PARTNER_MODEL_API_KEY_SECONDARY',
-            'PARTNER_MODEL_API_KEY_TERTIARY',
-            'PARTNER_TELEGRAM_BOT_TOKEN',
-            'PARTNER_TELEGRAM_API_ID',
-            'PARTNER_TELEGRAM_API_HASH',
-            'PARTNER_TELEGRAM_SESSION',
-            'PARTNER_TELEGRAM_SESSION_FILE'
-          )
-          foreach ($name in $secretNames) {
-            $value = [Environment]::GetEnvironmentVariable($name)
-            if ($value) { $problems += "environment carries $name" }
-          }
-          foreach ($path in @('data/secrets', 'data/secrets/telegram.session')) {
-            if (Test-Path -LiteralPath $path) { $problems += "secret path present: $path" }
-          }
-          if (Test-Path -LiteralPath '.env') {
-            $example = (Get-Content -Raw -LiteralPath '.env.example') -replace "`r`n", "`n"
-            $actual = (Get-Content -Raw -LiteralPath '.env') -replace "`r`n", "`n"
-            if ($example.Trim() -ne $actual.Trim()) { $problems += '.env differs from .env.example' }
-          } else {
-            $problems += '.env is missing; setup should have written it from the example'
-          }
-          # The checkout step asked for no persisted credentials, so the repository's own
-          # token must not be in the git config that later steps inherit.
-          $extraHeader = git config --local --get-all http.https://github.com/.extraheader
-          if ($LASTEXITCODE -eq 0 -and $extraHeader) {
-            $problems += 'git config holds a persisted GitHub credential'
-          }
-          if ($problems.Count) { $problems | ForEach-Object { Write-Error $_ }; exit 1 }
-          Write-Host 'No production credential, model key, Telegram session or persisted token is reachable from this run.'
+        run: ./.github/scripts/assert-no-credentials.ps1 -RequireEnvFile
 
       - name: Verify
         run: npm run verify
