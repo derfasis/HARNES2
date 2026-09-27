@@ -5,14 +5,21 @@
 # is a machine now. This workflow runs `npm run verify` and nothing else: if CI and a
 # developer ever disagree, the fix is the command, never a second CI-only path.
 #
-# It is deliberately offline. There is no `secrets:` block anywhere in this file, the
-# setup script writes `.env` from `.env.example`, and the step below fails the run if
-# anything that looks like a real credential is present. A verification gate that
-# could read a production key would be a way to leak one into a log.
+# What this run may not touch: production credentials, model calls, Telegram access.
+# Installing dependencies does need the network — setup fetches the pinned Hermes
+# revision, runs `npm ci` and `uv sync` — so this is not an offline runner. What it
+# must never do is carry a key or a session into that, and the steps below are what
+# make that true rather than merely intended.
 name: verify
 
 on:
   pull_request:
+
+# Read-only, and stated at the job rather than trusted from a default. A verification
+# run has no reason to write to the repository, and a narrower token is a smaller thing
+# to have leaked from a log.
+permissions:
+  contents: read
 
 jobs:
   verify:
@@ -25,6 +32,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Without this the token is written into the local git config, and every later
+          # step — including the ones that reach the network — runs with a repository
+          # credential in scope. A read-only verification run has no use for one.
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -36,14 +48,29 @@ jobs:
       - name: Install
         run: npm run setup
 
-      - name: Confirm nothing secret is present
+      - name: Confirm no production credential is reachable
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $problems = @()
-          # A Telegram session or a real key must never be reachable from a verification run.
-          foreach ($secret in @('data/secrets', 'data/secrets/telegram.session')) {
-            if (Test-Path -LiteralPath $secret) { $problems += "secret path present: $secret" }
+          # Every real variable the project's own .env.example names. Anything set in the
+          # environment is a value this run must not be able to see.
+          $secretNames = @(
+            'PARTNER_MODEL_API_KEY',
+            'PARTNER_MODEL_API_KEY_SECONDARY',
+            'PARTNER_MODEL_API_KEY_TERTIARY',
+            'PARTNER_TELEGRAM_BOT_TOKEN',
+            'PARTNER_TELEGRAM_API_ID',
+            'PARTNER_TELEGRAM_API_HASH',
+            'PARTNER_TELEGRAM_SESSION',
+            'PARTNER_TELEGRAM_SESSION_FILE'
+          )
+          foreach ($name in $secretNames) {
+            $value = [Environment]::GetEnvironmentVariable($name)
+            if ($value) { $problems += "environment carries $name" }
+          }
+          foreach ($path in @('data/secrets', 'data/secrets/telegram.session')) {
+            if (Test-Path -LiteralPath $path) { $problems += "secret path present: $path" }
           }
           if (Test-Path -LiteralPath '.env') {
             $example = (Get-Content -Raw -LiteralPath '.env.example') -replace "`r`n", "`n"
@@ -52,12 +79,14 @@ jobs:
           } else {
             $problems += '.env is missing; setup should have written it from the example'
           }
-          foreach ($name in @('PARTNER_MODEL_API_KEY', 'PARTNER_TELEGRAM_SESSION')) {
-            $value = [Environment]::GetEnvironmentVariable($name)
-            if ($value) { $problems += "environment carries $name" }
+          # The checkout step asked for no persisted credentials, so the repository's own
+          # token must not be in the git config that later steps inherit.
+          $extraHeader = git config --local --get-all http.https://github.com/.extraheader
+          if ($LASTEXITCODE -eq 0 -and $extraHeader) {
+            $problems += 'git config holds a persisted GitHub credential'
           }
           if ($problems.Count) { $problems | ForEach-Object { Write-Error $_ }; exit 1 }
-          Write-Host 'No credentials, sessions or real .env are reachable from this run.'
+          Write-Host 'No production credential, model key, Telegram session or persisted token is reachable from this run.'
 
       - name: Verify
         run: npm run verify
