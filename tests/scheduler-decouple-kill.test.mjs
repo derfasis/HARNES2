@@ -16,9 +16,12 @@ import { Scheduler } from '../business/scheduler.mjs';
 import { Store } from '../business/store.mjs';
 import { BusinessService } from '../business/service.mjs';
 import { loadConfig } from '../business/config.mjs';
+import { BrowserSourceReader, browserPolicy, pollBrowserSource, markBrowserSourceBlocked } from '../business/sources/browser-readonly.mjs';
+import { BrowserFetchError } from '../business/sources/browser-fetch.mjs';
+import { browserCheckpoint, sourceAccessReadiness } from '../business/source-ingestion.mjs';
 
 const sourceId = 'browser:example';
-const browserPolicy = (id = sourceId) => ({ sourceId: id, url: 'https://example.com/page',
+const browserSourceConfig = (id = sourceId) => ({ sourceId: id, url: 'https://example.com/page',
   maxLagSeconds: 300, pollEverySeconds: 300, processingBasis: 'Kill-test only', sourceKind: 'live_snapshot' });
 
 // A model that never answers on its own. `release()` is the only way a head pass ends, so a test
@@ -48,7 +51,7 @@ const harness = (t, { readers = [], config } = {}) => {
   const loaded = loadConfig();
   const cfg = config ?? { ...loaded,
     opportunity: { ...loaded.opportunity, automatic: true,
-      browserSources: [browserPolicy()], allowedSourceRefs: [sourceId] },
+      browserSources: [browserSourceConfig()], allowedSourceRefs: [sourceId] },
     runtime: { ...loaded.runtime, enabled: false },
     telegram: { ...loaded.telegram, enabled: false, liveSending: false } };
   const service = new BusinessService(store, cfg);
@@ -279,7 +282,7 @@ test('a running refresh survives an ordinary reconciliation and dies only on the
   const store = new Store(fs.mkdtempSync(path.join(os.tmpdir(), 'harnes2-orphan-'))); t.after(() => store.close());
   const loaded = loadConfig();
   const service = new BusinessService(store, { ...loaded,
-    opportunity: { ...loaded.opportunity, automatic: true, browserSources: [browserPolicy()], allowedSourceRefs: [sourceId] },
+    opportunity: { ...loaded.opportunity, automatic: true, browserSources: [browserSourceConfig()], allowedSourceRefs: [sourceId] },
     runtime: { ...loaded.runtime, enabled: false }, telegram: { ...loaded.telegram, enabled: false, liveSending: false } });
   seedThread(store, 'thread-5');
   store.run("INSERT INTO research_intents(id,partner_id,thread_id,authority_hash,proposal_basis_fingerprint,plan_packet_json,selection_json,refresh_sources_json,status,producer,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -461,6 +464,69 @@ test('a reconciliation that fails while the head waits reports the failure, not 
   assert.equal(scheduler.continuityState.disposition, 'reconciliation_failed',
     'and the operator is told so, rather than being left on the waiting message');
   model.releaseAll();
+});
+
+// A read failure must cost the source its freshness immediately.
+//
+// The checkpoint used to keep its previous `confirmed_at` through a failed read, so the boundary
+// kept answering "current" on the strength of a read that no longer happens — for as long as
+// `maxLagSeconds` allows. These assert both halves: freshness is lost at once, and the source is
+// still readable afterwards, because a phase that silences the source for a DNS hiccup is not a
+// fix, it is a different outage.
+test('a failed read makes the source not current at once, and allows the next attempt', async (t) => {
+  const { service, cfg } = harness(t, { readers: [] });
+  const sourceId = 'browser:example';
+  const ok = () => new BrowserSourceReader(browserPolicy(service, sourceId), { request: async () => ({
+    body: Buffer.from('<p>ok</p>'), statusCode: 200, headers: { 'content-type': 'text/html' },
+  }), lookup: async () => [{ address: '93.184.216.34', family: 4 }] });
+  const dead = () => new BrowserSourceReader(browserPolicy(service, sourceId), { request: async () => {
+    throw new BrowserFetchError('BROWSER_DNS_FAILED');
+  }, lookup: async () => [{ address: '93.184.216.34', family: 4 }] });
+
+  await pollBrowserSource(service, sourceId, ok());
+  assert.equal(browserCheckpoint(service, sourceId).phase, 'current', 'a good read confirms the source');
+  assert.equal(sourceAccessReadiness(service, sourceId).current, true, 'and the source is current');
+
+  await assert.rejects(() => pollBrowserSource(service, sourceId, dead()), (e) => e.code === 'BROWSER_DNS_FAILED');
+  const after = browserCheckpoint(service, sourceId);
+  assert.equal(after.phase, 'retrying', 'a failed read moves the source to retrying');
+  assert.equal(after.confirmed_at, null, 'and the old confirmation time is gone');
+  assert.equal(after.reason, 'BROWSER_DNS_FAILED', 'with the class of the failure, not its message');
+  assert.equal(sourceAccessReadiness(service, sourceId).current, false,
+    'freshness is lost at once, not when maxLagSeconds finally expires');
+  assert.equal(sourceAccessReadiness(service, sourceId).reason, 'SOURCE_TRANSPORT_NOT_CURRENT');
+
+  // And the source is still readable: retrying withholds freshness, it does not retire the source.
+  await pollBrowserSource(service, sourceId, ok());
+  assert.equal(browserCheckpoint(service, sourceId).phase, 'current', 'a later good read recovers it');
+  assert.equal(sourceAccessReadiness(service, sourceId).current, true, 'and the source is current again');
+});
+
+test('blocked is not retrying: a blocked source still refuses to be read', async (t) => {
+  const { service } = harness(t, { readers: [] });
+  const sourceId = 'browser:example';
+  const ok = () => new BrowserSourceReader(browserPolicy(service, sourceId), { request: async () => ({
+    body: Buffer.from('<p>ok</p>'), statusCode: 200, headers: { 'content-type': 'text/html' },
+  }), lookup: async () => [{ address: '93.184.216.34', family: 4 }] });
+  await pollBrowserSource(service, sourceId, ok());
+  await service.exclusive(() => service.store.transaction(() => markBrowserSourceBlocked(service, sourceId, 'BROWSER_POLICY_INVALID')));
+  assert.equal(browserCheckpoint(service, sourceId).phase, 'blocked');
+  await assert.rejects(() => pollBrowserSource(service, sourceId, ok()),
+    (e) => e.code === 'BROWSER_SOURCE_BLOCKED', 'blocked forbids the next attempt, retrying does not');
+  assert.equal(sourceAccessReadiness(service, sourceId).current, false);
+});
+
+test('a free-form failure never becomes the stored reason', async (t) => {
+  const { service } = harness(t, { readers: [] });
+  const sourceId = 'browser:example';
+  const leaky = () => new BrowserSourceReader(browserPolicy(service, sourceId), { request: async () => {
+    throw Object.assign(new Error('connect ECONNREFUSED 93.184.216.34:443 sk-live-abc'), { code: 'lowercase and spaces' });
+  }, lookup: async () => [{ address: '93.184.216.34', family: 4 }] });
+  await assert.rejects(() => pollBrowserSource(service, sourceId, leaky()));
+  const stored = JSON.stringify(browserCheckpoint(service, sourceId));
+  assert.match(stored, /BROWSER_READ_FAILED/, 'an unrecognised failure becomes one declared class');
+  for (const token of ['93.184', 'sk-live', 'ECONNREFUSED', 'connect '])
+    assert.ok(!stored.includes(token), `nothing of the provider error may survive: ${token}`);
 });
 
 // The boundary the split must not cross.

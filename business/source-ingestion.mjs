@@ -34,7 +34,15 @@ export function writeBrowserCheckpoint(service, sourceId, state) {
     && Object.keys(state).length === keys.length && Object.keys(state).every((key) => keys.includes(key))
     && state.source_id === sourceId
     && typeof state.policy_hash === 'string' && /^[a-f0-9]{64}$/.test(state.policy_hash)
-    && ['current', 'blocked'].includes(state.phase)
+    // `retrying` is what a read failure leaves behind, and it is the reason the phase exists at
+    // all. Without it a failed read left the checkpoint `current` with its previous `confirmed_at`,
+    // and the boundary kept treating that timestamp as proof of freshness for the rest of
+    // `maxLagSeconds` — up to an hour of a source the partner could no longer read still
+    // answering "current". `blocked` alone could not fix that: it also forbids the next attempt,
+    // and there is no browser recovery path, so one DNS hiccup would silence the source for good.
+    // `retrying` withholds freshness immediately while leaving the next attempt allowed, which is
+    // what the Telegram transport does with `catching_up`.
+    && ['current', 'retrying', 'blocked'].includes(state.phase)
     && (state.phase === 'current'
       ? state.reason === null && typeof state.confirmed_at === 'string' && Number.isFinite(Date.parse(state.confirmed_at))
       : state.confirmed_at === null && typeof state.reason === 'string' && state.reason.length > 0 && state.reason.length <= 100),
@@ -92,7 +100,7 @@ export function validateBrowserCheckpoint(state, sourceId) {
     && Object.keys(state).length === keys.length && Object.keys(state).every((key) => keys.includes(key))
     && state.source_id === sourceId
     && typeof state.policy_hash === 'string' && /^[a-f0-9]{64}$/.test(state.policy_hash)
-    && ['current', 'blocked'].includes(state.phase)
+    && ['current', 'retrying', 'blocked'].includes(state.phase)
     && (state.phase === 'current'
       ? state.reason === null && typeof state.confirmed_at === 'string' && Number.isFinite(Date.parse(state.confirmed_at))
       : state.confirmed_at === null && typeof state.reason === 'string' && state.reason.length > 0 && state.reason.length <= 100),

@@ -107,8 +107,29 @@ export async function pollBrowserSource(service, sourceId, transport) {
   if (existing && existing.policy_hash !== browserPolicyHash(policy))
     ensure(false, 'The browser policy changed since the source was last confirmed', 409, 'BROWSER_POLICY_CHANGED_SINCE_CONFIRMATION');
   if (existing?.phase === 'blocked') ensure(false, 'The browser source is blocked', 409, 'BROWSER_SOURCE_BLOCKED');
+  // `retrying` is deliberately not refused here. It is where a read failure puts a source, and
+  // the whole point of that phase is that the next attempt is still allowed — it withholds
+  // freshness, it does not retire the source.
 
-  const page = await transport.readPage();
+  let page;
+  try {
+    page = await transport.readPage();
+  } catch (error) {
+    // The checkpoint loses its freshness the moment a read fails, and it loses it in its own
+    // transaction, before the error travels on. Leaving the previous `confirmed_at` in place
+    // would let the boundary keep answering "current" on the strength of a read that no longer
+    // happens, for as long as `maxLagSeconds` allows — up to an hour of a source the partner
+    // cannot read still reporting itself as evidence.
+    //
+    // Only the class of failure is stored. A network or provider message can carry a host, an
+    // address or a credential, and this is durable storage an operator will read.
+    const raw = String(error?.code ?? '');
+    const code = /^[A-Z][A-Z0-9_]{1,63}$/.test(raw) ? raw : 'BROWSER_READ_FAILED';
+    try { await service.exclusive(() => service.store.transaction(() => writeBrowserCheckpoint(service, sourceId,
+      { source_id: sourceId, policy_hash: browserPolicyHash(policy), phase: 'retrying', confirmed_at: null, reason: code }))); }
+    catch { /* The read already failed; a failure to record it must not replace the real cause. */ }
+    throw error;
+  }
 
   const result = await service.exclusive(() => service.store.transaction(() => {
     const envelope = envelopeFor(service, policy, page);
