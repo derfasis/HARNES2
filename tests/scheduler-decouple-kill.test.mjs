@@ -26,8 +26,15 @@ import { createHash } from 'node:crypto';
 const digestOf = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
 const sourceId = 'browser:example';
+// `pollEverySeconds + tickSeconds <= maxLagSeconds` is enforced at load, and a source whose
+// reading interval does not fit inside its own freshness budget is refused there. An earlier
+// version of this fixture used 300/300 against a 20 s tick, which is invalid by that rule — and
+// the failure it causes is not a clean one: `validateBrowserSources` is the first statement of
+// the freshness boundary, so every `sourceAccessReadiness` call in this file threw before
+// reaching the assertion, and the tests failed for a reason that had nothing to do with what
+// they were checking. 300 inside 900 leaves room, and matches the sibling browser fixture.
 const browserSourceConfig = (id = sourceId) => ({ sourceId: id, url: 'https://example.com/page',
-  maxLagSeconds: 300, pollEverySeconds: 300, processingBasis: 'Kill-test only', sourceKind: 'live_snapshot' });
+  maxLagSeconds: 900, pollEverySeconds: 300, processingBasis: 'Kill-test only', sourceKind: 'live_snapshot' });
 
 // A model that never answers on its own. `release()` is the only way a head pass ends, so a test
 // can hold the partner mid-thought for as long as the scenario needs and observe what the eyes
@@ -54,12 +61,29 @@ const harness = (t, { readers = [], config } = {}) => {
   const store = new Store(directory);
   t.after(() => { store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
   const loaded = loadConfig();
+  // Continuity and an active offer are ON, and the runtime reports itself ready. Without them
+  // every path into `runtime.decide` is closed before it is reached — continuity returns
+  // `disabled`, and the opportunity pipeline stops at `waiting_offer` — so a head pass would
+  // never call the model, `model.calls` would be 0 whatever the scheduler did, and every
+  // assertion of the shape "the head did not reason" would pass without the head ever being
+  // allowed to. A test about whether reasoning is withheld is worthless unless reasoning is
+  // reachable in the first place.
   const cfg = config ?? { ...loaded,
-    opportunity: { ...loaded.opportunity, automatic: true,
+    opportunity: { ...loaded.opportunity, automatic: true, activeOffer: { id: 'offer-1', title: 'Test offer' },
       browserSources: [browserSourceConfig()], allowedSourceRefs: [sourceId] },
-    runtime: { ...loaded.runtime, enabled: false },
+    continuity: { ...loaded.continuity, enabled: true, modelEnabled: true },
+    executive: { ...loaded.executive, enabled: true, modelEnabled: true, maxModelRunsPerDay: 1000 },
+    runtime: { ...loaded.runtime, enabled: false, model: 'test-model', baseUrl: 'https://model.invalid',
+      inputUsdPerMillion: 1, outputUsdPerMillion: 1 },
     telegram: { ...loaded.telegram, enabled: false, liveSending: false } };
   const service = new BusinessService(store, cfg);
+  // Readiness checks the key and the Python environment. A synthetic value that is never
+  // transmitted stands in for the key, exactly as the sibling continuity suite does; the
+  // environment is checked on disk and the worktree is expected to have been set up.
+  const previousKey = process.env.PARTNER_MODEL_API_KEY;
+  process.env.PARTNER_MODEL_API_KEY = 'synthetic-never-transmitted';
+  t.after(() => { if (previousKey === undefined) delete process.env.PARTNER_MODEL_API_KEY;
+    else process.env.PARTNER_MODEL_API_KEY = previousKey; });
   const { runtime, state } = heldModel();
   const scheduler = new Scheduler(service, runtime, { readiness: () => ({ enabled: false, live_sending: false }) }, readers);
   t.after(() => state.releaseAll());
@@ -105,8 +129,14 @@ test('a reasoning pass in flight does not stop the source loop', async (t) => {
 
   // Now the source loop runs. Before the split this could not happen: `tick()` was already
   // inside the reasoning, so the eyes were behind the head in the same call stack.
+  //
+  // The source is aged first so it is genuinely due. `establishHealth` already performed the one
+  // read the interval permits, so without this the pass below would correctly read nothing and
+  // the assertion would be satisfied by the setup rather than by the fix.
+  scheduler.browserPolls.set(sourceId, { consideredAt: Date.now() - 400_000, readAt: Date.now() - 400_000 });
+  const before = reads.length;
   await scheduler.sourceTick();
-  assert.equal(reads.length, 1, 'the page was read while the head was still thinking');
+  assert.equal(reads.length, before + 1, 'the page was read while the head was still thinking');
   assert.equal(scheduler.lastReason, 'sources_current',
     'and the transport truth is what the source loop reports');
 
@@ -119,11 +149,16 @@ test('two source passes run while one head pass is still thinking', async (t) =>
   await establishHealth();
   const thinking = scheduler.reasonTick();
   for (let i = 0; i < 20 && model.pending === 0; i += 1) await new Promise((r) => setTimeout(r, 5));
+  // The source is aged so the first of these really is due, then the second is not. Two passes,
+  // one fetch: the interval decides the second one, and the fact that the second pass ran at all
+  // is what separates "the loop kept working" from "the loop stopped and nothing noticed".
+  scheduler.browserPolls.set(sourceId, { consideredAt: Date.now() - 400_000, readAt: Date.now() - 400_000 });
+  const before = reads.length;
   await scheduler.sourceTick();
+  assert.equal(reads.length, before + 1, 'the first pass reads the aged source');
+  const afterFirst = reads.length;
   await scheduler.sourceTick();
-  // Cadence is per source: the second pass inside the interval must not fetch again. What is
-  // asserted is that it ran and decided not to, which is a different thing from not running.
-  assert.ok(reads.length <= 1, 'the interval still governs the fetch');
+  assert.equal(reads.length, afterFirst, 'and the second, inside the interval, reads nothing');
   assert.equal(scheduler.busy, false, 'the source loop finished rather than queueing behind the head');
   model.releaseAll(); await thinking;
 });
@@ -148,21 +183,32 @@ test('a source is not left stale by a long head pass', async (t) => {
   model.releaseAll(); await thinking;
 });
 
-// 3. A cancelled or revoked turn mid-thought is not accepted.
+// 3. A cancelled or revoked turn mid-thought is not applied.
+//
+// The subject is a real turn that a real pass created, not an empty table: the earlier version of
+// this test updated `partner_turns` when no turn existed, so the assertions held because nothing
+// had ever been proposed — which is also what they would say if the completion path ignored
+// cancellation entirely.
 test('an answer that arrives after its work was cancelled is not applied', async (t) => {
-  const { scheduler, service, model, establishHealth } = harness(t, { readers: [countingReader([])] });
+  const { scheduler, store, model, establishHealth } = harness(t, { readers: [countingReader([])] });
   await establishHealth();
   const thinking = scheduler.reasonTick();
-  for (let i = 0; i < 20 && model.pending === 0; i += 1) await new Promise((r) => setTimeout(r, 5));
-  // While the worker is away the operator cancels whatever it was reasoning about. The
-  // completion path re-reads the turn and must find it is no longer running.
-  service.store.run("UPDATE partner_turns SET status='cancelled'");
+  for (let i = 0; i < 40 && model.pending === 0; i += 1) await new Promise((r) => setTimeout(r, 5));
+  assert.equal(model.pending, 1, 'the model really is mid-call, so there is something to cancel');
+
+  // While the worker is away the operator cancels what it was reasoning about. The completion path
+  // re-reads the turn and must find it is no longer running, so its answer cannot be applied.
+  const cancelled = store.all("SELECT id FROM partner_turns WHERE status='running'");
+  assert.ok(cancelled.length > 0, 'the head created a running turn to cancel');
+  store.run("UPDATE partner_turns SET status='cancelled' WHERE id=?", cancelled[0].id);
   model.releaseAll(); await thinking;
-  // Nothing may be proposed from a turn that was cancelled underneath the model.
-  const proposals = service.store.all("SELECT id FROM partner_turns WHERE status='proposed'");
-  assert.equal(proposals.length, 0, 'a cancelled turn produced no proposal');
-  const runs = service.store.all("SELECT status FROM runs WHERE status='running'");
-  assert.equal(runs.length, 0, 'and no run is left running after the head finished');
+
+  assert.equal(store.get("SELECT COUNT(*) n FROM partner_turns WHERE status='proposed'").n, 0,
+    'a cancelled turn produced no proposal');
+  assert.equal(store.get("SELECT COUNT(*) n FROM runs WHERE status='running'").n, 0,
+    'and no run is left running after the head finished');
+  assert.equal(store.get("SELECT COUNT(*) n FROM partner_turns WHERE status='running'").n, 0,
+    'and the cancelled turn is not left claimed by a worker that has already gone');
 });
 
 // 4. Shutdown does not close the store from under a worker.
@@ -181,7 +227,16 @@ test('shutdown drains a head pass before the store is closed', async (t) => {
   model.releaseAll();
   await thinking; await drained();
   assert.equal(scheduler.reasonBusy, false, 'and it drains to false before anything is closed');
-  assert.doesNotThrow(() => store.get('SELECT 1 AS n'), 'the store is still usable after the drain');
+  // The store is closed here, the way `server.mjs` does it, and the head's own writes must have
+  // already landed. An earlier version of this test merely read from a store nobody had closed,
+  // which said nothing about ordering — the guarantee is that the close waits, so the close is
+  // performed inside the test and the head must be finished before it.
+  const receipts = store.get("SELECT COUNT(*) n FROM runs WHERE status IN ('completed','failed')").n;
+  assert.ok(receipts > 0, 'the head wrote its result before the store was closed');
+  store.close();
+  assert.throws(() => store.get('SELECT 1 AS n'),
+    'and closing afterwards does not leave a half-written receipt behind');
+  t.after(() => { try { store.close(); } catch { /* already closed by the test */ } });
 });
 
 test('stop() clears both timers, not only the source one', async (t) => {
@@ -298,14 +353,19 @@ test('a running refresh survives an ordinary reconciliation and dies only on the
 
   // Standing for a reconciliation that runs while a pass is still awaiting the network. This is
   // the call that must NOT treat a live attempt as an orphan.
-  await service.exclusive(() => service.store.transaction(() => service.executive.reconcile()));
+  //
+  // `reconcile()` opens its own transaction, so it goes through `exclusive` alone — wrapping it
+  // in `store.transaction` issues a nested `BEGIN IMMEDIATE` and dies before the first assertion,
+  // which is how this test read the first time. The scheduler calls it exactly this way.
+  await service.exclusive(() => service.executive.reconcile());
   assert.equal(statusOf(), 'running', 'a plain reconcile leaves a running refresh alone');
 
   // And a second one, for the same reason: the absence of the sweep is not a one-off.
-  await service.exclusive(() => service.store.transaction(() => service.executive.reconcile()));
+  await service.exclusive(() => service.executive.reconcile());
   assert.equal(statusOf(), 'running', 'and still leaves it alone on a later pass');
 
-  // Now the pass actually begins, which is the moment the claim becomes true.
+  // Now the pass actually begins, which is the moment the claim becomes true. The scheduler wraps
+  // the sweep in a transaction of its own, and the sweep does not open one of its own.
   await service.exclusive(() => service.store.transaction(() => service.executive.sweepOrphanedRefreshes()));
   assert.equal(statusOf(), 'interrupted_unknown', 'the sweep retires what the pass boundary retires');
 });
@@ -485,7 +545,7 @@ test('a failed read makes the source not current at once, and allows the next at
     body: Buffer.from('<p>ok</p>'), statusCode: 200, headers: { 'content-type': 'text/html' },
   }), lookup: async () => [{ address: '93.184.216.34', family: 4 }] });
   const dead = () => new BrowserSourceReader(browserPolicy(service, sourceId), { request: async () => {
-    throw new BrowserFetchError('BROWSER_DNS_FAILED');
+    throw Object.assign(new Error('dns'), { code: 'ENOTFOUND' });
   }, lookup: async () => [{ address: '93.184.216.34', family: 4 }] });
 
   await pollBrowserSource(service, sourceId, ok());
@@ -542,9 +602,9 @@ test('a free-form failure never becomes the stored reason', async (t) => {
 test('a source whose reader is failing is not current, whatever the checkpoint says', async (t) => {
   const { service } = harness(t, { readers: [] });
   const sourceId = 'browser:example';
-  const config = { service, request: async () => ({ body: Buffer.from('<p>ok</p>'), statusCode: 200,
+  const opts = { service, request: async () => ({ body: Buffer.from('<p>ok</p>'), statusCode: 200,
     headers: { 'content-type': 'text/html' } }), lookup: async () => [{ address: '93.184.216.34', family: 4 }] };
-  const reader = new BrowserSourceReader(browserPolicy(service, sourceId), config);
+  const reader = new BrowserSourceReader(browserPolicy(service, sourceId), opts);
   await pollBrowserSource(service, sourceId, reader);
   assert.equal(sourceAccessReadiness(service, sourceId).current, true, 'a good read is current');
 
@@ -554,14 +614,13 @@ test('a source whose reader is failing is not current, whatever the checkpoint s
   // latch was never exercised and the test passed for the wrong reason.
   reader.markCurrent();
   const dead = new BrowserSourceReader(browserPolicy(service, sourceId), { service,
-    request: async () => { throw new BrowserFetchError('BROWSER_DNS_FAILED'); },
+    request: async () => { throw Object.assign(new Error('dns'), { code: 'ENOTFOUND' }); },
     lookup: async () => [{ address: '93.184.216.34', family: 4 }] });
   await assert.rejects(() => pollBrowserSource(service, sourceId, dead), (e) => e.code === 'BROWSER_DNS_FAILED');
   assert.equal(service.sourceTransportHealth.get(sourceId)(), false,
     'the failing reader is the one that now answers for the source');
   assert.equal(sourceAccessReadiness(service, sourceId).current, false,
     'and the source is refused even though its checkpoint write succeeded');
-  void reader;
 });
 
 // The case a socket-level latch cannot see: the page was read successfully and the intake refused
@@ -588,7 +647,6 @@ test('a read the intake refused does not leave the source current', async (t) =>
   assert.equal(sourceAccessReadiness(service, sourceId).current, false,
     'and the source is refused anyway, because the reader knows the read was never accepted');
   assert.equal(sourceAccessReadiness(service, sourceId).reason, 'SOURCE_TRANSPORT_DIRTY');
-  void store;
 });
 
 test('a reader that has never succeeded does not vouch for a source a previous process confirmed', async (t) => {
@@ -601,7 +659,7 @@ test('a reader that has never succeeded does not vouch for a source a previous p
       phase: 'current', confirmed_at: new Date().toISOString(), reason: null }));
   assert.equal(browserCheckpoint(service, sourceId).phase, 'current', 'the checkpoint is current and fresh');
   new BrowserSourceReader(browserPolicy(service, sourceId), { service,
-    request: async () => { throw new BrowserFetchError('BROWSER_DNS_FAILED'); },
+    request: async () => { throw Object.assign(new Error('dns'), { code: 'ENOTFOUND' }); },
     lookup: async () => [{ address: '93.184.216.34', family: 4 }] });
   // Unproven is not readable: a reader that has not once succeeded gets to say nothing about the
   // source, however recent the last confirmation is.
@@ -642,7 +700,7 @@ test('a failure that could not be written leaves the source not current', async 
   // failure record that cannot land. Reusing the reader also keeps the latch honest, since a new
   // reader would start unproven and the assertion below would pass without the write failing.
   const dead = new BrowserSourceReader(browserPolicy(service, sourceId), { service,
-    request: async () => { throw new BrowserFetchError('BROWSER_DNS_FAILED'); },
+    request: async () => { throw Object.assign(new Error('dns'), { code: 'ENOTFOUND' }); },
     lookup: async () => [{ address: '93.184.216.34', family: 4 }] });
   await assert.rejects(() => pollBrowserSource(service, sourceId, dead),
     (e) => e.code === 'BROWSER_CHECKPOINT_UPDATE_FAILED',
@@ -660,7 +718,6 @@ test('a failure that could not be written leaves the source not current', async 
   await pollBrowserSource(service, sourceId, reader);
   assert.equal(sourceAccessReadiness(service, sourceId).current, true,
     'a later good read restores the source without any operator action');
-  void store;
 });
 
 // The boundary the split must not cross.
