@@ -331,6 +331,60 @@ test('a head pass is withheld while reconciliation is failing', async (t) => {
   service.continuity.reconcile = original;
 });
 
+// A source's failure is a fact about the source, not about the last pass.
+//
+// A pass that read nothing has learned nothing, and a pass that read a different source has
+// learned nothing about this one. The one-bit version of this — "did anything fail on this
+// tick" — reported a broken transport as healthy the moment the interval carried it past a
+// tick, which is the only window in which nobody was looking.
+test('a failure survives a pass that does not retry it', async (t) => {
+  const { scheduler, model, establishHealth } = harness(t, { readers: [] });
+  await establishHealth();
+  scheduler.sourceReadFailures.set('browser:example', 'BROWSER_DNS_FAILED');
+  // A pass in which this source is not due changes nothing about it. The whole gap between two
+  // attempts can be minutes, and during it the partner is still broken.
+  await scheduler.sourceTick();
+  assert.equal(scheduler.sourceReadReason, 'source_read_failed:BROWSER_DNS_FAILED',
+    'a pass that did not retry the source still reports it broken');
+  await scheduler.sourceTick();
+  assert.equal(scheduler.sourceReadReason, 'source_read_failed:BROWSER_DNS_FAILED',
+    'and again on the next one');
+  model.releaseAll();
+});
+
+test('a real success clears only that source', async (t) => {
+  const { scheduler, model, establishHealth } = harness(t, { readers: [countingReader([])] });
+  await establishHealth();
+  scheduler.sourceReadFailures.set('browser:example', 'BROWSER_DNS_FAILED');
+  scheduler.sourceReadFailures.set('browser:other', 'BROWSER_TIMEOUT');
+  // The reader succeeds, so its own entry goes and nothing else does. One healthy source was
+  // never evidence about another.
+  await scheduler.sourceTick();
+  assert.equal(scheduler.sourceReadFailures.has('browser:example'), false, 'the read source recovered');
+  assert.equal(scheduler.sourceReadFailures.has('browser:other'), true, 'the unread source is still broken');
+  assert.equal(scheduler.sourceReadReason, 'source_read_failed:BROWSER_TIMEOUT',
+    'and the reported failure is the one that remains');
+  model.releaseAll();
+});
+
+test('the reported failure is deterministic when several are unresolved', async (t) => {
+  const { scheduler, model, establishHealth } = harness(t, { readers: [] });
+  await establishHealth();
+  // Inserted out of order on purpose: the same set of failures must read the same way however it
+  // was built, or an operator sees a reason that changes for no reason between two passes.
+  scheduler.sourceReadFailures.set('browser:z', 'BROWSER_TIMEOUT');
+  scheduler.sourceReadFailures.set('browser:a', 'BROWSER_DNS_FAILED');
+  await scheduler.sourceTick();
+  const first = scheduler.sourceReadReason;
+  assert.equal(first, 'source_read_failed:BROWSER_DNS_FAILED', 'the lowest code is the reported one');
+  scheduler.sourceReadFailures.clear();
+  scheduler.sourceReadFailures.set('browser:a', 'BROWSER_DNS_FAILED');
+  scheduler.sourceReadFailures.set('browser:z', 'BROWSER_TIMEOUT');
+  await scheduler.sourceTick();
+  assert.equal(scheduler.sourceReadReason, first, 'and it does not depend on insertion order');
+  model.releaseAll();
+});
+
 // The boundary the split must not cross.
 test('the two loops are independent locks', async (t) => {
   const { scheduler, model, establishHealth } = harness(t, { readers: [] });

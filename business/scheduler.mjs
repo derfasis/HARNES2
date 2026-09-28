@@ -11,7 +11,7 @@ import { processContinuity } from './continuity-reasoning.mjs';
 import { processExecutive } from './executive-reasoning.mjs';
 
 export class Scheduler {
-  constructor(service, runtime, telegram, sourceReaders = []) { this.sourceReaders = sourceReaders; this.service = service; this.runtime = runtime; this.telegram = telegram; this.busy = false; this.reasonBusy = false; this.stopped = false; this.lastReason = null; this.sourceReadReason = null; this.activeRun = null; this.readersAbsentReported = false; this.sourceReadersState = null; this.browserPolls = new Map(); this.continuityHealthy = false; this.executiveHealthy = false; }
+  constructor(service, runtime, telegram, sourceReaders = []) { this.sourceReaders = sourceReaders; this.service = service; this.runtime = runtime; this.telegram = telegram; this.busy = false; this.reasonBusy = false; this.stopped = false; this.lastReason = null; this.sourceReadReason = null; this.activeRun = null; this.readersAbsentReported = false; this.sourceReadersState = null; this.browserPolls = new Map(); this.sourceReadFailures = new Map(); this.continuityHealthy = false; this.executiveHealthy = false; }
   // Two loops, one clock, on purpose.
   //
   // The source loop is the partner's eyes: it polls readers, advances watch cursors and retires
@@ -140,7 +140,10 @@ export class Scheduler {
         } else if (!readersAbsent) this.readersAbsentReported = false;
         // Empty by default. Only a trusted bootstrap can supply narrowed read-only
         // transport capabilities. Reuse this tick, never the private-chat adapter.
-        let sourceReadFailed=false, sourceReadFailure=null;
+        // Whether a poll failed is now recorded per source in `sourceReadFailures` rather than
+        // as one flag for the pass. The flag was the bug: a pass that read nothing reported the
+        // partner healthy because nothing had been tried, not because anything had worked.
+        let sourceReadFailure=null;
         // Telegram is polled exactly as before, every tick, all of it. Browser sources are chosen
         // by their own interval and capped per tick, because a page that has not changed in five
         // minutes does not need to be fetched every twenty seconds — and a page that is down must
@@ -169,7 +172,7 @@ export class Scheduler {
             try { researchAttempts = await this.service.exclusive(() => this.service.store.transaction(() => this.service.executive.beginPoll(sourceId))); }
             catch { this.executiveHealthy = false; executiveHealthy = false; this.executiveState = { disposition: 'receipt_failed' }; }
           }
-          try { pollResult = await pollSource(this.service, sourceId, transport); }
+          try { pollResult = await pollSource(this.service, sourceId, transport); this.sourceReadFailures.delete(sourceId); }
           catch (error) {
             pollFailed = true;
             // A poll that fails silently is a source that can end up blocked with no evidence
@@ -177,7 +180,6 @@ export class Scheduler {
             // evidence. Record the class of failure, the cursor it read at and the checkpoint's
             // own state, and nothing else: no message
             // text, no provider payload, no stack, no credentials.
-            sourceReadFailed=true;
             // Reading the checkpoint can itself fail on a corrupt row, and telemetry that throws
             // while reporting a failure would abort the very tick it is reporting about. The
             // checkpoint is the one for the transport that failed: a browser source has no pts at
@@ -188,6 +190,12 @@ export class Scheduler {
             // Only something shaped like a code is recorded. Anything else could be a provider
             // message carrying payload, and this lands in durable storage.
             const code=/^[A-Za-z0-9_.:-]{1,80}$/.test(raw) ? raw : 'UNCLASSIFIED';
+            // Recorded per source, and only on a real attempt. A source that was not due this
+            // pass is left exactly as it was: its failure is still the truth about it until a
+            // pass that actually reads it says otherwise, and the interval between two attempts
+            // can be minutes. Clearing on a tick where nothing was read is how a transport stops
+            // being reported while still being broken.
+            this.sourceReadFailures.set(sourceId, code);
             sourceReadFailure={ source_id:sourceId, code,
               checkpoint_pts:state?.pts ?? null, phase:state?.phase ?? null, reason:state?.reason ?? null };
             try { await this.service.exclusive(() => this.service.store.transaction(
@@ -224,7 +232,19 @@ export class Scheduler {
         // whatever the head last concluded before an operator could read it. What the source loop
         // owns is the transport truth, so that is what it writes: a failed poll, or the word for
         // "the sources are current" which is what an idle partner is.
-        this.sourceReadReason = sourceReadFailed ? `source_read_failed:${sourceReadFailure?.code ?? 'UNCLASSIFIED'}` : null;
+        // Derived from the unresolved set, not from whether this pass happened to fail. The set
+        // only changes when a source is actually read: a failure stays until a real attempt
+        // succeeds, a success clears only its own source, and a pass in which nothing was due
+        // leaves every known failure standing. One failing source is never hidden by another's
+        // success.
+        //
+        // The code is the lowest sorted one, so the same state always reads the same way. Which
+        // source failed is in status().source_readers and in the durable `source.*.poll.failed`
+        // event; this slot answers only "are the sources current", and a deterministic answer to
+        // that is worth more than a precise one nobody can act on.
+        this.sourceReadReason = this.sourceReadFailures.size
+          ? `source_read_failed:${[...this.sourceReadFailures.values()].sort()[0]}`
+          : null;
         this.lastReason = this.sourceReadReason ?? this.lastReason ?? 'sources_current';
         return;
       }
