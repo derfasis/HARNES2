@@ -604,12 +604,8 @@ test('a reconciliation that fails while the head waits reports the failure, not 
 test('a failed read makes the source not current at once, and allows the next attempt', async (t) => {
   const { service, cfg } = await harness(t, { readers: [] });
   const sourceId = 'browser:example';
-  const ok = () => new BrowserSourceReader(browserPolicy(service, sourceId), { request: async () => ({
-    body: Buffer.from('<p>ok</p>'), statusCode: 200, headers: { 'content-type': 'text/html' },
-  }), lookup: async () => [{ address: '93.184.216.34', family: 4 }] });
-  const dead = () => new BrowserSourceReader(browserPolicy(service, sourceId), { request: async () => {
-    throw Object.assign(new Error('dns'), { code: 'ENOTFOUND' });
-  }, lookup: async () => [{ address: '93.184.216.34', family: 4 }] });
+  const ok = () => workingReader(service, sourceId);
+  const dead = () => deadReader(service, sourceId);
 
   await pollBrowserSource(service, sourceId, ok());
   assert.equal(browserCheckpoint(service, sourceId).phase, 'current', 'a good read confirms the source');
@@ -633,9 +629,7 @@ test('a failed read makes the source not current at once, and allows the next at
 test('blocked is not retrying: a blocked source still refuses to be read', async (t) => {
   const { service } = await harness(t, { readers: [] });
   const sourceId = 'browser:example';
-  const ok = () => new BrowserSourceReader(browserPolicy(service, sourceId), { request: async () => ({
-    body: Buffer.from('<p>ok</p>'), statusCode: 200, headers: { 'content-type': 'text/html' },
-  }), lookup: async () => [{ address: '93.184.216.34', family: 4 }] });
+  const ok = () => workingReader(service, sourceId);
   await pollBrowserSource(service, sourceId, ok());
   await service.exclusive(() => service.store.transaction(() => markBrowserSourceBlocked(service, sourceId, 'BROWSER_POLICY_INVALID')));
   assert.equal(browserCheckpoint(service, sourceId).phase, 'blocked');
