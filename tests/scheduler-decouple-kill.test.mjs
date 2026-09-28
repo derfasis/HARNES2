@@ -385,6 +385,45 @@ test('the reported failure is deterministic when several are unresolved', async 
   model.releaseAll();
 });
 
+// Cold start is not a failure.
+//
+// The health flags used to start `false`, which is a claim: "a reconciliation was attempted and
+// it did not succeed". A partner that had not run a pass yet had made no such claim, so the
+// status told the operator it was broken when the only true thing was that it had not looked.
+// Both states must withhold reasoning — a model may not run on a transport nobody has checked —
+// and only the word differs. A field that cannot tell those apart teaches operators to ignore it.
+test('a head pass before any source pass waits, and says it is waiting', async (t) => {
+  const { scheduler, model } = harness(t, { readers: [] });
+  assert.equal(scheduler.continuityHealthy, null, 'health starts unestablished, not failed');
+  await scheduler.reasonTick();
+  assert.equal(model.calls, 0, 'no inference on a transport nobody has checked');
+  assert.equal(scheduler.continuityState.disposition, 'waiting_reconciliation',
+    'and the operator is told it is waiting, not that it is broken');
+});
+
+test('a reconciliation that actually fails withholds reasoning and says it failed', async (t) => {
+  const { scheduler, service, model } = harness(t, { readers: [] });
+  service.continuity.reconcile = () => { throw new Error('db down'); };
+  await scheduler.sourceTick();
+  assert.equal(scheduler.continuityHealthy, false, 'a real failure is established as a failure');
+  await scheduler.reasonTick();
+  assert.equal(model.calls, 0, 'and reasoning is still withheld');
+  assert.equal(scheduler.continuityState.disposition, 'reconciliation_failed',
+    'the two states differ in what they claim, not in what they permit');
+});
+
+test('a successful pass permits reasoning and clears the waiting state', async (t) => {
+  const { scheduler, model } = harness(t, { readers: [] });
+  await scheduler.reasonTick();
+  assert.equal(scheduler.continuityState.disposition, 'waiting_reconciliation');
+  await scheduler.sourceTick();
+  assert.equal(scheduler.continuityHealthy, true);
+  const thinking = scheduler.reasonTick();
+  model.releaseAll(); await thinking;
+  assert.notEqual(scheduler.continuityState.disposition, 'waiting_reconciliation',
+    'once a pass has established health, the waiting state is gone');
+});
+
 // The boundary the split must not cross.
 test('the two loops are independent locks', async (t) => {
   const { scheduler, model, establishHealth } = harness(t, { readers: [] });

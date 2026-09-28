@@ -11,7 +11,13 @@ import { processContinuity } from './continuity-reasoning.mjs';
 import { processExecutive } from './executive-reasoning.mjs';
 
 export class Scheduler {
-  constructor(service, runtime, telegram, sourceReaders = []) { this.sourceReaders = sourceReaders; this.service = service; this.runtime = runtime; this.telegram = telegram; this.busy = false; this.reasonBusy = false; this.stopped = false; this.lastReason = null; this.sourceReadReason = null; this.activeRun = null; this.readersAbsentReported = false; this.sourceReadersState = null; this.browserPolls = new Map(); this.sourceReadFailures = new Map(); this.continuityHealthy = false; this.executiveHealthy = false; }
+  constructor(service, runtime, telegram, sourceReaders = []) { this.sourceReaders = sourceReaders; this.service = service; this.runtime = runtime; this.telegram = telegram; this.busy = false; this.reasonBusy = false; this.stopped = false; this.lastReason = null; this.sourceReadReason = null; this.activeRun = null; this.readersAbsentReported = false; this.sourceReadersState = null; this.browserPolls = new Map(); this.sourceReadFailures = new Map();
+    // Tri-state on purpose. `false` is a claim — "a reconciliation was attempted and it failed" —
+    // and a partner that has not run a pass yet has made no such claim. Reporting `false` at cold
+    // start told the operator the partner was broken when the only true thing was that it had not
+    // looked yet. `null` is that third answer, and reasoning treats it exactly like `false`: not
+    // established is not healthy, and the model still does not run.
+    this.continuityHealthy = null; this.executiveHealthy = null; }
   // Two loops, one clock, on purpose.
   //
   // The source loop is the partner's eyes: it polls readers, advances watch cursors and retires
@@ -334,16 +340,23 @@ export class Scheduler {
       // that is failing withholds derived work — that is the fail-closed direction, and it is the
       // reason this reads a flag instead of calling reconcile() a second time and hoping.
       //
-      // "Never established" is treated as unhealthy, not as healthy. The flags start false so a
-      // reasoning pass that runs before the first source pass does not infer from a reconciliation
-      // that was never attempted. One tick of doing nothing is the cheap side of that choice; the
-      // expensive side would be reasoning on a transport whose health nobody has checked.
+      // "Never established" withholds exactly like "established and failed", because reasoning on
+      // a transport whose health nobody has checked is the expensive side of that choice. What
+      // differs is only what the operator is told: a partner that has not looked yet is waiting,
+      // not broken. One word of telemetry is the whole difference between a cold start and an
+      // incident, and conflating them is how an operator learns to ignore the field.
       if (cfg.opportunity?.automatic !== true) return;
-      if (!this.continuityHealthy) { this.continuityState = { disposition: 'reconciliation_failed' }; return; }
+      if (this.continuityHealthy !== true) {
+        this.continuityState = { disposition: this.continuityHealthy === false ? 'reconciliation_failed' : 'waiting_reconciliation' };
+        return;
+      }
       try { this.continuityState = await processContinuity(this.service, this.runtime); }
       catch { this.continuityState = { disposition: 'reasoning_failed' }; }
       const result = await processSourceOpportunity(this.service, this.runtime);
-      if (cfg.executive?.enabled === true && this.executiveHealthy) {
+      // `=== true` rather than a truthiness test: `null` must mean "not established" here for the
+      // same reason it does for continuity, and a falsy check would keep the two honest by accident
+      // rather than by statement.
+      if (cfg.executive?.enabled === true && this.executiveHealthy === true) {
         try { this.executiveState = await processExecutive(this.service, this.runtime); }
         catch { this.executiveState = { disposition: 'processing_failed' }; }
       }
