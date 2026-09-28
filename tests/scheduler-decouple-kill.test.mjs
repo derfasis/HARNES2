@@ -19,7 +19,8 @@ import { loadConfig } from '../business/config.mjs';
 import { BrowserSourceReader, browserPolicy, pollBrowserSource, markBrowserSourceBlocked } from '../business/sources/browser-readonly.mjs';
 import { BrowserFetchError } from '../business/sources/browser-fetch.mjs';
 import { browserCheckpoint, sourceAccessReadiness, browserPolicyHash } from '../business/source-ingestion.mjs';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 
 // The same key derivation `channel_offsets` is written with, so a row written here is found by the
 // same lookup production uses rather than by a second, slightly different one.
@@ -56,20 +57,68 @@ const heldModel = () => {
   return { runtime, state };
 };
 
-const harness = (t, { readers = [], config } = {}) => {
+// A real OPEN thread with attention, opened through the same command an operator would use. Its
+// basis and its `business_basis` come from the service, so a thread built here is one continuity
+// will actually consider — which is what makes the head pass below reach the model instead of
+// returning empty.
+// A response shaped like the one `http(s).request` produces.
+//
+// It has to be an emitter, not a plain object: `readBounded` listens for `data`, `end`, `error`
+// and `aborted`, so a `{ statusCode, headers, body }` literal passes the status and content-type
+// checks and then fails as `BROWSER_FETCH_FAILED` the moment the body is read. An earlier version
+// of this file used literals, and every browser test in it failed for that reason alone.
+class FakeResponse extends EventEmitter {
+  constructor({ status = 200, headers = {}, body = '' } = {}) {
+    super();
+    this.statusCode = status; this.headers = headers; this.destroyed = false;
+    setImmediate(() => { if (!this.destroyed) { this.emit('data', Buffer.from(body)); this.emit('end'); } });
+  }
+  resume() { this.emit('end'); return this; }
+  destroy() { this.destroyed = true; return this; }
+}
+const okPage = (text = '<p>ok</p>') => new FakeResponse({ headers: { 'content-type': 'text/html' }, body: text });
+// A reader whose page always comes back, built the way production builds one.
+const workingReader = (service, sourceId) => new BrowserSourceReader(browserPolicy(service, sourceId), { service,
+  request: async () => okPage(), lookup: async () => [{ address: '93.184.216.34', family: 4 }] });
+// A reader whose page never arrives, failing the way a resolver fails.
+const deadReader = (service, sourceId) => new BrowserSourceReader(browserPolicy(service, sourceId), { service,
+  request: async () => { throw Object.assign(new Error('resolver said no'), { code: 'ENOTFOUND' }); },
+  lookup: async () => [{ address: '93.184.216.34', family: 4 }] });
+// A reader that reaches the page but yields nothing readable.
+const emptyReader = (service, sourceId) => new BrowserSourceReader(browserPolicy(service, sourceId), { service,
+  request: async () => okPage('   '), lookup: async () => [{ address: '93.184.216.34', family: 4 }] });
+
+const openAttentionThread = async (service, sourceRef, evidence = []) => {
+  // Every field the command validates must be present, `initial_evidence_event_ids` included:
+  // `open` refuses a payload it does not recognise, and it also requires the source to be on the
+  // allowlist, which the harness sets up. The thread comes back with attention, which is what
+  // continuity's `prepare` selects on.
+  const opened = await service.command('continuity.open', { title: 'Kill-test thread',
+    objective: 'Observe the split between reading and reasoning.',
+    success_condition: 'The source loop keeps running while the head thinks.',
+    source_ids: [sourceRef], max_age_seconds: 3600, initial_evidence_event_ids: evidence },
+  `req-${randomUUID()}`);
+  return opened?.thread_id ?? opened?.id ?? null;
+};
+
+const harness = async (t, { readers = [], config } = {}) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harnes2-decouple-'));
   const store = new Store(directory);
   t.after(() => { store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
   const loaded = loadConfig();
-  // Continuity and an active offer are ON, and the runtime reports itself ready. Without them
-  // every path into `runtime.decide` is closed before it is reached — continuity returns
-  // `disabled`, and the opportunity pipeline stops at `waiting_offer` — so a head pass would
-  // never call the model, `model.calls` would be 0 whatever the scheduler did, and every
-  // assertion of the shape "the head did not reason" would pass without the head ever being
-  // allowed to. A test about whether reasoning is withheld is worthless unless reasoning is
+  // Continuity is ON and the runtime reports itself ready. Without them every path into
+  // `runtime.decide` is closed before it is reached — continuity returns `disabled` — so a head
+  // pass would never call the model, `model.calls` would be 0 whatever the scheduler did, and
+  // every assertion of the shape "the head did not reason" would pass without the head ever
+  // being allowed to. A test about whether reasoning is withheld is worthless unless reasoning is
   // reachable in the first place.
+  //
+  // No active offer: an offer that does not satisfy the projection's own schema is refused with
+  // `INVALID_INPUT` before the model is reached, so a placeholder here breaks every test in the
+  // file for a reason that has nothing to do with the loops. Continuity reaches the model on its
+  // own, given a thread with attention.
   const cfg = config ?? { ...loaded,
-    opportunity: { ...loaded.opportunity, automatic: true, activeOffer: { id: 'offer-1', title: 'Test offer' },
+    opportunity: { ...loaded.opportunity, automatic: true,
       browserSources: [browserSourceConfig()], allowedSourceRefs: [sourceId] },
     continuity: { ...loaded.continuity, enabled: true, modelEnabled: true },
     executive: { ...loaded.executive, enabled: true, modelEnabled: true, maxModelRunsPerDay: 1000 },
@@ -87,14 +136,28 @@ const harness = (t, { readers = [], config } = {}) => {
   const { runtime, state } = heldModel();
   const scheduler = new Scheduler(service, runtime, { readiness: () => ({ enabled: false, live_sending: false }) }, readers);
   t.after(() => state.releaseAll());
+  // A real thread with attention, so continuity's `prepare` has something to reason about and the
+  // head pass reaches the model. Without it the head has nothing to do and returns immediately,
+  // which is the state that made every "the head is in flight" assertion vacuous.
+  let threadId = null;
   // `continuityHealthy` starts false on purpose — a reasoning pass that runs before any source
   // pass must not infer from a reconciliation nobody attempted. A test that wants the head to
   // think therefore has to earn it: this is the source pass that establishes the health it
   // reads. Without it the model never starts and every head assertion below would be green for
   // the wrong reason, which is the failure mode this whole file exists to catch.
-  const establishHealth = async () => { await scheduler.sourceTick(); assert.equal(scheduler.continuityHealthy, true,
+  const establishHealth = async () => {
+    // The source pass comes FIRST. Reconciliation runs inside it, and it retires a thread whose
+    // evidence or authority no longer holds — so a thread opened before the pass can be terminated
+    // by it, and the head then has nothing to reason about. The order here is the order the
+    // scheduler happens in, and the thread is opened on evidence the pass has already confirmed.
+    await scheduler.sourceTick();
+    if (!threadId) {
+      const read = await pollBrowserSource(service, sourceId, workingReader(service, sourceId));
+      threadId = await openAttentionThread(service, sourceId, [read.source_event_id]);
+    }
+    assert.equal(scheduler.continuityHealthy, true,
     'the source pass established reconciliation health'); };
-  return { store, service, scheduler, cfg, model: state, directory, establishHealth };
+  return { store, service, scheduler, cfg, model: state, directory, establishHealth, threadId };
 };
 
 // A real thread, because `research_intents.thread_id` is a foreign key. A receipt test that
@@ -106,7 +169,7 @@ const seedThread = (store, id = 'thread-1') => store.run(
   `INSERT INTO partner_threads(id,partner_id,title,objective,success_condition,business_basis,
      max_age_seconds,status,revision,attention,attention_reasons_json,attention_at,created_at,updated_at)
    VALUES(?,?,?,?,?,?,86400,'OPEN',1,1,'[]','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')`,
-  id, 'partner-001', 'Kill-test', 'Prove the scenario', 'The scenario is reached', 'business_basis', 'thread');
+  id, 'partner-001', 'Kill-test', 'Prove the scenario', 'The scenario is reached', 'business_basis');
 
 // A reader that counts how many times it was read. Cadence is the observable: what matters is
 // not that the page was fetched but that the fetch happened at all while the head was busy.
@@ -118,7 +181,7 @@ const countingReader = (reads, { fail = false } = {}) => ({ sourceId,
 // 1. The head is mid-thought and the source is still read.
 test('a reasoning pass in flight does not stop the source loop', async (t) => {
   const reads = [];
-  const { scheduler, model, establishHealth } = harness(t, { readers: [countingReader(reads)] });
+  const { scheduler, model, establishHealth } = await harness(t, { readers: [countingReader(reads)] });
   await establishHealth();
   // Start the head and let it reach the model. It will not return until released.
   const thinking = scheduler.reasonTick();
@@ -145,7 +208,7 @@ test('a reasoning pass in flight does not stop the source loop', async (t) => {
 
 test('two source passes run while one head pass is still thinking', async (t) => {
   const reads = [];
-  const { scheduler, model, establishHealth } = harness(t, { readers: [countingReader(reads)] });
+  const { scheduler, model, establishHealth } = await harness(t, { readers: [countingReader(reads)] });
   await establishHealth();
   const thinking = scheduler.reasonTick();
   for (let i = 0; i < 20 && model.pending === 0; i += 1) await new Promise((r) => setTimeout(r, 5));
@@ -166,7 +229,7 @@ test('two source passes run while one head pass is still thinking', async (t) =>
 // 2. Freshness does not decay because of reasoning.
 test('a source is not left stale by a long head pass', async (t) => {
   const reads = [];
-  const { scheduler, service, model, establishHealth } = harness(t, { readers: [countingReader(reads)] });
+  const { scheduler, service, model, establishHealth } = await harness(t, { readers: [countingReader(reads)] });
   await establishHealth();
   // Age the schedule so the source is genuinely due, exactly as it would be after maxLagSeconds
   // of ticks. Aging the real record is the point: a stamp left at zero would make the source
@@ -190,7 +253,7 @@ test('a source is not left stale by a long head pass', async (t) => {
 // had ever been proposed — which is also what they would say if the completion path ignored
 // cancellation entirely.
 test('an answer that arrives after its work was cancelled is not applied', async (t) => {
-  const { scheduler, store, model, establishHealth } = harness(t, { readers: [countingReader([])] });
+  const { scheduler, store, model, establishHealth } = await harness(t, { readers: [countingReader([])] });
   await establishHealth();
   const thinking = scheduler.reasonTick();
   for (let i = 0; i < 40 && model.pending === 0; i += 1) await new Promise((r) => setTimeout(r, 5));
@@ -214,7 +277,7 @@ test('an answer that arrives after its work was cancelled is not applied', async
 // 4. Shutdown does not close the store from under a worker.
 test('shutdown drains a head pass before the store is closed', async (t) => {
   const reads = [];
-  const { scheduler, store, model, establishHealth } = harness(t, { readers: [countingReader(reads)] });
+  const { scheduler, store, model, establishHealth } = await harness(t, { readers: [countingReader(reads)] });
   await establishHealth();
   const thinking = scheduler.reasonTick();
   for (let i = 0; i < 20 && model.pending === 0; i += 1) await new Promise((r) => setTimeout(r, 5));
@@ -240,7 +303,7 @@ test('shutdown drains a head pass before the store is closed', async (t) => {
 });
 
 test('stop() clears both timers, not only the source one', async (t) => {
-  const { scheduler } = harness(t, { readers: [] });
+  const { scheduler } = await harness(t, { readers: [] });
   scheduler.start();
   const source = scheduler.timer, head = scheduler.reasonTimer;
   assert.ok(source, 'the source timer exists');
@@ -258,7 +321,7 @@ test('stop() clears both timers, not only the source one', async (t) => {
 
 // 5. A receipt that cannot be written does not leave work in flight.
 test('a failed Executive receipt does not leave the attempt running', async (t) => {
-  const { scheduler, service, store, model } = harness(t, { readers: [countingReader([])] });
+  const { scheduler, service, store, model } = await harness(t, { readers: [countingReader([])] });
   // A real thread, because the intent's thread_id is a foreign key. Without it this test dies on
   // the constraint before it reaches the scenario, and a test that cannot reach its own subject
   // proves nothing about it.
@@ -287,7 +350,7 @@ test('a failed Executive receipt does not leave the attempt running', async (t) 
 
 test('a refresh that completes writes a receipt and succeeds', async (t) => {
   const reads = [];
-  const { scheduler, store } = harness(t, { readers: [countingReader(reads)] });
+  const { scheduler, store } = await harness(t, { readers: [countingReader(reads)] });
   seedThread(store, 'thread-2');
   store.run("INSERT INTO research_intents(id,partner_id,thread_id,authority_hash,proposal_basis_fingerprint,plan_packet_json,selection_json,refresh_sources_json,status,producer,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
     'intent-2', 'partner-001', 'thread-2', 'ah', 'bf', '{}', '{}', '[]', 'waiting_sources', 'operator', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
@@ -303,7 +366,7 @@ test('a refresh that completes writes a receipt and succeeds', async (t) => {
 // The orphan sweep, which is what makes the guarantee above survive a crash rather than a
 // well-behaved pass.
 test('a refresh attempt orphaned by a dead pass is retired on the next pass', async (t) => {
-  const { scheduler, store } = harness(t, { readers: [countingReader([])] });
+  const { scheduler, store } = await harness(t, { readers: [countingReader([])] });
   seedThread(store, 'thread-3');
   store.run("INSERT INTO research_intents(id,partner_id,thread_id,authority_hash,proposal_basis_fingerprint,plan_packet_json,selection_json,refresh_sources_json,status,producer,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
     'intent-3', 'partner-001', 'thread-3', 'ah', 'bf', '{}', '{}', '[]', 'waiting_sources', 'operator', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
@@ -318,7 +381,7 @@ test('a refresh attempt orphaned by a dead pass is retired on the next pass', as
 });
 
 test('a model attempt running beside the source loop is not swept', async (t) => {
-  const { scheduler, store } = harness(t, { readers: [countingReader([])] });
+  const { scheduler, store } = await harness(t, { readers: [countingReader([])] });
   seedThread(store, 'thread-4');
   store.run("INSERT INTO research_intents(id,partner_id,thread_id,authority_hash,proposal_basis_fingerprint,plan_packet_json,selection_json,refresh_sources_json,status,producer,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
     'intent-4', 'partner-001', 'thread-4', 'ah', 'bf', '{}', '{}', '[]', 'reasoning', 'operator', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
@@ -372,7 +435,7 @@ test('a running refresh survives an ordinary reconciliation and dies only on the
 
 // 6. A recovered reconciliation is reported as recovered.
 test('a reconciliation that recovers stops reporting reconciliation_failed', async (t) => {
-  const { scheduler, service } = harness(t, { readers: [] });
+  const { scheduler, service } = await harness(t, { readers: [] });
   const original = service.continuity.reconcile.bind(service.continuity);
   let fail = true;
   service.continuity.reconcile = () => { if (fail) throw new Error('db down'); return original(); };
@@ -388,7 +451,7 @@ test('a reconciliation that recovers stops reporting reconciliation_failed', asy
 });
 
 test('a head pass is withheld while reconciliation is failing', async (t) => {
-  const { scheduler, service, model } = harness(t, { readers: [] });
+  const { scheduler, service, model } = await harness(t, { readers: [] });
   const original = service.continuity.reconcile.bind(service.continuity);
   service.continuity.reconcile = () => { throw new Error('db down'); };
   await scheduler.sourceTick();
@@ -406,7 +469,7 @@ test('a head pass is withheld while reconciliation is failing', async (t) => {
 // tick" — reported a broken transport as healthy the moment the interval carried it past a
 // tick, which is the only window in which nobody was looking.
 test('a failure survives a pass that does not retry it', async (t) => {
-  const { scheduler, model, establishHealth } = harness(t, { readers: [] });
+  const { scheduler, model, establishHealth } = await harness(t, { readers: [] });
   await establishHealth();
   scheduler.sourceReadFailures.set('browser:example', 'BROWSER_DNS_FAILED');
   // A pass in which this source is not due changes nothing about it. The whole gap between two
@@ -421,7 +484,7 @@ test('a failure survives a pass that does not retry it', async (t) => {
 });
 
 test('a real success clears only that source', async (t) => {
-  const { scheduler, model, establishHealth } = harness(t, { readers: [countingReader([])] });
+  const { scheduler, model, establishHealth } = await harness(t, { readers: [countingReader([])] });
   await establishHealth();
   scheduler.sourceReadFailures.set('browser:example', 'BROWSER_DNS_FAILED');
   scheduler.sourceReadFailures.set('browser:other', 'BROWSER_TIMEOUT');
@@ -436,7 +499,7 @@ test('a real success clears only that source', async (t) => {
 });
 
 test('the reported failure is deterministic when several are unresolved', async (t) => {
-  const { scheduler, model, establishHealth } = harness(t, { readers: [] });
+  const { scheduler, model, establishHealth } = await harness(t, { readers: [] });
   await establishHealth();
   // Inserted out of order on purpose: the same set of failures must read the same way however it
   // was built, or an operator sees a reason that changes for no reason between two passes.
@@ -461,7 +524,7 @@ test('the reported failure is deterministic when several are unresolved', async 
 // Both states must withhold reasoning — a model may not run on a transport nobody has checked —
 // and only the word differs. A field that cannot tell those apart teaches operators to ignore it.
 test('a head pass before any source pass waits, and says it is waiting', async (t) => {
-  const { scheduler, model } = harness(t, { readers: [] });
+  const { scheduler, model } = await harness(t, { readers: [] });
   assert.equal(scheduler.continuityHealthy, null, 'health starts unestablished, not failed');
   await scheduler.reasonTick();
   assert.equal(model.calls, 0, 'no inference on a transport nobody has checked');
@@ -470,7 +533,7 @@ test('a head pass before any source pass waits, and says it is waiting', async (
 });
 
 test('a reconciliation that actually fails withholds reasoning and says it failed', async (t) => {
-  const { scheduler, service, model } = harness(t, { readers: [] });
+  const { scheduler, service, model } = await harness(t, { readers: [] });
   service.continuity.reconcile = () => { throw new Error('db down'); };
   await scheduler.sourceTick();
   assert.equal(scheduler.continuityHealthy, false, 'a real failure is established as a failure');
@@ -481,7 +544,7 @@ test('a reconciliation that actually fails withholds reasoning and says it faile
 });
 
 test('a successful pass permits reasoning and clears the waiting state', async (t) => {
-  const { scheduler, model } = harness(t, { readers: [] });
+  const { scheduler, model } = await harness(t, { readers: [] });
   await scheduler.reasonTick();
   assert.equal(scheduler.continuityState.disposition, 'waiting_reconciliation');
   await scheduler.sourceTick();
@@ -499,7 +562,7 @@ test('a successful pass permits reasoning and clears the waiting state', async (
 // fail. The test holds a reconciliation open rather than racing it, so what is asserted is the
 // rule and not the timing: a check that has not finished is not a check that passed.
 test('a head pass during an in-flight reconciliation is withheld', async (t) => {
-  const { scheduler, service, model } = harness(t, { readers: [] });
+  const { scheduler, service, model } = await harness(t, { readers: [] });
   const original = service.continuity.reconcile.bind(service.continuity);
   const gates = [];
   service.continuity.reconcile = () => new Promise((resolve) => { gates.push(() => { resolve(); return original(); }); });
@@ -516,7 +579,7 @@ test('a head pass during an in-flight reconciliation is withheld', async (t) => 
 });
 
 test('a reconciliation that fails while the head waits reports the failure, not the wait', async (t) => {
-  const { scheduler, service, model } = harness(t, { readers: [] });
+  const { scheduler, service, model } = await harness(t, { readers: [] });
   const gates = [];
   service.continuity.reconcile = () => new Promise((_, reject) => { gates.push(() => reject(new Error('db down'))); });
   const passing = scheduler.sourceTick();
@@ -539,7 +602,7 @@ test('a reconciliation that fails while the head waits reports the failure, not 
 // still readable afterwards, because a phase that silences the source for a DNS hiccup is not a
 // fix, it is a different outage.
 test('a failed read makes the source not current at once, and allows the next attempt', async (t) => {
-  const { service, cfg } = harness(t, { readers: [] });
+  const { service, cfg } = await harness(t, { readers: [] });
   const sourceId = 'browser:example';
   const ok = () => new BrowserSourceReader(browserPolicy(service, sourceId), { request: async () => ({
     body: Buffer.from('<p>ok</p>'), statusCode: 200, headers: { 'content-type': 'text/html' },
@@ -568,7 +631,7 @@ test('a failed read makes the source not current at once, and allows the next at
 });
 
 test('blocked is not retrying: a blocked source still refuses to be read', async (t) => {
-  const { service } = harness(t, { readers: [] });
+  const { service } = await harness(t, { readers: [] });
   const sourceId = 'browser:example';
   const ok = () => new BrowserSourceReader(browserPolicy(service, sourceId), { request: async () => ({
     body: Buffer.from('<p>ok</p>'), statusCode: 200, headers: { 'content-type': 'text/html' },
@@ -582,7 +645,7 @@ test('blocked is not retrying: a blocked source still refuses to be read', async
 });
 
 test('a free-form failure never becomes the stored reason', async (t) => {
-  const { service } = harness(t, { readers: [] });
+  const { service } = await harness(t, { readers: [] });
   const sourceId = 'browser:example';
   const leaky = () => new BrowserSourceReader(browserPolicy(service, sourceId), { request: async () => {
     throw Object.assign(new Error('connect ECONNREFUSED 93.184.216.34:443 sk-live-abc'), { code: 'lowercase and spaces' });
@@ -600,10 +663,9 @@ test('a free-form failure never becomes the stored reason', async (t) => {
 // still says `current` with a `confirmed_at` recent enough to pass the age check. The only thing
 // left that knows the truth is the reader itself, in memory — so the boundary has to ask it.
 test('a source whose reader is failing is not current, whatever the checkpoint says', async (t) => {
-  const { service } = harness(t, { readers: [] });
+  const { service } = await harness(t, { readers: [] });
   const sourceId = 'browser:example';
-  const opts = { service, request: async () => ({ body: Buffer.from('<p>ok</p>'), statusCode: 200,
-    headers: { 'content-type': 'text/html' } }), lookup: async () => [{ address: '93.184.216.34', family: 4 }] };
+  const opts = { service, request: async () => okPage(), lookup: async () => [{ address: '3.184.216.34', family: 4 }] };
   const reader = new BrowserSourceReader(browserPolicy(service, sourceId), opts);
   await pollBrowserSource(service, sourceId, reader);
   assert.equal(sourceAccessReadiness(service, sourceId).current, true, 'a good read is current');
@@ -613,9 +675,7 @@ test('a source whose reader is failing is not current, whatever the checkpoint s
   // this test reassigned `readPage`, which skipped the very code that marks the latch, so the
   // latch was never exercised and the test passed for the wrong reason.
   reader.markCurrent();
-  const dead = new BrowserSourceReader(browserPolicy(service, sourceId), { service,
-    request: async () => { throw Object.assign(new Error('dns'), { code: 'ENOTFOUND' }); },
-    lookup: async () => [{ address: '93.184.216.34', family: 4 }] });
+  const dead = deadReader(service, sourceId);
   await assert.rejects(() => pollBrowserSource(service, sourceId, dead), (e) => e.code === 'BROWSER_DNS_FAILED');
   assert.equal(service.sourceTransportHealth.get(sourceId)(), false,
     'the failing reader is the one that now answers for the source');
@@ -628,11 +688,9 @@ test('a source whose reader is failing is not current, whatever the checkpoint s
 // boundary that asked "did the socket answer" would call a source current whose newest reading
 // was thrown away.
 test('a read the intake refused does not leave the source current', async (t) => {
-  const { service, store } = harness(t, { readers: [] });
+  const { service, store } = await harness(t, { readers: [] });
   const sourceId = 'browser:example';
-  const reader = new BrowserSourceReader(browserPolicy(service, sourceId), { service,
-    request: async () => ({ body: Buffer.from('<p>ok</p>'), statusCode: 200,
-      headers: { 'content-type': 'text/html' } }), lookup: async () => [{ address: '93.184.216.34', family: 4 }] });
+  const reader = workingReader(service, sourceId);
   await pollBrowserSource(service, sourceId, reader);
   assert.equal(sourceAccessReadiness(service, sourceId).current, true, 'a committed read is current');
 
@@ -650,7 +708,7 @@ test('a read the intake refused does not leave the source current', async (t) =>
 });
 
 test('a reader that has never succeeded does not vouch for a source a previous process confirmed', async (t) => {
-  const { service, store } = harness(t, { readers: [] });
+  const { service, store } = await harness(t, { readers: [] });
   const sourceId = 'browser:example';
   // A fresh reader, and a checkpoint written as an earlier process would have left it.
   store.run('INSERT OR REPLACE INTO channel_offsets(channel,account_id,cursor) VALUES(?,?,?)',
@@ -658,9 +716,7 @@ test('a reader that has never succeeded does not vouch for a source a previous p
     JSON.stringify({ source_id: sourceId, policy_hash: browserPolicyHash(browserPolicy(service, sourceId)),
       phase: 'current', confirmed_at: new Date().toISOString(), reason: null }));
   assert.equal(browserCheckpoint(service, sourceId).phase, 'current', 'the checkpoint is current and fresh');
-  new BrowserSourceReader(browserPolicy(service, sourceId), { service,
-    request: async () => { throw Object.assign(new Error('dns'), { code: 'ENOTFOUND' }); },
-    lookup: async () => [{ address: '93.184.216.34', family: 4 }] });
+  deadReader(service, sourceId);
   // Unproven is not readable: a reader that has not once succeeded gets to say nothing about the
   // source, however recent the last confirmation is.
   assert.equal(sourceAccessReadiness(service, sourceId).current, false,
@@ -669,10 +725,9 @@ test('a reader that has never succeeded does not vouch for a source a previous p
 });
 
 test('a reader replaced by a new one is the only one the boundary may ask', async (t) => {
-  const { service } = harness(t, { readers: [] });
+  const { service } = await harness(t, { readers: [] });
   const sourceId = 'browser:example';
-  const opts = { service, request: async () => ({ body: Buffer.from('<p>ok</p>'), statusCode: 200,
-    headers: { 'content-type': 'text/html' } }), lookup: async () => [{ address: '93.184.216.34', family: 4 }] };
+  const opts = { service, request: async () => okPage(), lookup: async () => [{ address: '3.184.216.34', family: 4 }] };
   const first = new BrowserSourceReader(browserPolicy(service, sourceId), opts);
   assert.equal(first.owns(service), true, 'the reader owns the seam it registered');
   const second = new BrowserSourceReader(browserPolicy(service, sourceId), opts);
@@ -683,11 +738,9 @@ test('a reader replaced by a new one is the only one the boundary may ask', asyn
 // The whole point of the latch, in the exact state the latch exists for: the read failed, the
 // write that would have recorded it failed too, and durable storage still says `current`.
 test('a failure that could not be written leaves the source not current', async (t) => {
-  const { service, store } = harness(t, { readers: [] });
+  const { service, store } = await harness(t, { readers: [] });
   const sourceId = 'browser:example';
-  const reader = new BrowserSourceReader(browserPolicy(service, sourceId), { service,
-    request: async () => ({ body: Buffer.from('<p>ok</p>'), statusCode: 200,
-      headers: { 'content-type': 'text/html' } }), lookup: async () => [{ address: '93.184.216.34', family: 4 }] });
+  const reader = workingReader(service, sourceId);
   await pollBrowserSource(service, sourceId, reader);
   assert.equal(sourceAccessReadiness(service, sourceId).current, true);
 
@@ -699,9 +752,7 @@ test('a failure that could not be written leaves the source not current', async 
   // The reader keeps the same good transport: the read succeeds, and it is the *write* of the
   // failure record that cannot land. Reusing the reader also keeps the latch honest, since a new
   // reader would start unproven and the assertion below would pass without the write failing.
-  const dead = new BrowserSourceReader(browserPolicy(service, sourceId), { service,
-    request: async () => { throw Object.assign(new Error('dns'), { code: 'ENOTFOUND' }); },
-    lookup: async () => [{ address: '93.184.216.34', family: 4 }] });
+  const dead = deadReader(service, sourceId);
   await assert.rejects(() => pollBrowserSource(service, sourceId, dead),
     (e) => e.code === 'BROWSER_CHECKPOINT_UPDATE_FAILED',
     'the unrecordable failure is reported as the unrecordable failure');
@@ -722,7 +773,7 @@ test('a failure that could not be written leaves the source not current', async 
 
 // The boundary the split must not cross.
 test('the two loops are independent locks', async (t) => {
-  const { scheduler, model, establishHealth } = harness(t, { readers: [] });
+  const { scheduler, model, establishHealth } = await harness(t, { readers: [] });
   assert.equal(scheduler.busy, false); assert.equal(scheduler.reasonBusy, false);
   await establishHealth();
   const thinking = scheduler.reasonTick();
@@ -738,7 +789,7 @@ test('the two loops are independent locks', async (t) => {
 
 test('a full tick runs eyes then head, and reports the transport truth', async (t) => {
   const reads = [];
-  const { scheduler, model } = harness(t, { readers: [countingReader(reads)] });
+  const { scheduler, model } = await harness(t, { readers: [countingReader(reads)] });
   const pass = scheduler.tick();
   model.releaseAll();
   await pass;
