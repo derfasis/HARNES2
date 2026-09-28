@@ -122,6 +122,14 @@ function browserTransportBoundary(service, sourceId) {
   validateBrowserCheckpoint(state, sourceId);
   check(state.policy_hash === browserPolicyHash(policy), 'SOURCE_TRANSPORT_NOT_READY');
   check(state.phase === 'current', 'SOURCE_TRANSPORT_NOT_CURRENT');
+  // The reader's own verdict, asked the same way the Telegram source is asked. A checkpoint says
+  // what was last proven and can only be rewritten by a successful write; the latch says what this
+  // reader last managed, in memory, and survives a checkpoint write that failed. Between them
+  // they close the one window a checkpoint cannot cover — a read that failed at the same moment
+  // the record of that failure could not be stored, where the durable claim is stale and nothing
+  // else is left to contradict it.
+  const liveHealth = service.sourceTransportHealth?.get(sourceId);
+  check(!liveHealth || liveHealth() === true, 'SOURCE_TRANSPORT_DIRTY');
   // The age, which is the whole point of `maxLagSeconds`. Without it a checkpoint stays `current`
   // for ever: nothing has to fail for the source to stop being read, and a reader that silently
   // stopped would leave a source looking confirmed indefinitely.

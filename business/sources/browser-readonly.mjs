@@ -43,18 +43,44 @@ const identities = (policy) => ({
 });
 
 export class BrowserSourceReader {
-  #policy; #transport;
+  #policy; #transport; #readable = null; #health;
   // `request` and `lookup` are the boundary's seams. Both default to the real ones, so a reader
   // built in production opens a real socket, and a test can state what a host resolves to and how
   // a socket behaves without either reaching a network.
-  constructor(policy, { request, lookup } = {}) { this.#policy = policy; this.#transport = { request, lookup }; }
+  //
+  // `service` feeds the same `sourceTransportHealth` seam the Telegram reader feeds. The
+  // checkpoint records what was last proven; this latch records what this reader instance last
+  // managed, in memory, and it exists because the two can disagree. A read that fails while the
+  // checkpoint write also fails leaves durable evidence saying `current` — and the only honest
+  // remaining claim is that the reader itself knows it has been failing. A boundary that trusted
+  // the checkpoint alone would read that disagreement as freshness.
+  constructor(policy, { request, lookup, service } = {}) {
+    this.#policy = policy; this.#transport = { request, lookup };
+    // `null` is unproven, and unproven is not readable. A reader that has never succeeded does
+    // not get to vouch for the source.
+    this.#health = () => this.#readable === true;
+    if (service) { service.sourceTransportHealth ??= new Map(); service.sourceTransportHealth.set(policy.sourceId, this.#health); }
+  }
   policy() { return this.#policy; }
+  // Whether this reader is still the one the boundary should ask. Mirrors the Telegram reader's
+  // ownership check, so a reader replaced or retired cannot answer on another's behalf.
+  owns(service) { return service?.sourceTransportHealth?.get(this.#policy.sourceId) === this.#health; }
 
   // The only thing this class can do. There is deliberately no write counterpart.
   async readPage() {
-    const page = await fetchPublicPage(this.#policy.url, this.#transport);
+    let page;
+    try {
+      page = await fetchPublicPage(this.#policy.url, this.#transport);
+    } catch (error) { this.#readable = false; throw error; }
     const { text, truncated, originalLength } = sanitizeHtml(page.body.toString('utf8'), LIMITS.maxTextChars);
-    if (!text) { const error = new AppError('The page yielded no readable text', 422, 'BROWSER_EMPTY_PAGE'); error.code = 'BROWSER_EMPTY_PAGE'; throw error; }
+    if (!text) {
+      this.#readable = false;
+      const error = new AppError('The page yielded no readable text', 422, 'BROWSER_EMPTY_PAGE'); error.code = 'BROWSER_EMPTY_PAGE'; throw error;
+    }
+    // Only a read that produced readable text proves the source is readable. Marking it here
+    // rather than after the intake is deliberate: the latch is about this reader's ability to
+    // reach the page, and the intake writes may still fail after it.
+    this.#readable = true;
     return { text, truncated, originalLength, finalUrl: page.finalUrl, status: page.status };
   }
 }

@@ -86,7 +86,11 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
   // because the source is simply never read and nothing anywhere says so.
   const browserReaders = (config.opportunity?.browserSources ?? [])
     .map((source) => ({ sourceId: source.sourceId,
-      transport: new BrowserSourceReader(browserPolicy(service, source.sourceId)) }));
+      // `service` is what registers this reader's health latch with the freshness boundary.
+      // Without it the boundary has nothing to ask, asks nothing, and a source whose last read
+      // failed while the record of that failure could not be written would keep passing on a
+      // stale checkpoint.
+      transport: new BrowserSourceReader(browserPolicy(service, source.sourceId), { service }) }));
   let telegramReaders = [];
   const composeReaders = () => { scheduler.sourceReaders = [...telegramReaders, ...browserReaders]; };
   const scheduler = new Scheduler(service,runtime,telegram,[]);

@@ -18,7 +18,12 @@ import { BusinessService } from '../business/service.mjs';
 import { loadConfig } from '../business/config.mjs';
 import { BrowserSourceReader, browserPolicy, pollBrowserSource, markBrowserSourceBlocked } from '../business/sources/browser-readonly.mjs';
 import { BrowserFetchError } from '../business/sources/browser-fetch.mjs';
-import { browserCheckpoint, sourceAccessReadiness } from '../business/source-ingestion.mjs';
+import { browserCheckpoint, sourceAccessReadiness, browserPolicyHash } from '../business/source-ingestion.mjs';
+import { createHash } from 'node:crypto';
+
+// The same key derivation `channel_offsets` is written with, so a row written here is found by the
+// same lookup production uses rather than by a second, slightly different one.
+const digestOf = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
 const sourceId = 'browser:example';
 const browserSourceConfig = (id = sourceId) => ({ sourceId: id, url: 'https://example.com/page',
@@ -527,6 +532,59 @@ test('a free-form failure never becomes the stored reason', async (t) => {
   assert.match(stored, /BROWSER_READ_FAILED/, 'an unrecognised failure becomes one declared class');
   for (const token of ['93.184', 'sk-live', 'ECONNREFUSED', 'connect '])
     assert.ok(!stored.includes(token), `nothing of the provider error may survive: ${token}`);
+});
+
+// The one case a checkpoint cannot cover on its own.
+//
+// A read failed, and the write that would have recorded that failure also failed. Durable evidence
+// still says `current` with a `confirmed_at` recent enough to pass the age check. The only thing
+// left that knows the truth is the reader itself, in memory — so the boundary has to ask it.
+test('a source whose reader is failing is not current, whatever the checkpoint says', async (t) => {
+  const { service } = harness(t, { readers: [] });
+  const sourceId = 'browser:example';
+  const config = { service, request: async () => ({ body: Buffer.from('<p>ok</p>'), statusCode: 200,
+    headers: { 'content-type': 'text/html' } }), lookup: async () => [{ address: '93.184.216.34', family: 4 }] };
+  const reader = new BrowserSourceReader(browserPolicy(service, sourceId), config);
+  await pollBrowserSource(service, sourceId, reader);
+  assert.equal(sourceAccessReadiness(service, sourceId).current, true, 'a good read is current');
+
+  // The reader now fails. `readPage` marks the latch before rethrowing, so the boundary sees a
+  // reader that has stopped being able to read even though nothing durable changed.
+  reader.readPage = async () => { throw new BrowserFetchError('BROWSER_DNS_FAILED'); };
+  await assert.rejects(() => pollBrowserSource(service, sourceId, reader), (e) => e.code === 'BROWSER_DNS_FAILED');
+  assert.equal(sourceAccessReadiness(service, sourceId).current, false,
+    'the latch refuses the source even though the checkpoint write succeeded');
+});
+
+test('a reader that has never succeeded does not vouch for a source a previous process confirmed', async (t) => {
+  const { service, store } = harness(t, { readers: [] });
+  const sourceId = 'browser:example';
+  // A fresh reader, and a checkpoint written as an earlier process would have left it.
+  store.run('INSERT OR REPLACE INTO channel_offsets(channel,account_id,cursor) VALUES(?,?,?)',
+    'browser-source-v0', digestOf([service.config.partnerId, sourceId]),
+    JSON.stringify({ source_id: sourceId, policy_hash: browserPolicyHash(browserPolicy(service, sourceId)),
+      phase: 'current', confirmed_at: new Date().toISOString(), reason: null }));
+  assert.equal(browserCheckpoint(service, sourceId).phase, 'current', 'the checkpoint is current and fresh');
+  new BrowserSourceReader(browserPolicy(service, sourceId), { service,
+    request: async () => { throw new BrowserFetchError('BROWSER_DNS_FAILED'); },
+    lookup: async () => [{ address: '93.184.216.34', family: 4 }] });
+  // Unproven is not readable: a reader that has not once succeeded gets to say nothing about the
+  // source, however recent the last confirmation is.
+  assert.equal(sourceAccessReadiness(service, sourceId).current, false,
+    'a never-successful reader cannot vouch for a source');
+  assert.equal(sourceAccessReadiness(service, sourceId).reason, 'SOURCE_TRANSPORT_DIRTY');
+});
+
+test('a reader replaced by a new one is the only one the boundary may ask', async (t) => {
+  const { service } = harness(t, { readers: [] });
+  const sourceId = 'browser:example';
+  const opts = { service, request: async () => ({ body: Buffer.from('<p>ok</p>'), statusCode: 200,
+    headers: { 'content-type': 'text/html' } }), lookup: async () => [{ address: '93.184.216.34', family: 4 }] };
+  const first = new BrowserSourceReader(browserPolicy(service, sourceId), opts);
+  assert.equal(first.owns(service), true, 'the reader owns the seam it registered');
+  const second = new BrowserSourceReader(browserPolicy(service, sourceId), opts);
+  assert.equal(first.owns(service), false, 'and stops owning it once another reader takes the slot');
+  assert.equal(second.owns(service), true, 'the newest reader is the one that answers');
 });
 
 // The boundary the split must not cross.
