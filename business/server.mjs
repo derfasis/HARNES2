@@ -187,10 +187,11 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
       }
       if (req.method === 'POST' && url.pathname === '/api/scheduler/wake') {
         const ready = runtimeReadiness(config); ensure(ready.ready,`Модель не подключена: ${ready.missing.join(', ')}`,409);
-        // Both loops. A wake that only ran the source pass left the operator's "run it now" doing
-        // nothing an operator could see, because the disposition they asked for comes from the
-        // head, not the eyes.
-        void scheduler.tick().catch(()=>{}); void scheduler.reasonTick().catch(()=>{}); return send(202,{accepted:true});
+        // `tick()` is the full pass — source then reasoning — so it is the only call here.
+        // Naming both was a double alarm: `reasonTick()` would race the one `tick()` already
+        // schedules, and losing that race is not harmless, because the loser can record a
+        // reconciliation failure the winner has since resolved.
+        void scheduler.tick().catch(()=>{}); return send(202,{accepted:true});
       }
       return send(404,{error:'not found'});
     } catch (error) {
