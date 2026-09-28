@@ -496,9 +496,13 @@ test('real authenticated HTTP surface supports capture, proposal and review whil
   const app = await start({ config, directory });
   t.after(async () => { await app.close(); fs.rmSync(directory, { recursive: true, force: true }); });
   let token;
+  // The Host header has to carry the port the server is actually listening on. With `port: 0` the
+  // kernel picks one, and the check binds to that rather than to the configured `0` — so a header
+  // that hard-codes `:0` names a host the server did not serve.
+  const listeningPort = app.server.address().port;
   const request = (route, body, authenticated = true) => new Promise((resolve, reject) => {
-    const req = http.request({ host: '127.0.0.1', port: app.server.address().port, path: route,
-      method: body ? 'POST' : 'GET', headers: { host: '127.0.0.1:0', 'content-type': 'application/json',
+    const req = http.request({ host: '127.0.0.1', port: listeningPort, path: route,
+      method: body ? 'POST' : 'GET', headers: { host: `127.0.0.1:${listeningPort}`, 'content-type': 'application/json',
         ...(authenticated && token ? { 'x-partner-token': token } : {}) } }, res => {
       let text = ''; res.on('data', chunk => { text += chunk; });
       res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(text) }));
