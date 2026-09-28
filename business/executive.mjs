@@ -290,16 +290,20 @@ export class ExecutiveLoop {
   }
   // Refresh attempts that outlived the pass that started them.
   //
-  // The source loop is not reentrant — `busy` admits one pass at a time — and a refresh attempt
-  // is only ever live inside a single source pass: beginPoll, poll, finishPoll, in that order,
-  // with no await between the bookends that could belong to another pass. So a refresh attempt
-  // still `running` when a *new* source pass begins is not slow, it is orphaned: the pass that
-  // owned it died between beginPoll and finishPoll, and nothing else will ever move it. Before
-  // this, that left the intent waiting on a refresh that could never complete until a restart.
+  // Called by the scheduler at the very top of a source pass, and ONLY there. The claim this makes
+  // is time-shaped, and the time is what makes it true: if a new source pass has begun, the
+  // previous one has finished, so a `research.refresh_source` attempt still marked `running` can
+  // only have been orphaned by a pass that died between `beginPoll` and `finishPoll`. Nothing
+  // else will ever move it, and the intent waits on a refresh that cannot complete until restart.
   //
-  // Model attempts are deliberately NOT touched. `research.plan` and `research.submit_brief` are
-  // legitimately `running` for as long as a reasoning pass takes, and that pass is exactly what
-  // must not be disturbed by a reconciliation running beside it.
+  // It is deliberately NOT part of `reconcile()`. A `running` refresh is not orphaned on its own —
+  // it is a perfectly healthy attempt while its own pass is still awaiting the network, and a
+  // reconciliation that ran during that wait would kill live work. Binding the sweep to the one
+  // place where the assertion is arithmetically true keeps the rest of Executive ignorant of where
+  // the source loop currently is.
+  //
+  // Model attempts are not touched either. `research.plan` and `research.submit_brief` are
+  // legitimately `running` for as long as a reasoning pass takes.
   sweepOrphanedRefreshes() {
     const orphans = this.db.all(`SELECT a.id AS attempt_id FROM research_attempts a
       JOIN research_intents i ON i.id=a.intent_id
@@ -315,7 +319,6 @@ export class ExecutiveLoop {
   }
   reconcile() {
     return this.db.transaction(() => {
-      this.sweepOrphanedRefreshes();
       const cursor = this.db.get('SELECT cursor FROM channel_offsets WHERE channel=? AND account_id=?', CURSOR, this.partnerId)?.cursor ?? '';
       const page = (after, take, before = null) => this.db.all(`SELECT * FROM research_intents WHERE partner_id=? AND id>?
         AND status IN (SELECT value FROM json_each(?)) ${before ? 'AND id<=?' : ''} ORDER BY id LIMIT ?`, this.partnerId, after, JSON.stringify(ACTIVE), ...(before ? [before] : []), take);

@@ -55,6 +55,15 @@ export class Scheduler {
     this.busy = true;
     try {
       const cfg = this.service.config;
+      // The first thing a source pass does, before any reconciliation and before anything is
+      // begun. This is the only moment at which "a refresh attempt is still `running`" means "the
+      // pass that owned it is gone" — it is true because `busy` admits one pass at a time, so
+      // reaching this line proves the previous pass returned. Anywhere else in the system a
+      // `running` refresh is simply a refresh in progress, and treating it as an orphan there
+      // would kill work that is waiting on the network.
+      try { await this.service.exclusive(() => this.service.store.transaction(
+        () => this.service.executive.sweepOrphanedRefreshes())); }
+      catch { /* Recovery must never stop the pass it is recovering. */ }
       // No model is needed to preserve watch cursors, revoke old scope, or notice a
       // deadline. Disabled continuity still retires revoked historical watches.
       //

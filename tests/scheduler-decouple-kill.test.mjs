@@ -268,6 +268,40 @@ test('a model attempt running beside the source loop is not swept', async (t) =>
   assert.equal(row.status, 'running', 'the source loop does not touch a model attempt');
 });
 
+// The distinction that makes the sweep safe, asserted on both sides of it.
+//
+// A `running` refresh is not orphaned by being running. It is orphaned by its pass having ended,
+// and the only place that can be known is the top of a *new* pass. So the same database state —
+// one attempt, `running` — must be left alone by an ordinary reconciliation and retired by the
+// next source pass. Anything that puts the sweep anywhere else gets exactly one of these two
+// wrong, and a suite that only ever tests the retired side cannot tell which.
+test('a running refresh survives an ordinary reconciliation and dies only on the next pass', async (t) => {
+  const store = new Store(fs.mkdtempSync(path.join(os.tmpdir(), 'harnes2-orphan-'))); t.after(() => store.close());
+  const loaded = loadConfig();
+  const service = new BusinessService(store, { ...loaded,
+    opportunity: { ...loaded.opportunity, automatic: true, browserSources: [browserPolicy()], allowedSourceRefs: [sourceId] },
+    runtime: { ...loaded.runtime, enabled: false }, telegram: { ...loaded.telegram, enabled: false, liveSending: false } });
+  seedThread(store, 'thread-5');
+  store.run("INSERT INTO research_intents(id,partner_id,thread_id,authority_hash,proposal_basis_fingerprint,plan_packet_json,selection_json,refresh_sources_json,status,producer,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+    'intent-5', 'partner-001', 'thread-5', 'ah', 'bf', '{}', '{}', '[]', 'waiting_sources', 'operator', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+  store.run("INSERT INTO research_attempts(id,intent_id,capability_id,capability_version,slot,status,grant_version,created_at) VALUES(?,?,?,?,?,?,?,?)",
+    'attempt-5', 'intent-5', 'research.refresh_source', 'v1', `refresh:${sourceId}`, 'running', 0, '2026-01-01T00:00:00Z');
+  const statusOf = () => store.get("SELECT status FROM research_attempts WHERE id=?", 'attempt-5').status;
+
+  // Standing for a reconciliation that runs while a pass is still awaiting the network. This is
+  // the call that must NOT treat a live attempt as an orphan.
+  await service.exclusive(() => service.store.transaction(() => service.executive.reconcile()));
+  assert.equal(statusOf(), 'running', 'a plain reconcile leaves a running refresh alone');
+
+  // And a second one, for the same reason: the absence of the sweep is not a one-off.
+  await service.exclusive(() => service.store.transaction(() => service.executive.reconcile()));
+  assert.equal(statusOf(), 'running', 'and still leaves it alone on a later pass');
+
+  // Now the pass actually begins, which is the moment the claim becomes true.
+  await service.exclusive(() => service.store.transaction(() => service.executive.sweepOrphanedRefreshes()));
+  assert.equal(statusOf(), 'interrupted_unknown', 'the sweep retires what the pass boundary retires');
+});
+
 // 6. A recovered reconciliation is reported as recovered.
 test('a reconciliation that recovers stops reporting reconciliation_failed', async (t) => {
   const { scheduler, service } = harness(t, { readers: [] });
