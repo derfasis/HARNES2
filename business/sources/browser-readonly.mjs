@@ -43,18 +43,44 @@ const identities = (policy) => ({
 });
 
 export class BrowserSourceReader {
-  #policy; #transport;
+  #policy; #transport; #readable = null; #health;
   // `request` and `lookup` are the boundary's seams. Both default to the real ones, so a reader
   // built in production opens a real socket, and a test can state what a host resolves to and how
   // a socket behaves without either reaching a network.
-  constructor(policy, { request, lookup } = {}) { this.#policy = policy; this.#transport = { request, lookup }; }
+  //
+  // `service` feeds the same `sourceTransportHealth` seam the Telegram reader feeds. The
+  // checkpoint records what was last proven; this latch records what this reader instance last
+  // managed, in memory, and it exists because the two can disagree. A read that fails while the
+  // checkpoint write also fails leaves durable evidence saying `current` — and the only honest
+  // remaining claim is that the reader itself knows it has been failing. A boundary that trusted
+  // the checkpoint alone would read that disagreement as freshness.
+  constructor(policy, { request, lookup, service } = {}) {
+    this.#policy = policy; this.#transport = { request, lookup };
+    // `null` is unproven, and unproven is not readable. A reader that has never succeeded does
+    // not get to vouch for the source.
+    this.#health = () => this.#readable === true;
+    if (service) { service.sourceTransportHealth ??= new Map(); service.sourceTransportHealth.set(policy.sourceId, this.#health); }
+  }
   policy() { return this.#policy; }
+  // Whether this reader is still the one the boundary should ask. Mirrors the Telegram reader's
+  // ownership check, so a reader replaced or retired cannot answer on another's behalf.
+  owns(service) { return service?.sourceTransportHealth?.get(this.#policy.sourceId) === this.#health; }
+  // The latch is about source truth, not about the network. A page that was fetched and then
+  // refused by the intake has not been accepted, and a boundary asked only "did the socket
+  // answer" would call a source current on the strength of a read that was thrown away. So the
+  // reader is marked dirty by the caller at both points where a read fails to become evidence,
+  // and marked current only after the durable commit that makes it evidence.
+  markCurrent() { this.#readable = true; return this; }
+  markDirty() { this.#readable = false; return this; }
 
   // The only thing this class can do. There is deliberately no write counterpart.
   async readPage() {
     const page = await fetchPublicPage(this.#policy.url, this.#transport);
     const { text, truncated, originalLength } = sanitizeHtml(page.body.toString('utf8'), LIMITS.maxTextChars);
     if (!text) { const error = new AppError('The page yielded no readable text', 422, 'BROWSER_EMPTY_PAGE'); error.code = 'BROWSER_EMPTY_PAGE'; throw error; }
+    // The latch is NOT set here. A page that reached this point has only been fetched; whether it
+    // became source truth is decided by the intake, and only `pollBrowserSource` knows that. Marking
+    // it here would vouch for a source on the strength of a socket.
     return { text, truncated, originalLength, finalUrl: page.finalUrl, status: page.status };
   }
 }
@@ -107,18 +133,64 @@ export async function pollBrowserSource(service, sourceId, transport) {
   if (existing && existing.policy_hash !== browserPolicyHash(policy))
     ensure(false, 'The browser policy changed since the source was last confirmed', 409, 'BROWSER_POLICY_CHANGED_SINCE_CONFIRMATION');
   if (existing?.phase === 'blocked') ensure(false, 'The browser source is blocked', 409, 'BROWSER_SOURCE_BLOCKED');
+  // `retrying` is deliberately not refused here. It is where a read failure puts a source, and
+  // the whole point of that phase is that the next attempt is still allowed — it withholds
+  // freshness, it does not retire the source.
 
-  const page = await transport.readPage();
+  let page;
+  try {
+    page = await transport.readPage();
+  } catch (error) {
+    // Marked here and not inside `readPage`, so the latch tracks evidence rather than sockets and
+    // so a reader whose page was fetched but never accepted is not left vouching for the source.
+    transport.markDirty?.();
+    // The checkpoint loses its freshness the moment a read fails, and it loses it in its own
+    // transaction, before the error travels on. Leaving the previous `confirmed_at` in place
+    // would let the boundary keep answering "current" on the strength of a read that no longer
+    // happens, for as long as `maxLagSeconds` allows — up to an hour of a source the partner
+    // cannot read still reporting itself as evidence.
+    //
+    // Only the class of failure is stored. A network or provider message can carry a host, an
+    // address or a credential, and this is durable storage an operator will read.
+    const raw = String(error?.code ?? '');
+    const code = /^[A-Z][A-Z0-9_]{1,63}$/.test(raw) ? raw : 'BROWSER_READ_FAILED';
+    try { await service.exclusive(() => service.store.transaction(() => writeBrowserCheckpoint(service, sourceId,
+      { source_id: sourceId, policy_hash: browserPolicyHash(policy), phase: 'retrying', confirmed_at: null, reason: code }))); }
+    catch {
+      // Not swallowed. The reader's latch already withholds the source, so nothing unsafe is
+      // believed either way — but durable storage now disagrees with reality, and an operator
+      // reading a `current` checkpoint for a source that just failed to be read has to be told
+      // that, not handed the read failure as if the record had been updated. The code names the
+      // condition and carries nothing from either underlying error.
+      const failure = new AppError('The browser checkpoint could not be updated', 409, 'BROWSER_CHECKPOINT_UPDATE_FAILED');
+      failure.code = 'BROWSER_CHECKPOINT_UPDATE_FAILED';
+      throw failure;
+    }
+    throw error;
+  }
 
-  const result = await service.exclusive(() => service.store.transaction(() => {
-    const envelope = envelopeFor(service, policy, page);
-    const ingested = ingestSource(service, envelope);
-    // Written with the intake, never after it: a page that was ingested and a source that was not
-    // marked current would read as a failure that never happened.
-    writeBrowserCheckpoint(service, sourceId, { source_id: sourceId, policy_hash: browserPolicyHash(policy),
-      phase: 'current', confirmed_at: new Date().toISOString(), reason: null });
-    return ingested;
-  }));
+  let result;
+  try {
+    result = await service.exclusive(() => service.store.transaction(() => {
+      const envelope = envelopeFor(service, policy, page);
+      const ingested = ingestSource(service, envelope);
+      // Written with the intake, never after it: a page that was ingested and a source that was not
+      // marked current would read as a failure that never happened.
+      writeBrowserCheckpoint(service, sourceId, { source_id: sourceId, policy_hash: browserPolicyHash(policy),
+        phase: 'current', confirmed_at: new Date().toISOString(), reason: null });
+      return ingested;
+    }));
+  } catch (error) {
+    // The page was read and the intake refused it, or the store failed. Either way the read did
+    // not become source truth, and the previous checkpoint is still sitting there saying
+    // `current` with a timestamp young enough to pass the age check. Without this the reader goes
+    // on vouching for a source whose newest reading was thrown away, and the freshness boundary —
+    // which trusts the latch over the stale row — would agree with it.
+    transport.markDirty?.();
+    throw error;
+  }
+  // Only now, with the intake and the checkpoint committed together, is the source current.
+  transport.markCurrent?.();
   return { ...result, disposition: result.disposition, browser: { truncated: page.truncated, final_url: page.finalUrl } };
 }
 

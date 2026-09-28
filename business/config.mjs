@@ -128,6 +128,12 @@ export function loadConfig() {
     if (url.username || url.password || url.search || url.hash || !(url.protocol === 'https:' || (url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)))) throw new Error('Model URL must use HTTPS, or local HTTP, without credentials/query.');
   }
   if (typeof cfg.engagement?.enabled !== 'boolean') throw new Error('Invalid engagement.enabled');
+  if (typeof cfg.continuity?.enabled !== 'boolean' || typeof cfg.continuity?.modelEnabled !== 'boolean'
+    || cfg.continuity.modelEnabled && !cfg.continuity.enabled) throw new Error('Invalid continuity configuration');
+  if (['enabled','modelEnabled','autoPlan'].some(k => typeof cfg.executive?.[k] !== 'boolean')
+    || cfg.executive.enabled && !cfg.continuity.enabled || cfg.executive.modelEnabled && !cfg.executive.enabled
+    || cfg.executive.autoPlan && !cfg.executive.modelEnabled || !Number.isInteger(cfg.executive.maxModelRunsPerDay)
+    || cfg.executive.maxModelRunsPerDay < 1 || cfg.executive.maxModelRunsPerDay > 30) throw new Error('Invalid executive configuration');
   if (typeof cfg.discovery?.enabled !== 'boolean') throw new Error('Invalid discovery.enabled');
   if (typeof cfg.opportunity?.automatic !== 'boolean') throw new Error('Invalid opportunity.automatic');
   validateAllowedSourceRefs(cfg);

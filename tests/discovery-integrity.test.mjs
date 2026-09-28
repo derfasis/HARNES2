@@ -888,7 +888,7 @@ test('transfer creates engagement attention without external effects', async t =
   noExternalEffects(h, 1, 1);
 });
 
-test('v3 bundle from a clean database imports into v4 with empty discovery state', async t => {
+test('v3 bundle from a clean database imports into the current schema with empty discovery state', async t => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harnes2-discovery-v3-'));
   const cleanStore = new Store(directory);
   t.after(() => { cleanStore.close(); fs.rmSync(directory, { recursive: true, force: true }); });
@@ -896,6 +896,8 @@ test('v3 bundle from a clean database imports into v4 with empty discovery state
   const v3 = structuredClone(bundle);
   delete v3.tables.discovery_situations;
   delete v3.tables.discovery_evidence;
+  for (const table of ['partner_threads', 'partner_watches', 'partner_observations', 'partner_turns']) delete v3.tables[table];
+  for (const table of ['research_intents', 'research_attempts']) delete v3.tables[table];
   v3.migrations = v3.migrations.slice(0, 3);
   v3.tables_sha256 = hash(JSON.stringify(v3.tables));
   const file = path.join(directory, 'v3.json'); fs.writeFileSync(file, JSON.stringify(v3));

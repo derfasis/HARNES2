@@ -4,7 +4,7 @@ import path from 'node:path';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import Ajv from 'ajv';
-import { loadConfig, validateAllowedSourceRefs, validateTelegramSources, ROOT, DATA, readJson, runtimeReadiness } from './config.mjs';
+import { loadConfig, validateAllowedSourceRefs, validateTelegramSources, validateBrowserSources, ROOT, DATA, readJson, runtimeReadiness } from './config.mjs';
 import { Store } from './store.mjs';
 import { BusinessService } from './service.mjs';
 import { invalidateRevokedDiscoverySources } from './discovery.mjs';
@@ -15,9 +15,10 @@ import { MtprotoTelegramChannel } from './channels/telegram-mtproto.mjs';
 import { BrowserSourceReader, browserPolicy } from './sources/browser-readonly.mjs';
 import { toolDefinitions, callTool } from './tools.mjs';
 import { exportPartner } from './export.mjs';
+import { listCandidates } from './executive-donors.mjs';
 import { AppError, ensure, requiredText } from './errors.mjs';
 
-const publicFiles = new Map([['/', ['index.html','text/html; charset=utf-8']], ['/app.js',['app.js','text/javascript; charset=utf-8']], ['/styles.css',['styles.css','text/css; charset=utf-8']], ['/favicon.svg',['favicon.svg','image/svg+xml']]]);
+const publicFiles = new Map([['/', ['index.html','text/html; charset=utf-8']], ['/app.js',['app.js','text/javascript; charset=utf-8']], ['/research.js',['research.js','text/javascript; charset=utf-8']], ['/styles.css',['styles.css','text/css; charset=utf-8']], ['/favicon.svg',['favicon.svg','image/svg+xml']]]);
 const validateCommand = new Ajv().compile(readJson(path.join(ROOT,'contracts/command.schema.json')));
 const tokenEquals = (a,b) => typeof a === 'string' && Buffer.byteLength(a) === Buffer.byteLength(b) && timingSafeEqual(Buffer.from(a),Buffer.from(b));
 async function readBody(req) {
@@ -66,6 +67,13 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
   ensure(config.server.host === '127.0.0.1', 'Only loopback dashboard binding is supported', 409);
   validateAllowedSourceRefs(config);
   validateTelegramSources(config);
+  // Browser sources are validated here for the same reason the other two are: `start({ config })`
+  // accepts a hand-built config, and only `loadConfig()` would have checked this list. Without
+  // this call an invalid browser policy — one off the allowlist, or one whose reading interval
+  // cannot honour its own freshness budget — reached the reader and only refused at the first
+  // poll, which is a running service that looks configured and is not. Refuse before the port is
+  // taken, the store is opened, and any reader exists.
+  validateBrowserSources(config);
   const store = new Store(directory), service = new BusinessService(store,config);
   ensure(service.partner(), 'partnerId не совпадает с профилем', 500);
   const operatorToken = randomBytes(32).toString('hex'), mcpToken = randomBytes(32).toString('hex'), runTokens = new Map();
@@ -78,13 +86,17 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
   // because the source is simply never read and nothing anywhere says so.
   const browserReaders = (config.opportunity?.browserSources ?? [])
     .map((source) => ({ sourceId: source.sourceId,
-      transport: new BrowserSourceReader(browserPolicy(service, source.sourceId)) }));
+      // `service` is what registers this reader's health latch with the freshness boundary.
+      // Without it the boundary has nothing to ask, asks nothing, and a source whose last read
+      // failed while the record of that failure could not be written would keep passing on a
+      // stale checkpoint.
+      transport: new BrowserSourceReader(browserPolicy(service, source.sourceId), { service }) }));
   let telegramReaders = [];
   const composeReaders = () => { scheduler.sourceReaders = [...telegramReaders, ...browserReaders]; };
   const scheduler = new Scheduler(service,runtime,telegram,[]);
   telegram.onSourcesReady = readers => { telegramReaders = readers ?? []; composeReaders(); };
   composeReaders();
-  let shuttingDown = false;
+  let shuttingDown = false, servicePort = config.server.port;
   const server = http.createServer(async (req,res) => {
     const send = (code,value) => { res.writeHead(code, {'Content-Type':'application/json; charset=utf-8'}); res.end(JSON.stringify(value)); };
     res.setHeader('Cache-Control','no-store'); res.setHeader('X-Content-Type-Options','nosniff');
@@ -92,7 +104,7 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
     res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
     try {
       ensure(!shuttingDown, 'Приложение завершает работу', 503);
-      const hosts = [`127.0.0.1:${config.server.port}`,`localhost:${config.server.port}`];
+      const hosts = [`127.0.0.1:${servicePort}`,`localhost:${servicePort}`];
       ensure(hosts.includes(req.headers.host), 'Недопустимый Host', 403);
       ensure(!req.headers.origin || hosts.map(h => `http://${h}`).includes(req.headers.origin), 'Недопустимый Origin', 403);
       ensure(!['cross-site'].includes(req.headers['sec-fetch-site']), 'Запрос с другого сайта запрещён', 403);
@@ -115,6 +127,31 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
         return send(404,{error:'not found'});
       }
       ensure(tokenEquals(req.headers['x-partner-token'],operatorToken), 'Перезагрузите страницу для обновления сессии', 403);
+      if (req.method === 'GET' && url.pathname.startsWith('/api/executive/')) {
+        if (url.pathname === '/api/executive/candidates') {
+          ensure([...url.searchParams.keys()].every(k => ['limit','cursor'].includes(k))
+            && [...url.searchParams.keys()].every(k => url.searchParams.getAll(k).length === 1), 'Invalid candidate query', 400);
+          return send(200, listCandidates(service, { limit: Number(url.searchParams.get('limit') ?? 20), cursor: url.searchParams.get('cursor') ?? '0' }));
+        }
+        if (url.pathname === '/api/executive/intents') {
+          ensure([...url.searchParams.keys()].every(k => ['limit','cursor','thread_id'].includes(k))
+            && [...url.searchParams.keys()].every(k => url.searchParams.getAll(k).length === 1), 'Invalid executive query', 400);
+          return send(200, service.executive.list({ limit: Number(url.searchParams.get('limit') ?? 20),
+            cursor: url.searchParams.get('cursor') ?? '', thread_id: url.searchParams.get('thread_id') }));
+        }
+        const match = /^\/api\/executive\/intents\/([^/]+)$/.exec(url.pathname);
+        if (match) { ensure([...url.searchParams].length === 0, 'Invalid executive query', 400); return send(200, service.executive.detail(decodeURIComponent(match[1]))); }
+        return send(404, { error: 'not found' });
+      }
+      if (req.method === 'GET' && url.pathname.startsWith('/api/continuity/')) {
+        if (url.pathname === '/api/continuity/threads') {
+          ensure([...url.searchParams.keys()].every(k => ['limit','cursor'].includes(k))
+            && [...url.searchParams.keys()].every(k => url.searchParams.getAll(k).length === 1), 'Invalid continuity query', 400);
+          return send(200, service.continuity.list({ limit: Number(url.searchParams.get('limit') ?? 20), cursor: url.searchParams.get('cursor') ?? '' }));
+        }
+        if (url.pathname.startsWith('/api/continuity/turns/')) return send(200, service.continuity.turn(decodeURIComponent(url.pathname.split('/').at(-1))));
+        if (url.pathname.startsWith('/api/continuity/threads/')) return send(200, service.continuity.detail(decodeURIComponent(url.pathname.split('/').at(-1))));
+      }
       if (req.method === 'GET' && url.pathname === '/api/state') return send(200,{...service.snapshot(),
         runtime:runtimeReadiness(config), scheduler:scheduler.status(), telegram:telegram.readiness(),
         capabilities:readJson(path.join(ROOT,'partner/capabilities.json')),
@@ -154,6 +191,10 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
       }
       if (req.method === 'POST' && url.pathname === '/api/scheduler/wake') {
         const ready = runtimeReadiness(config); ensure(ready.ready,`Модель не подключена: ${ready.missing.join(', ')}`,409);
+        // `tick()` is the full pass — source then reasoning — so it is the only call here.
+        // Naming both was a double alarm: `reasonTick()` would race the one `tick()` already
+        // schedules, and losing that race is not harmless, because the loser can record a
+        // reconciliation failure the winner has since resolved.
         void scheduler.tick().catch(()=>{}); return send(202,{accepted:true});
       }
       return send(404,{error:'not found'});
@@ -166,14 +207,20 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
   server.requestTimeout = 30000; server.headersTimeout = 10000;
   try { await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(config.server.port,config.server.host,resolve);}); }
   catch (error) {store.close();throw error;}
+  const listeningAddress = server.address();
+  if (listeningAddress && typeof listeningAddress === 'object') servicePort = listeningAddress.port;
   // Recovery occurs only after acquiring this server port; a duplicate launch cannot interrupt the live instance.
   store.recover();
   invalidateRevokedDiscoverySources(service);
+  try { service.continuity.reconcile(); }
+  catch { scheduler.continuityState = { disposition: 'reconciliation_failed' }; }
+  try { service.executive.reconcile(); }
+  catch { scheduler.executiveState = { disposition: 'reconciliation_failed' }; }
   fs.mkdirSync(path.join(directory,'runtime'),{recursive:true});
-  fs.writeFileSync(path.join(directory,'runtime/mcp-connection.json'),JSON.stringify({url:`http://127.0.0.1:${config.server.port}`,token:mcpToken}),{mode:0o600});
-  fs.writeFileSync(path.join(directory,'runtime/service.json'),JSON.stringify({pid:process.pid,port:config.server.port,started_at:new Date().toISOString()}));
+  fs.writeFileSync(path.join(directory,'runtime/mcp-connection.json'),JSON.stringify({url:`http://127.0.0.1:${servicePort}`,token:mcpToken}),{mode:0o600});
+  fs.writeFileSync(path.join(directory,'runtime/service.json'),JSON.stringify({pid:process.pid,port:servicePort,started_at:new Date().toISOString()}));
   scheduler.start(); telegram.start();
-  console.log(`Digital AI Partner: http://127.0.0.1:${config.server.port}`);
+  console.log(`Digital AI Partner: http://127.0.0.1:${servicePort}`);
   console.log(`Hermes ${runtimeReadiness(config).ready ? 'enabled' : 'waiting for model configuration'}; Telegram ${config.telegram.enabled ? 'enabled' : 'disabled'}.`);
   const close = async () => {
     if (shuttingDown) return; shuttingDown=true; scheduler.stop();
@@ -181,7 +228,13 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
     // The in-flight tick keeps running after stop(), and it is that tick that polls the readers.
     // Draining it before Telegram goes away is what keeps a reader from being released underneath
     // a read that is still using it.
-    while (scheduler.busy || telegram.polling) await new Promise(resolve=>setTimeout(resolve,50));
+    //
+    // `reasonBusy` belongs in this wait for the same reason. Reasoning now runs on its own loop,
+    // so a shutdown that drained only `busy` would close the store while a completion transaction
+    // was still writing its receipt — the database disappearing from under a worker that is
+    // committing to it, which is how a run ends as `interrupted` with the receipt half-written.
+    // Both loops are drained here, and the store is closed after both are quiet.
+    while (scheduler.busy || scheduler.reasonBusy || telegram.polling) await new Promise(resolve=>setTimeout(resolve,50));
     await closed; await telegram.stop(); store.close();
   };
   for (const signal of ['SIGINT','SIGTERM']) process.once(signal,()=>close().then(()=>process.exit(0)));

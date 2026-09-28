@@ -7,20 +7,110 @@ import { sourceTransportKind } from './source-ingestion.mjs';
 import { sourceCheckpointState } from './source-ingestion.mjs';
 import { id } from './store.mjs';
 import { now } from './errors.mjs';
+import { processContinuity } from './continuity-reasoning.mjs';
+import { processExecutive } from './executive-reasoning.mjs';
 
 export class Scheduler {
-  constructor(service, runtime, telegram, sourceReaders = []) { this.sourceReaders = sourceReaders; this.service = service; this.runtime = runtime; this.telegram = telegram; this.busy = false; this.stopped = false; this.lastReason = null; this.activeRun = null; this.readersAbsentReported = false; this.sourceReadersState = null; this.browserPolls = new Map(); }
-  start() { this.timer = setInterval(() => this.tick().catch(() => { this.lastReason = 'Ошибка обработки очереди; подробности в журнале запуска'; }), this.service.config.scheduler.tickSeconds * 1000); }
+  constructor(service, runtime, telegram, sourceReaders = []) { this.sourceReaders = sourceReaders; this.service = service; this.runtime = runtime; this.telegram = telegram; this.busy = false; this.reasonBusy = false; this.stopped = false; this.lastReason = null; this.sourceReadReason = null; this.activeRun = null; this.readersAbsentReported = false; this.sourceReadersState = null; this.browserPolls = new Map(); this.sourceReadFailures = new Map();
+    // Tri-state on purpose. `false` is a claim — "a reconciliation was attempted and it failed" —
+    // and a partner that has not run a pass yet has made no such claim. Reporting `false` at cold
+    // start told the operator the partner was broken when the only true thing was that it had not
+    // looked yet. `null` is that third answer, and reasoning treats it exactly like `false`: not
+    // established is not healthy, and the model still does not run.
+    this.continuityHealthy = null; this.executiveHealthy = null; }
+  // Two loops, one clock, on purpose.
+  //
+  // The source loop is the partner's eyes: it polls readers, advances watch cursors and retires
+  // revoked scope. It calls no model. The reasoning loop is the partner's head: Continuity,
+  // Opportunity and Executive each make one bounded inference. They are separate timers because a
+  // head that thinks for three minutes must not cost the eyes three minutes of blindness — a source
+  // left unpolled goes stale against its own `maxLagSeconds`, and that staleness is the evidence
+  // the reasoning loop is about to be asked to judge. A model call and a watch cursor share a
+  // clock only if one of them is allowed to be wrong.
+  //
+  // What is NOT relaxed to get this: preparation stays durable, the answer is revalidated against
+  // the basis and evidence it was given, a stale answer is discarded rather than stored, and one
+  // reasoning pass at a time per scheduler. Only the *waiting* moved out of the source path.
+  start() {
+    const seconds = this.service.config.scheduler.tickSeconds * 1000;
+    const failed = () => { this.lastReason = 'Ошибка обработки очереди; подробности в журнале запуска'; };
+    // The two timers call the two halves, never `tick()`. A single timer that called the whole
+    // pass would put the head back on the eyes' clock, which is the whole defect.
+    this.timer = setInterval(() => this.sourceTick().catch(failed), seconds);
+    this.reasonTimer = setInterval(() => this.reasonTick().catch(failed), seconds);
+  }
+  // One full pass, eyes then head, in that order. This is what an operator or a test means by
+  // "run a tick", and it is what `/api/scheduler/wake` uses. The scheduled loops never call it,
+  // because the guarantee that matters — that polling does not wait on inference — only holds if
+  // the timers drive the halves separately.
+  async tick() {
+    await this.sourceTick();
+    await this.reasonTick();
+  }
   // `reason` normally carries the pipeline's business disposition; a source poll that was actually
   // attempted and failed may override it, because a failed poll is why the partner is doing
   // nothing. Reader absence is reported separately and never takes this slot: it is a transport
   // condition, and replacing the disposition there took away the reason an operator needs most.
-  status() { return { enabled: this.service.config.scheduler.enabled, busy: this.busy, active_run: this.activeRun, reason: this.lastReason, model: runtimeReadiness(this.service.config), source_readers: this.sourceReadersState }; }
-  async tick() {
+  // `reason_busy` is reported beside `busy` rather than inside it: the two loops are independent,
+  // and an operator looking at one long-running tick must be able to tell whether the eyes or the
+  // head is the thing that is working.
+  status() { return { enabled: this.service.config.scheduler.enabled, busy: this.busy, reason_busy: this.reasonBusy, active_run: this.activeRun, reason: this.lastReason, model: runtimeReadiness(this.service.config), source_readers: this.sourceReadersState, continuity: this.continuityState ?? { disposition: 'not_run' }, executive: this.executiveState ?? { disposition: 'not_run' } }; }
+  // The source loop. Poll, checkpoint, retire, discover. No model call anywhere in it.
+  async sourceTick() {
     if (this.busy || this.stopped || !this.service.config.scheduler.enabled) return;
     this.busy = true;
     try {
       const cfg = this.service.config;
+      // The first thing a source pass does, before any reconciliation and before anything is
+      // begun. This is the only moment at which "a refresh attempt is still `running`" means "the
+      // pass that owned it is gone" — it is true because `busy` admits one pass at a time, so
+      // reaching this line proves the previous pass returned. Anywhere else in the system a
+      // `running` refresh is simply a refresh in progress, and treating it as an orphan there
+      // would kill work that is waiting on the network.
+      try { await this.service.exclusive(() => this.service.store.transaction(
+        () => this.service.executive.sweepOrphanedRefreshes())); }
+      catch { /* Recovery must never stop the pass it is recovering. */ }
+      // No model is needed to preserve watch cursors, revoke old scope, or notice a
+      // deadline. Disabled continuity still retires revoked historical watches.
+      //
+      // Reconciliation stays here, in the loop that must keep its promise every tick, and not in
+      // the reasoning loop. A revoked watch retired by a model call that is slow to be scheduled
+      // is a revoked watch that keeps its authority for the length of that delay. Reconciliation
+      // needs no inference, so it owes no inference any patience.
+      // Set to `null` for the duration of the attempt, not to `true`. Setting `true` first is a
+      // race the split introduced: this line awaits, and the reasoning loop runs on its own timer,
+      // so a head pass starting during the await would read "healthy" for a reconciliation that
+      // has not finished and may still fail. `null` is the honest value while the answer is not
+      // known, and it withholds reasoning exactly as `false` does — a check in progress is not a
+      // check that passed. Written this way the flag is only ever a claim about a *completed*
+      // attempt, which is the only kind of claim worth reading.
+      this.continuityHealthy = null;
+      try {
+        await this.service.exclusive(() => this.service.continuity.reconcile());
+        this.continuityHealthy = true;
+        // A reconciliation that recovers clears its own failure. The state used to be written
+        // only on the way down, so one transient fault pinned the partner to
+        // `reconciliation_failed` for the rest of the process even though every later pass
+        // succeeded — an operator reading status() was told the partner was broken when the only
+        // thing that had happened was that it had recovered.
+        if (this.continuityState?.disposition === 'reconciliation_failed') this.continuityState = { disposition: 'reconciled' };
+      }
+      catch { this.continuityHealthy = false; this.continuityState = { disposition: 'reconciliation_failed' }; }
+      this.executiveHealthy = null;
+      try {
+        await this.service.exclusive(() => this.service.executive.reconcile());
+        this.executiveHealthy = true;
+        if (this.executiveState?.disposition === 'reconciliation_failed') this.executiveState = { disposition: 'reconciled' };
+      }
+      catch { this.executiveHealthy = false; this.executiveState = { disposition: 'reconciliation_failed' }; }
+      // The head is told which of the two reconciliations are trustworthy rather than being asked
+      // to find out. A failed reconciliation is a reason to withhold derived work, and it is
+      // recorded once per pass instead of being rediscovered inside every inference.
+      // `let`, not `const`: both flags are cleared below when a receipt cannot be written, and
+      // `const` on a name that is reassigned throws a `TypeError` at the first failure — which is
+      // the exact moment this code exists to handle. The instance flags are written at the same
+      // time so the next pass sees the failure too; the locals carry it through this one.
+      let continuityHealthy = this.continuityHealthy, executiveHealthy = this.executiveHealthy;
       if (cfg.opportunity?.automatic) {
         // A source that is configured but has no reader is not a quiet source. The poll loop
         // below skips it, it sits at its last confirmed cursor forever, and every other signal
@@ -69,7 +159,10 @@ export class Scheduler {
         } else if (!readersAbsent) this.readersAbsentReported = false;
         // Empty by default. Only a trusted bootstrap can supply narrowed read-only
         // transport capabilities. Reuse this tick, never the private-chat adapter.
-        let sourceReadFailed=false, sourceReadFailure=null;
+        // Whether a poll failed is now recorded per source in `sourceReadFailures` rather than
+        // as one flag for the pass. The flag was the bug: a pass that read nothing reported the
+        // partner healthy because nothing had been tried, not because anything had worked.
+        let sourceReadFailure=null;
         // Telegram is polled exactly as before, every tick, all of it. Browser sources are chosen
         // by their own interval and capped per tick, because a page that has not changed in five
         // minutes does not need to be fetched every twenty seconds — and a page that is down must
@@ -93,14 +186,19 @@ export class Scheduler {
           // Stamped once, before the attempt rather than in one branch after another, so the two
           // outcomes cannot stamp differently and so a source that fails waits exactly as long as
           // one that succeeds.
-          try { await pollSource(this.service, sourceId, transport); }
+          let researchAttempts = [], pollResult = null, pollFailed = false;
+          if (isBrowser && executiveHealthy) {
+            try { researchAttempts = await this.service.exclusive(() => this.service.store.transaction(() => this.service.executive.beginPoll(sourceId))); }
+            catch { this.executiveHealthy = false; executiveHealthy = false; this.executiveState = { disposition: 'receipt_failed' }; }
+          }
+          try { pollResult = await pollSource(this.service, sourceId, transport); this.sourceReadFailures.delete(sourceId); }
           catch (error) {
+            pollFailed = true;
             // A poll that fails silently is a source that can end up blocked with no evidence
             // left behind, which would otherwise leave the source failure without durable
             // evidence. Record the class of failure, the cursor it read at and the checkpoint's
             // own state, and nothing else: no message
             // text, no provider payload, no stack, no credentials.
-            sourceReadFailed=true;
             // Reading the checkpoint can itself fail on a corrupt row, and telemetry that throws
             // while reporting a failure would abort the very tick it is reporting about. The
             // checkpoint is the one for the transport that failed: a browser source has no pts at
@@ -111,6 +209,12 @@ export class Scheduler {
             // Only something shaped like a code is recorded. Anything else could be a provider
             // message carrying payload, and this lands in durable storage.
             const code=/^[A-Za-z0-9_.:-]{1,80}$/.test(raw) ? raw : 'UNCLASSIFIED';
+            // Recorded per source, and only on a real attempt. A source that was not due this
+            // pass is left exactly as it was: its failure is still the truth about it until a
+            // pass that actually reads it says otherwise, and the interval between two attempts
+            // can be minutes. Clearing on a tick where nothing was read is how a transport stops
+            // being reported while still being broken.
+            this.sourceReadFailures.set(sourceId, code);
             sourceReadFailure={ source_id:sourceId, code,
               checkpoint_pts:state?.pts ?? null, phase:state?.phase ?? null, reason:state?.reason ?? null };
             try { await this.service.exclusive(() => this.service.store.transaction(
@@ -119,18 +223,49 @@ export class Scheduler {
               () => this.service.store.event(cfg.partnerId, null, pollFailureKind(this.service, sourceId), 'system', sourceReadFailure))); }
             catch { /* Telemetry must never stop the queue. */ }
           }
+          if (researchAttempts.length) {
+            try { await this.service.exclusive(() => this.service.store.transaction(() => this.service.executive.finishPoll(researchAttempts, pollResult, pollFailed))); }
+            catch {
+              // The receipt write is what makes the poll mean anything to Executive, and it is
+              // the one thing here that can fail after the page was already read and ingested.
+              // A failure used to leave the attempt `running` with nothing to move it: the intent
+              // waited on a refresh that would never complete, and only a restart cleared it. That
+              // is fail-closed, and it is also a source that is silently never refreshed again —
+              // so the attempts are retired here, in a second transaction, by the same rule a
+              // crash uses. A receipt that cannot be written leaves the refresh unproven, and an
+              // unproven refresh must not stay in flight.
+              this.executiveHealthy = false; executiveHealthy = false;
+              this.executiveState = { disposition: 'receipt_failed' };
+              try { await this.service.exclusive(() => this.service.store.transaction(
+                () => this.service.executive.abandonPoll(researchAttempts, 'RECEIPT_PERSIST_FAILED'))); }
+              catch { /* The attempts stay running; reconciliation retires them on a later pass. */ }
+            }
+          }
         }
         if (cfg.discovery?.enabled === true) {
           try { await this.service.reconcileDiscovery(); }
           catch { this.lastReason = 'Discovery reconciliation failed; source truth remains durable'; }
         }
-        const result = await processSourceOpportunity(this.service, this.runtime);
-        // The disposition is the answer to "what is the partner doing", and a failed poll is
-        // reported in that same slot because it *is* why the partner is not doing anything. A
-        // missing reader is deliberately not: it is a transport fact, already recorded as an event
-        // and exposed in status().source_readers, and overwriting the disposition here took away
-        // the reason an operator needs most.
-        this.lastReason = sourceReadFailed ? `source_read_failed:${sourceReadFailure?.code ?? 'UNCLASSIFIED'}` : result.disposition; return;
+        // The pipeline's business disposition is no longer computed here — it belongs to the
+        // reasoning loop, and a source loop that overwrote it every twenty seconds would erase
+        // whatever the head last concluded before an operator could read it. What the source loop
+        // owns is the transport truth, so that is what it writes: a failed poll, or the word for
+        // "the sources are current" which is what an idle partner is.
+        // Derived from the unresolved set, not from whether this pass happened to fail. The set
+        // only changes when a source is actually read: a failure stays until a real attempt
+        // succeeds, a success clears only its own source, and a pass in which nothing was due
+        // leaves every known failure standing. One failing source is never hidden by another's
+        // success.
+        //
+        // The code is the lowest sorted one, so the same state always reads the same way. Which
+        // source failed is in status().source_readers and in the durable `source.*.poll.failed`
+        // event; this slot answers only "are the sources current", and a deterministic answer to
+        // that is worth more than a precise one nobody can act on.
+        this.sourceReadReason = this.sourceReadFailures.size
+          ? `source_read_failed:${[...this.sourceReadFailures.values()].sort()[0]}`
+          : null;
+        this.lastReason = this.sourceReadReason ?? this.lastReason ?? 'sources_current';
+        return;
       }
       if (cfg.discovery?.enabled === true) {
         try { await this.service.reconcileDiscovery(); }
@@ -199,6 +334,52 @@ export class Scheduler {
       }
     } finally { this.busy = false; this.activeRun = null; }
   }
+  // The reasoning loop. Three bounded inferences, at most one at a time, and never on the source
+  // loop's clock.
+  //
+  // Each stage revalidates what it was given, and that revalidation is the reason this could be
+  // moved at all rather than merely made faster. Continuity refuses a stale basis and marks the
+  // turn stale; Executive re-asserts authority, basis and evidence before it records a plan or a
+  // brief; Opportunity re-derives the context state and refuses a transport that is no longer
+  // current. A model that took three minutes to answer is therefore answering about a world that
+  // has since been checked, and a world that moved underneath it produces a refusal, not a
+  // confident summary of something that stopped being true.
+  async reasonTick() {
+    if (this.reasonBusy || this.stopped || !this.service.config.scheduler.enabled) return;
+    this.reasonBusy = true;
+    try {
+      const cfg = this.service.config;
+      // Read what the source loop last established rather than re-deriving it. A reconciliation
+      // that is failing withholds derived work — that is the fail-closed direction, and it is the
+      // reason this reads a flag instead of calling reconcile() a second time and hoping.
+      //
+      // "Never established" withholds exactly like "established and failed", because reasoning on
+      // a transport whose health nobody has checked is the expensive side of that choice. What
+      // differs is only what the operator is told: a partner that has not looked yet is waiting,
+      // not broken. One word of telemetry is the whole difference between a cold start and an
+      // incident, and conflating them is how an operator learns to ignore the field.
+      if (cfg.opportunity?.automatic !== true) return;
+      if (this.continuityHealthy !== true) {
+        this.continuityState = { disposition: this.continuityHealthy === false ? 'reconciliation_failed' : 'waiting_reconciliation' };
+        return;
+      }
+      try { this.continuityState = await processContinuity(this.service, this.runtime); }
+      catch { this.continuityState = { disposition: 'reasoning_failed' }; }
+      const result = await processSourceOpportunity(this.service, this.runtime);
+      // `=== true` rather than a truthiness test: `null` must mean "not established" here for the
+      // same reason it does for continuity, and a falsy check would keep the two honest by accident
+      // rather than by statement.
+      if (cfg.executive?.enabled === true && this.executiveHealthy === true) {
+        try { this.executiveState = await processExecutive(this.service, this.runtime); }
+        catch { this.executiveState = { disposition: 'processing_failed' }; }
+      }
+      // The disposition is the head's answer to "what is the partner doing". It does not take the
+      // slot from a failed poll: a transport that cannot be read is why the partner is not doing
+      // anything, and a business disposition would hide that. The failed poll wins, and it is the
+      // source loop that wrote it, so the two loops can no longer overwrite each other.
+      this.lastReason = this.sourceReadReason ?? result.disposition;
+    } finally { this.reasonBusy = false; }
+  }
   async ensurePlanningTask() {
     const cfg = this.service.config.scheduler; if (!cfg.dailyPlanning) return;
     const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: cfg.timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' }).formatToParts().map(p => [p.type,p.value]));
@@ -207,5 +388,9 @@ export class Scheduler {
     await this.service.exclusive(() => this.service.store.transaction(() => this.service.addTask({ kind: 'planning', title: 'План партнёра на день', instructions: 'Просмотри цель, незавершённые дела и доступные сведения. Предложи несколько полезных следующих действий; не дублируй существующие задачи.', due_at: now(), dedupe_key: key }, 'system', 'pending')));
   }
   cancel(runId) { this.runtime.cancel(runId); }
-  stop() { this.stopped = true; clearInterval(this.timer); this.runtime.close(); }
+  // Both timers, and the reason the reasoning loop needs its own: `clearInterval` on the source
+  // timer alone left the head running, and `runtime.close()` then killed the worker out from
+  // under a completion transaction that was mid-write. The caller drains `reasonBusy` before the
+  // store is closed; this only stops the clock and says so.
+  stop() { this.stopped = true; clearInterval(this.timer); clearInterval(this.reasonTimer); this.runtime.close(); }
 }

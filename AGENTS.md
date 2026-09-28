@@ -1,7 +1,7 @@
 # Project guidance
 
 - The product goal is in `digital_ai_partner_idea_for_astra.md`; implementation entrypoint is `README.md`.
-- The owner explicitly requested installation/architecture without tests or model calls. Do not run tests or contact a model until the owner changes this instruction. Syntax compilation via `npm run build` is allowed.
+- The owner explicitly authorizes running any tests required for verification, including local/offline suites, hosted CI, real model/API calls, and live read-only network/Telegram/Browser tests. Test permission does not authorize production/customer sends or weakening safety defaults; real outbound messages/actions still require explicit task-level authorization.
 - Business data and rules belong to `business/` and `partner/`. Keep upstream Hermes changes separate and retain its license and pinned revision.
 - Do not import credentials or datasets from the old `D:\\HARNES` workspace without a task requiring them. Never put secrets in tracked configuration, logs or exports.
 - A draft is not a sent message; an accepted call is not an attended call. Preserve versioned approvals, source evidence, suppression, ownership, and unknown delivery state.
