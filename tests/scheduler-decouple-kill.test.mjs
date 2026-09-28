@@ -104,7 +104,8 @@ const openAttentionThread = async (service, sourceRef, evidence = []) => {
 const harness = async (t, { readers = [], config } = {}) => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harnes2-decouple-'));
   const store = new Store(directory);
-  t.after(() => { store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  t.after(() => { try { store.close(); } catch { /* a shutdown test may close it deliberately */ }
+    fs.rmSync(directory, { recursive: true, force: true }); });
   const loaded = loadConfig();
   // Continuity is ON and the runtime reports itself ready. Without them every path into
   // `runtime.decide` is closed before it is reached — continuity returns `disabled` — so a head
@@ -157,7 +158,31 @@ const harness = async (t, { readers = [], config } = {}) => {
     }
     assert.equal(scheduler.continuityHealthy, true,
     'the source pass established reconciliation health'); };
-  return { store, service, scheduler, cfg, model: state, directory, establishHealth, threadId };
+  return { store, service, scheduler, cfg, model: state, directory, establishHealth,
+    get threadId() { return threadId; } };
+};
+
+// Build a real authorized Browser refresh through the operator contracts. Receipt tests must not
+// hand-write an intent with a fake authority hash: reconciliation correctly retires such a row
+// before beginPoll, which makes a test about receipt persistence pass or fail for the wrong reason.
+const authorizeRefresh = async (h) => {
+  await h.establishHealth();
+  const d = h.service.continuity.detail(h.threadId);
+  const evidence = d.evidence.find((e) => e.source_ref === sourceId);
+  assert.ok(evidence, 'the real thread has Browser evidence to refresh');
+  const proposed = await h.service.command('executive.propose', {
+    thread_id: h.threadId, expected_basis_fingerprint: d.basis_fingerprint,
+    plan: { question: 'Did the Browser evidence change?', decision_to_inform: 'Refresh the selected evidence',
+      completion_criterion: 'Read the selected source once', evidence_event_ids: [evidence.source_event_id],
+      refresh_source_ids: [sourceId] }
+  }, `req-${randomUUID()}`);
+  const intent = h.service.executive.detail(proposed.intent_id);
+  await h.service.command('executive.authorize', {
+    intent_id: proposed.intent_id, expected_revision: intent.revision,
+    expected_basis_fingerprint: intent.proposal_basis_fingerprint, allow_model: false,
+    deadline: new Date(Date.now() + 3_600_000).toISOString()
+  }, `req-${randomUUID()}`);
+  return proposed.intent_id;
 };
 
 // A real thread, because `research_intents.thread_id` is a foreign key. A receipt test that
@@ -237,8 +262,9 @@ test('a source is not left stale by a long head pass', async (t) => {
   scheduler.browserPolls.set(sourceId, { consideredAt: Date.now() - 400_000, readAt: Date.now() - 400_000 });
   const thinking = scheduler.reasonTick();
   for (let i = 0; i < 20 && model.pending === 0; i += 1) await new Promise((r) => setTimeout(r, 5));
+  const beforeRead = reads.length;
   await scheduler.sourceTick();
-  assert.equal(reads.length, 1, 'a due source is read while the head thinks');
+  assert.equal(reads.length, beforeRead + 1, 'a due source is read while the head thinks');
   // And the checkpoint is written, so the freshness boundary sees current evidence rather than
   // an age that only the reasoning timer was keeping alive.
   const row = service.store.get('SELECT cursor FROM channel_offsets WHERE channel=?', 'browser-source-v0');
@@ -323,46 +349,35 @@ test('stop() clears both timers, not only the source one', async (t) => {
 
 // 5. A receipt that cannot be written does not leave work in flight.
 test('a failed Executive receipt does not leave the attempt running', async (t) => {
-  const { scheduler, service, store, model } = await harness(t, { readers: [countingReader([])] });
-  // A real thread, because the intent's thread_id is a foreign key. Without it this test dies on
-  // the constraint before it reaches the scenario, and a test that cannot reach its own subject
-  // proves nothing about it.
-  seedThread(store, 'thread-1');
-  // Make finishPoll fail the way a real one does: the page was read and ingested, and the write
-  // that ties that truth to the intent is what breaks.
-  const original = service.executive.finishPoll.bind(service.executive);
+  const h = await harness(t, { readers: [countingReader([])] });
+  const iid = await authorizeRefresh(h);
+  const original = h.service.executive.finishPoll.bind(h.service.executive);
   let failNext = true;
-  service.executive.finishPoll = (...args) => { if (failNext) { failNext = false; throw new Error('db gone'); } return original(...args); };
-  store.run("INSERT INTO research_intents(id,partner_id,thread_id,authority_hash,proposal_basis_fingerprint,plan_packet_json,selection_json,refresh_sources_json,status,producer,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-    'intent-1', 'partner-001', 'thread-1', 'ah', 'bf', '{}', '{}', '[]', 'waiting_sources', 'operator', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
-  // `pending`, not `running`: this attempt is one the *upcoming* pass will begin, and a
-  // `running` row here would be swept as an orphan by the reconciliation that opens the pass.
-  // That is the orphan sweep working, not this test's subject.
-  store.run("INSERT INTO research_attempts(id,intent_id,capability_id,capability_version,slot,status,grant_version,created_at) VALUES(?,?,?,?,?,?,?,?)",
-    'attempt-1', 'intent-1', 'research.refresh_source', 'v1', `refresh:${sourceId}`, 'pending', 0, '2026-01-01T00:00:00Z');
-
-  await scheduler.sourceTick();
-  // The attempt must reach a terminal state in this same pass. Leaving it `running` is what
-  // made the intent wait on a refresh that would never complete, until a restart cleared it.
-  const row = store.get("SELECT status FROM research_attempts WHERE id=?", 'attempt-1');
-  assert.notEqual(row.status, 'running', 'the attempt is not left running after a failed receipt');
-  assert.ok(['failed', 'interrupted_unknown'].includes(row.status), `terminal state, got ${row.status}`);
-  model.releaseAll();
+  h.service.executive.finishPoll = (...args) => {
+    if (failNext) { failNext = false; throw new Error('db gone'); }
+    return original(...args);
+  };
+  h.scheduler.browserPolls.set(sourceId, { consideredAt: Date.now() - 400_000, readAt: Date.now() - 400_000 });
+  await h.scheduler.sourceTick();
+  const attempt = h.store.get("SELECT * FROM research_attempts WHERE intent_id=? AND slot=?", iid, `refresh:${sourceId}`);
+  assert.equal(attempt.status, 'interrupted_unknown',
+    'a receipt that could not be persisted is terminal and explicitly unknown');
+  assert.match(attempt.receipt_json, /RECEIPT_PERSIST_FAILED/);
+  assert.equal(h.scheduler.executiveState.disposition, 'receipt_failed');
+  h.model.releaseAll();
 });
 
 test('a refresh that completes writes a receipt and succeeds', async (t) => {
   const reads = [];
-  const { scheduler, store } = await harness(t, { readers: [countingReader(reads)] });
-  seedThread(store, 'thread-2');
-  store.run("INSERT INTO research_intents(id,partner_id,thread_id,authority_hash,proposal_basis_fingerprint,plan_packet_json,selection_json,refresh_sources_json,status,producer,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-    'intent-2', 'partner-001', 'thread-2', 'ah', 'bf', '{}', '{}', '[]', 'waiting_sources', 'operator', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
-  store.run("INSERT INTO research_attempts(id,intent_id,capability_id,capability_version,slot,status,grant_version,created_at) VALUES(?,?,?,?,?,?,?,?)",
-    'attempt-2', 'intent-2', 'research.refresh_source', 'v1', `refresh:${sourceId}`, 'pending', 0, '2026-01-01T00:00:00Z');
-  await scheduler.sourceTick();
-  const row = store.get("SELECT status FROM research_attempts WHERE id=?", 'attempt-2');
-  assert.notEqual(row.status, 'running', 'a completed pass leaves nothing in flight');
-  assert.ok(['succeeded', 'failed', 'interrupted_unknown'].includes(row.status),
-    `the attempt is terminal either way, got ${row.status}`);
+  const h = await harness(t, { readers: [countingReader(reads)] });
+  const iid = await authorizeRefresh(h);
+  h.scheduler.browserPolls.set(sourceId, { consideredAt: Date.now() - 400_000, readAt: Date.now() - 400_000 });
+  const before = reads.length;
+  await h.scheduler.sourceTick();
+  assert.equal(reads.length, before + 1, 'the authorized refresh used the due Browser poll');
+  const attempt = h.store.get("SELECT * FROM research_attempts WHERE intent_id=? AND slot=?", iid, `refresh:${sourceId}`);
+  assert.equal(attempt.status, 'succeeded', 'a completed refresh owns a succeeded receipt');
+  assert.match(attempt.receipt_json, /evidence_added|no_new_evidence/);
 });
 
 // The orphan sweep, which is what makes the guarantee above survive a crash rather than a
@@ -491,7 +506,8 @@ test('a real success clears only that source', async (t) => {
   scheduler.sourceReadFailures.set('browser:example', 'BROWSER_DNS_FAILED');
   scheduler.sourceReadFailures.set('browser:other', 'BROWSER_TIMEOUT');
   // The reader succeeds, so its own entry goes and nothing else does. One healthy source was
-  // never evidence about another.
+  // never evidence about another. establishHealth() just read it, so make the retry genuinely due.
+  scheduler.browserPolls.set(sourceId, { consideredAt: Date.now() - 400_000, readAt: Date.now() - 400_000 });
   await scheduler.sourceTick();
   assert.equal(scheduler.sourceReadFailures.has('browser:example'), false, 'the read source recovered');
   assert.equal(scheduler.sourceReadFailures.has('browser:other'), true, 'the unread source is still broken');
@@ -648,7 +664,7 @@ test('a free-form failure never becomes the stored reason', async (t) => {
   }, lookup: async () => [{ address: '93.184.216.34', family: 4 }] });
   await assert.rejects(() => pollBrowserSource(service, sourceId, leaky()));
   const stored = JSON.stringify(browserCheckpoint(service, sourceId));
-  assert.match(stored, /BROWSER_READ_FAILED/, 'an unrecognised failure becomes one declared class');
+  assert.match(stored, /BROWSER_FETCH_FAILED/, 'an unrecognised transport failure becomes the closed fallback class');
   for (const token of ['93.184', 'sk-live', 'ECONNREFUSED', 'connect '])
     assert.ok(!stored.includes(token), `nothing of the provider error may survive: ${token}`);
 });
@@ -736,20 +752,21 @@ test('a reader replaced by a new one is the only one the boundary may ask', asyn
 test('a failure that could not be written leaves the source not current', async (t) => {
   const { service, store } = await harness(t, { readers: [] });
   const sourceId = 'browser:example';
-  const reader = workingReader(service, sourceId);
+  let failRead = false;
+  const reader = new BrowserSourceReader(browserPolicy(service, sourceId), { service,
+    request: async () => {
+      if (failRead) throw Object.assign(new Error('resolver said no'), { code: 'ENOTFOUND' });
+      return okPage();
+    },
+    lookup: async () => [{ address: '93.184.216.34', family: 4 }] });
   await pollBrowserSource(service, sourceId, reader);
   assert.equal(sourceAccessReadiness(service, sourceId).current, true);
 
-  // Break the store, then fail the read through the transport rather than by replacing the
-  // method under test. The read failure must not be what the operator is told, because the
-  // record of it is exactly what did not happen.
+  // Same reader, same health seam: the read fails and the DB cannot record retrying.
   const transaction = service.store.transaction.bind(service.store);
+  failRead = true;
   service.store.transaction = () => { throw new Error('db gone'); };
-  // The reader keeps the same good transport: the read succeeds, and it is the *write* of the
-  // failure record that cannot land. Reusing the reader also keeps the latch honest, since a new
-  // reader would start unproven and the assertion below would pass without the write failing.
-  const dead = deadReader(service, sourceId);
-  await assert.rejects(() => pollBrowserSource(service, sourceId, dead),
+  await assert.rejects(() => pollBrowserSource(service, sourceId, reader),
     (e) => e.code === 'BROWSER_CHECKPOINT_UPDATE_FAILED',
     'the unrecordable failure is reported as the unrecordable failure');
   service.store.transaction = transaction;
@@ -762,6 +779,7 @@ test('a failure that could not be written leaves the source not current', async 
   assert.equal(sourceAccessReadiness(service, sourceId).reason, 'SOURCE_TRANSPORT_DIRTY');
 
   // And it recovers on its own once the store works again.
+  failRead = false;
   await pollBrowserSource(service, sourceId, reader);
   assert.equal(sourceAccessReadiness(service, sourceId).current, true,
     'a later good read restores the source without any operator action');
