@@ -77,9 +77,17 @@ export class Scheduler {
       // the reasoning loop. A revoked watch retired by a model call that is slow to be scheduled
       // is a revoked watch that keeps its authority for the length of that delay. Reconciliation
       // needs no inference, so it owes no inference any patience.
-      this.continuityHealthy = true;
+      // Set to `null` for the duration of the attempt, not to `true`. Setting `true` first is a
+      // race the split introduced: this line awaits, and the reasoning loop runs on its own timer,
+      // so a head pass starting during the await would read "healthy" for a reconciliation that
+      // has not finished and may still fail. `null` is the honest value while the answer is not
+      // known, and it withholds reasoning exactly as `false` does — a check in progress is not a
+      // check that passed. Written this way the flag is only ever a claim about a *completed*
+      // attempt, which is the only kind of claim worth reading.
+      this.continuityHealthy = null;
       try {
         await this.service.exclusive(() => this.service.continuity.reconcile());
+        this.continuityHealthy = true;
         // A reconciliation that recovers clears its own failure. The state used to be written
         // only on the way down, so one transient fault pinned the partner to
         // `reconciliation_failed` for the rest of the process even though every later pass
@@ -88,9 +96,10 @@ export class Scheduler {
         if (this.continuityState?.disposition === 'reconciliation_failed') this.continuityState = { disposition: 'reconciled' };
       }
       catch { this.continuityHealthy = false; this.continuityState = { disposition: 'reconciliation_failed' }; }
-      this.executiveHealthy = true;
+      this.executiveHealthy = null;
       try {
         await this.service.exclusive(() => this.service.executive.reconcile());
+        this.executiveHealthy = true;
         if (this.executiveState?.disposition === 'reconciliation_failed') this.executiveState = { disposition: 'reconciled' };
       }
       catch { this.executiveHealthy = false; this.executiveState = { disposition: 'reconciliation_failed' }; }

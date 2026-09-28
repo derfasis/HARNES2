@@ -424,6 +424,45 @@ test('a successful pass permits reasoning and clears the waiting state', async (
     'once a pass has established health, the waiting state is gone');
 });
 
+// The race the split introduced.
+//
+// Setting the health flag before awaiting the reconciliation means the reasoning loop, which runs
+// on its own timer, can read `true` for a reconciliation that is still in flight and about to
+// fail. The test holds a reconciliation open rather than racing it, so what is asserted is the
+// rule and not the timing: a check that has not finished is not a check that passed.
+test('a head pass during an in-flight reconciliation is withheld', async (t) => {
+  const { scheduler, service, model } = harness(t, { readers: [] });
+  const original = service.continuity.reconcile.bind(service.continuity);
+  const gates = [];
+  service.continuity.reconcile = () => new Promise((resolve) => { gates.push(() => { resolve(); return original(); }); });
+  const passing = scheduler.sourceTick();
+  for (let i = 0; i < 50 && gates.length === 0; i += 1) await new Promise((r) => setTimeout(r, 5));
+  assert.equal(gates.length, 1, 'the source pass is inside the reconciliation');
+  await scheduler.reasonTick();
+  assert.equal(model.calls, 0, 'the head does not reason on a check that has not finished');
+  assert.equal(scheduler.continuityHealthy, null, 'and the flag is not claimed as healthy');
+  assert.equal(scheduler.continuityState.disposition, 'waiting_reconciliation');
+  gates.pop()(); await passing;
+  assert.equal(scheduler.continuityHealthy, true, 'the flag is set only once the answer is in');
+  model.releaseAll();
+});
+
+test('a reconciliation that fails while the head waits reports the failure, not the wait', async (t) => {
+  const { scheduler, service, model } = harness(t, { readers: [] });
+  const gates = [];
+  service.continuity.reconcile = () => new Promise((_, reject) => { gates.push(() => reject(new Error('db down'))); });
+  const passing = scheduler.sourceTick();
+  for (let i = 0; i < 50 && gates.length === 0; i += 1) await new Promise((r) => setTimeout(r, 5));
+  await scheduler.reasonTick();
+  assert.equal(scheduler.continuityState.disposition, 'waiting_reconciliation',
+    'while it is still running, the head is waiting');
+  gates.pop()(); await passing;
+  assert.equal(scheduler.continuityHealthy, false, 'the completed attempt is a failure');
+  assert.equal(scheduler.continuityState.disposition, 'reconciliation_failed',
+    'and the operator is told so, rather than being left on the waiting message');
+  model.releaseAll();
+});
+
 // The boundary the split must not cross.
 test('the two loops are independent locks', async (t) => {
   const { scheduler, model, establishHealth } = harness(t, { readers: [] });
