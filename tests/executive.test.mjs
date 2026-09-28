@@ -20,6 +20,7 @@ import { EXECUTIVE_TABLES } from '../business/executive-tables.mjs';
 import { start } from '../business/server.mjs';
 
 const SOURCE = 'public:executive', BROWSER = 'browser:executive';
+const ACTIVE_OFFER = readJson(path.join(ROOT, 'benchmarks/opportunity-projection-v0/case-01.json')).active_offer;
 const fixture = extra => ({ source_id: SOURCE, source_kind: 'sanitized_fixture', message_id: 'm1', author_id: 'a1',
   display_name: null, thread_id: null, reply_to_id: null, version: 1, operation: 'upsert', text: 'Two hours weekly.',
   created_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-01T00:00:00.000Z', ...extra });
@@ -29,8 +30,9 @@ function harness(t, browser = false) {
   config.continuity = { enabled: true, modelEnabled: false };
   config.executive = { enabled: true, modelEnabled: false, autoPlan: false, maxModelRunsPerDay: 5 };
   config.opportunity = { ...config.opportunity, automatic: true, allowedSourceRefs: [SOURCE, ...(browser ? [BROWSER] : [])],
-    activeOffer: { id: 'fixture', version: 'v1', text: 'Test only' }, browserSources: browser ? [
-      { sourceId: BROWSER, url: 'https://example.com/offer', maxLagSeconds: 3600, pollEverySeconds: 300 }] : [] };
+    activeOffer: ACTIVE_OFFER, browserSources: browser ? [
+      { sourceId: BROWSER, url: 'https://example.com/offer', maxLagSeconds: 3600, pollEverySeconds: 300,
+        processingBasis: 'Executive synthetic test only', sourceKind: 'live_snapshot' }] : [] };
   let store = new Store(directory), service = new BusinessService(store, config);
   t.after(() => { store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
   const h = { directory, config, get store() { return store; }, get service() { return service; },
