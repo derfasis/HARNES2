@@ -548,12 +548,47 @@ test('a source whose reader is failing is not current, whatever the checkpoint s
   await pollBrowserSource(service, sourceId, reader);
   assert.equal(sourceAccessReadiness(service, sourceId).current, true, 'a good read is current');
 
-  // The reader now fails. `readPage` marks the latch before rethrowing, so the boundary sees a
-  // reader that has stopped being able to read even though nothing durable changed.
-  reader.readPage = async () => { throw new BrowserFetchError('BROWSER_DNS_FAILED'); };
-  await assert.rejects(() => pollBrowserSource(service, sourceId, reader), (e) => e.code === 'BROWSER_DNS_FAILED');
+  // The same reader, now pointed at a page that cannot be read. The failure comes from the
+  // transport itself rather than from replacing the method under test — an earlier version of
+  // this test reassigned `readPage`, which skipped the very code that marks the latch, so the
+  // latch was never exercised and the test passed for the wrong reason.
+  reader.markCurrent();
+  const dead = new BrowserSourceReader(browserPolicy(service, sourceId), { service,
+    request: async () => { throw new BrowserFetchError('BROWSER_DNS_FAILED'); },
+    lookup: async () => [{ address: '93.184.216.34', family: 4 }] });
+  await assert.rejects(() => pollBrowserSource(service, sourceId, dead), (e) => e.code === 'BROWSER_DNS_FAILED');
+  assert.equal(service.sourceTransportHealth.get(sourceId)(), false,
+    'the failing reader is the one that now answers for the source');
   assert.equal(sourceAccessReadiness(service, sourceId).current, false,
-    'the latch refuses the source even though the checkpoint write succeeded');
+    'and the source is refused even though its checkpoint write succeeded');
+  void reader;
+});
+
+// The case a socket-level latch cannot see: the page was read successfully and the intake refused
+// it. The network answered, the durable checkpoint stayed on the previous confirmation, and a
+// boundary that asked "did the socket answer" would call a source current whose newest reading
+// was thrown away.
+test('a read the intake refused does not leave the source current', async (t) => {
+  const { service, store } = harness(t, { readers: [] });
+  const sourceId = 'browser:example';
+  const reader = new BrowserSourceReader(browserPolicy(service, sourceId), { service,
+    request: async () => ({ body: Buffer.from('<p>ok</p>'), statusCode: 200,
+      headers: { 'content-type': 'text/html' } }), lookup: async () => [{ address: '93.184.216.34', family: 4 }] });
+  await pollBrowserSource(service, sourceId, reader);
+  assert.equal(sourceAccessReadiness(service, sourceId).current, true, 'a committed read is current');
+
+  // The read still succeeds; the store refuses the commit that would make it evidence.
+  const transaction = service.store.transaction.bind(service.store);
+  service.store.transaction = () => { throw new Error('db gone'); };
+  await assert.rejects(() => pollBrowserSource(service, sourceId, reader));
+  service.store.transaction = transaction;
+
+  assert.equal(browserCheckpoint(service, sourceId).phase, 'current',
+    'the durable checkpoint is the old one, because the commit never landed');
+  assert.equal(sourceAccessReadiness(service, sourceId).current, false,
+    'and the source is refused anyway, because the reader knows the read was never accepted');
+  assert.equal(sourceAccessReadiness(service, sourceId).reason, 'SOURCE_TRANSPORT_DIRTY');
+  void store;
 });
 
 test('a reader that has never succeeded does not vouch for a source a previous process confirmed', async (t) => {
@@ -598,12 +633,18 @@ test('a failure that could not be written leaves the source not current', async 
   await pollBrowserSource(service, sourceId, reader);
   assert.equal(sourceAccessReadiness(service, sourceId).current, true);
 
-  // Break the store, then fail the read. The read failure must not be what the operator is told,
-  // because the record of it is exactly what did not happen.
+  // Break the store, then fail the read through the transport rather than by replacing the
+  // method under test. The read failure must not be what the operator is told, because the
+  // record of it is exactly what did not happen.
   const transaction = service.store.transaction.bind(service.store);
   service.store.transaction = () => { throw new Error('db gone'); };
-  reader.readPage = async () => { throw new BrowserFetchError('BROWSER_DNS_FAILED'); };
-  await assert.rejects(() => pollBrowserSource(service, sourceId, reader),
+  // The reader keeps the same good transport: the read succeeds, and it is the *write* of the
+  // failure record that cannot land. Reusing the reader also keeps the latch honest, since a new
+  // reader would start unproven and the assertion below would pass without the write failing.
+  const dead = new BrowserSourceReader(browserPolicy(service, sourceId), { service,
+    request: async () => { throw new BrowserFetchError('BROWSER_DNS_FAILED'); },
+    lookup: async () => [{ address: '93.184.216.34', family: 4 }] });
+  await assert.rejects(() => pollBrowserSource(service, sourceId, dead),
     (e) => e.code === 'BROWSER_CHECKPOINT_UPDATE_FAILED',
     'the unrecordable failure is reported as the unrecordable failure');
   service.store.transaction = transaction;
