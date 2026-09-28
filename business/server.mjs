@@ -96,7 +96,7 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
   const scheduler = new Scheduler(service,runtime,telegram,[]);
   telegram.onSourcesReady = readers => { telegramReaders = readers ?? []; composeReaders(); };
   composeReaders();
-  let shuttingDown = false;
+  let shuttingDown = false, servicePort = config.server.port;
   const server = http.createServer(async (req,res) => {
     const send = (code,value) => { res.writeHead(code, {'Content-Type':'application/json; charset=utf-8'}); res.end(JSON.stringify(value)); };
     res.setHeader('Cache-Control','no-store'); res.setHeader('X-Content-Type-Options','nosniff');
@@ -104,7 +104,7 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
     res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
     try {
       ensure(!shuttingDown, 'Приложение завершает работу', 503);
-      const hosts = [`127.0.0.1:${config.server.port}`,`localhost:${config.server.port}`];
+      const hosts = [`127.0.0.1:${servicePort}`,`localhost:${servicePort}`];
       ensure(hosts.includes(req.headers.host), 'Недопустимый Host', 403);
       ensure(!req.headers.origin || hosts.map(h => `http://${h}`).includes(req.headers.origin), 'Недопустимый Origin', 403);
       ensure(!['cross-site'].includes(req.headers['sec-fetch-site']), 'Запрос с другого сайта запрещён', 403);
@@ -207,6 +207,8 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
   server.requestTimeout = 30000; server.headersTimeout = 10000;
   try { await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(config.server.port,config.server.host,resolve);}); }
   catch (error) {store.close();throw error;}
+  const listeningAddress = server.address();
+  if (listeningAddress && typeof listeningAddress === 'object') servicePort = listeningAddress.port;
   // Recovery occurs only after acquiring this server port; a duplicate launch cannot interrupt the live instance.
   store.recover();
   invalidateRevokedDiscoverySources(service);
@@ -215,10 +217,10 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
   try { service.executive.reconcile(); }
   catch { scheduler.executiveState = { disposition: 'reconciliation_failed' }; }
   fs.mkdirSync(path.join(directory,'runtime'),{recursive:true});
-  fs.writeFileSync(path.join(directory,'runtime/mcp-connection.json'),JSON.stringify({url:`http://127.0.0.1:${config.server.port}`,token:mcpToken}),{mode:0o600});
-  fs.writeFileSync(path.join(directory,'runtime/service.json'),JSON.stringify({pid:process.pid,port:config.server.port,started_at:new Date().toISOString()}));
+  fs.writeFileSync(path.join(directory,'runtime/mcp-connection.json'),JSON.stringify({url:`http://127.0.0.1:${servicePort}`,token:mcpToken}),{mode:0o600});
+  fs.writeFileSync(path.join(directory,'runtime/service.json'),JSON.stringify({pid:process.pid,port:servicePort,started_at:new Date().toISOString()}));
   scheduler.start(); telegram.start();
-  console.log(`Digital AI Partner: http://127.0.0.1:${config.server.port}`);
+  console.log(`Digital AI Partner: http://127.0.0.1:${servicePort}`);
   console.log(`Hermes ${runtimeReadiness(config).ready ? 'enabled' : 'waiting for model configuration'}; Telegram ${config.telegram.enabled ? 'enabled' : 'disabled'}.`);
   const close = async () => {
     if (shuttingDown) return; shuttingDown=true; scheduler.stop();
