@@ -55,8 +55,26 @@ const harness = (t, { readers = [], config } = {}) => {
   const { runtime, state } = heldModel();
   const scheduler = new Scheduler(service, runtime, { readiness: () => ({ enabled: false, live_sending: false }) }, readers);
   t.after(() => state.releaseAll());
-  return { store, service, scheduler, cfg, model: state, directory };
+  // `continuityHealthy` starts false on purpose — a reasoning pass that runs before any source
+  // pass must not infer from a reconciliation nobody attempted. A test that wants the head to
+  // think therefore has to earn it: this is the source pass that establishes the health it
+  // reads. Without it the model never starts and every head assertion below would be green for
+  // the wrong reason, which is the failure mode this whole file exists to catch.
+  const establishHealth = async () => { await scheduler.sourceTick(); assert.equal(scheduler.continuityHealthy, true,
+    'the source pass established reconciliation health'); };
+  return { store, service, scheduler, cfg, model: state, directory, establishHealth };
 };
+
+// A real thread, because `research_intents.thread_id` is a foreign key. A receipt test that
+// inserts a thread_id nothing else knows dies on the constraint before it reaches the scenario
+// under test, and a test that cannot reach its own subject proves nothing. The columns are the
+// ones the migration actually declares NOT NULL, so this row is a thread the rest of the code
+// would accept rather than one that merely exists.
+const seedThread = (store, id = 'thread-1') => store.run(
+  `INSERT INTO partner_threads(id,partner_id,title,objective,success_condition,business_basis,
+     max_age_seconds,status,revision,attention,attention_reasons_json,attention_at,created_at,updated_at)
+   VALUES(?,?,?,?,?,?,86400,'OPEN',1,1,'[]','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')`,
+  id, 'partner-001', 'Kill-test', 'Prove the scenario', 'The scenario is reached', 'business_basis', 'thread');
 
 // A reader that counts how many times it was read. Cadence is the observable: what matters is
 // not that the page was fetched but that the fetch happened at all while the head was busy.
@@ -68,7 +86,8 @@ const countingReader = (reads, { fail = false } = {}) => ({ sourceId,
 // 1. The head is mid-thought and the source is still read.
 test('a reasoning pass in flight does not stop the source loop', async (t) => {
   const reads = [];
-  const { scheduler, model } = harness(t, { readers: [countingReader(reads)] });
+  const { scheduler, model, establishHealth } = harness(t, { readers: [countingReader(reads)] });
+  await establishHealth();
   // Start the head and let it reach the model. It will not return until released.
   const thinking = scheduler.reasonTick();
   for (let i = 0; i < 20 && model.pending === 0; i += 1) await new Promise((r) => setTimeout(r, 5));
@@ -88,7 +107,8 @@ test('a reasoning pass in flight does not stop the source loop', async (t) => {
 
 test('two source passes run while one head pass is still thinking', async (t) => {
   const reads = [];
-  const { scheduler, model } = harness(t, { readers: [countingReader(reads)] });
+  const { scheduler, model, establishHealth } = harness(t, { readers: [countingReader(reads)] });
+  await establishHealth();
   const thinking = scheduler.reasonTick();
   for (let i = 0; i < 20 && model.pending === 0; i += 1) await new Promise((r) => setTimeout(r, 5));
   await scheduler.sourceTick();
@@ -103,7 +123,8 @@ test('two source passes run while one head pass is still thinking', async (t) =>
 // 2. Freshness does not decay because of reasoning.
 test('a source is not left stale by a long head pass', async (t) => {
   const reads = [];
-  const { scheduler, service, model } = harness(t, { readers: [countingReader(reads)] });
+  const { scheduler, service, model, establishHealth } = harness(t, { readers: [countingReader(reads)] });
+  await establishHealth();
   // Age the schedule so the source is genuinely due, exactly as it would be after maxLagSeconds
   // of ticks. Aging the real record is the point: a stamp left at zero would make the source
   // look permanently due and the test would pass for the wrong reason.
@@ -121,7 +142,8 @@ test('a source is not left stale by a long head pass', async (t) => {
 
 // 3. A cancelled or revoked turn mid-thought is not accepted.
 test('an answer that arrives after its work was cancelled is not applied', async (t) => {
-  const { scheduler, service, model } = harness(t, { readers: [countingReader([])] });
+  const { scheduler, service, model, establishHealth } = harness(t, { readers: [countingReader([])] });
+  await establishHealth();
   const thinking = scheduler.reasonTick();
   for (let i = 0; i < 20 && model.pending === 0; i += 1) await new Promise((r) => setTimeout(r, 5));
   // While the worker is away the operator cancels whatever it was reasoning about. The
@@ -138,7 +160,8 @@ test('an answer that arrives after its work was cancelled is not applied', async
 // 4. Shutdown does not close the store from under a worker.
 test('shutdown drains a head pass before the store is closed', async (t) => {
   const reads = [];
-  const { scheduler, store, model } = harness(t, { readers: [countingReader(reads)] });
+  const { scheduler, store, model, establishHealth } = harness(t, { readers: [countingReader(reads)] });
+  await establishHealth();
   const thinking = scheduler.reasonTick();
   for (let i = 0; i < 20 && model.pending === 0; i += 1) await new Promise((r) => setTimeout(r, 5));
   // The exact condition server.mjs drains. `reasonBusy` is the term that had to be added; a
@@ -151,54 +174,98 @@ test('shutdown drains a head pass before the store is closed', async (t) => {
   await thinking; await drained();
   assert.equal(scheduler.reasonBusy, false, 'and it drains to false before anything is closed');
   assert.doesNotThrow(() => store.get('SELECT 1 AS n'), 'the store is still usable after the drain');
-  assert.equal(scheduler.timer, undefined ?? scheduler.timer, 'timers were cleared by stop()');
 });
 
 test('stop() clears both timers, not only the source one', async (t) => {
   const { scheduler } = harness(t, { readers: [] });
   scheduler.start();
-  assert.ok(scheduler.timer, 'the source timer exists');
-  assert.ok(scheduler.reasonTimer, 'the reasoning timer exists');
+  const source = scheduler.timer, head = scheduler.reasonTimer;
+  assert.ok(source, 'the source timer exists');
+  assert.ok(head, 'the reasoning timer exists');
+  assert.notEqual(source, head, 'and they are two distinct timers, not one aliased twice');
   scheduler.stop();
-  // A timer that survived stop() would keep calling into a stopped service for the life of the
-  // process, and nothing would say so.
+  // Asserted against handles captured *before* stop(), never against `scheduler.timer` itself.
+  // Comparing a field to itself passes no matter what the field holds, which is why this
+  // assertion was worth rewriting rather than keeping: a timer that survived stop() would keep
+  // calling into a stopped service for the life of the process, and nothing would say so.
+  assert.equal(source._destroyed, true, 'the source timer was destroyed');
+  assert.equal(head._destroyed, true, 'the reasoning timer was destroyed');
   assert.equal(scheduler.stopped, true);
 });
 
 // 5. A receipt that cannot be written does not leave work in flight.
 test('a failed Executive receipt does not leave the attempt running', async (t) => {
   const { scheduler, service, store, model } = harness(t, { readers: [countingReader([])] });
+  // A real thread, because the intent's thread_id is a foreign key. Without it this test dies on
+  // the constraint before it reaches the scenario, and a test that cannot reach its own subject
+  // proves nothing about it.
+  seedThread(store, 'thread-1');
   // Make finishPoll fail the way a real one does: the page was read and ingested, and the write
   // that ties that truth to the intent is what breaks.
   const original = service.executive.finishPoll.bind(service.executive);
   let failNext = true;
   service.executive.finishPoll = (...args) => { if (failNext) { failNext = false; throw new Error('db gone'); } return original(...args); };
-  const attempt = 'attempt-1';
   store.run("INSERT INTO research_intents(id,partner_id,thread_id,authority_hash,proposal_basis_fingerprint,plan_packet_json,selection_json,refresh_sources_json,status,producer,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
     'intent-1', 'partner-001', 'thread-1', 'ah', 'bf', '{}', '{}', '[]', 'waiting_sources', 'operator', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+  // `pending`, not `running`: this attempt is one the *upcoming* pass will begin, and a
+  // `running` row here would be swept as an orphan by the reconciliation that opens the pass.
+  // That is the orphan sweep working, not this test's subject.
   store.run("INSERT INTO research_attempts(id,intent_id,capability_id,capability_version,slot,status,grant_version,created_at) VALUES(?,?,?,?,?,?,?,?)",
-    attempt, 'intent-1', 'research.refresh_source', 'v1', `refresh:${sourceId}`, 'running', 0, '2026-01-01T00:00:00Z');
+    'attempt-1', 'intent-1', 'research.refresh_source', 'v1', `refresh:${sourceId}`, 'pending', 0, '2026-01-01T00:00:00Z');
 
   await scheduler.sourceTick();
   // The attempt must reach a terminal state in this same pass. Leaving it `running` is what
   // made the intent wait on a refresh that would never complete, until a restart cleared it.
-  const row = store.get("SELECT status FROM research_attempts WHERE id=?", attempt);
+  const row = store.get("SELECT status FROM research_attempts WHERE id=?", 'attempt-1');
   assert.notEqual(row.status, 'running', 'the attempt is not left running after a failed receipt');
   assert.ok(['failed', 'interrupted_unknown'].includes(row.status), `terminal state, got ${row.status}`);
   model.releaseAll();
 });
 
-test('a successful refresh still finishes, so the failure path is not the only path', async (t) => {
+test('a refresh that completes writes a receipt and succeeds', async (t) => {
   const reads = [];
   const { scheduler, store } = harness(t, { readers: [countingReader(reads)] });
+  seedThread(store, 'thread-2');
   store.run("INSERT INTO research_intents(id,partner_id,thread_id,authority_hash,proposal_basis_fingerprint,plan_packet_json,selection_json,refresh_sources_json,status,producer,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-    'intent-2', 'partner-001', 'thread-1', 'ah', 'bf', '{}', '{}', '[]', 'waiting_sources', 'operator', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+    'intent-2', 'partner-001', 'thread-2', 'ah', 'bf', '{}', '{}', '[]', 'waiting_sources', 'operator', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
   store.run("INSERT INTO research_attempts(id,intent_id,capability_id,capability_version,slot,status,grant_version,created_at) VALUES(?,?,?,?,?,?,?,?)",
-    'attempt-2', 'intent-2', 'research.refresh_source', 'v1', `refresh:${sourceId}`, 'running', 0, '2026-01-01T00:00:00Z');
+    'attempt-2', 'intent-2', 'research.refresh_source', 'v1', `refresh:${sourceId}`, 'pending', 0, '2026-01-01T00:00:00Z');
   await scheduler.sourceTick();
   const row = store.get("SELECT status FROM research_attempts WHERE id=?", 'attempt-2');
+  assert.notEqual(row.status, 'running', 'a completed pass leaves nothing in flight');
   assert.ok(['succeeded', 'failed', 'interrupted_unknown'].includes(row.status),
     `the attempt is terminal either way, got ${row.status}`);
+});
+
+// The orphan sweep, which is what makes the guarantee above survive a crash rather than a
+// well-behaved pass.
+test('a refresh attempt orphaned by a dead pass is retired on the next pass', async (t) => {
+  const { scheduler, store } = harness(t, { readers: [countingReader([])] });
+  seedThread(store, 'thread-3');
+  store.run("INSERT INTO research_intents(id,partner_id,thread_id,authority_hash,proposal_basis_fingerprint,plan_packet_json,selection_json,refresh_sources_json,status,producer,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+    'intent-3', 'partner-001', 'thread-3', 'ah', 'bf', '{}', '{}', '[]', 'waiting_sources', 'operator', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+  store.run("INSERT INTO research_attempts(id,intent_id,capability_id,capability_version,slot,status,grant_version,created_at) VALUES(?,?,?,?,?,?,?,?)",
+    'attempt-3', 'intent-3', 'research.refresh_source', 'v1', `refresh:${sourceId}`, 'running', 0, '2026-01-01T00:00:00Z');
+  // Nothing is polling this source, so the only thing that can move the attempt is the sweep.
+  await scheduler.sourceTick();
+  const row = store.get("SELECT status,receipt_json FROM research_attempts WHERE id=?", 'attempt-3');
+  assert.equal(row.status, 'interrupted_unknown', 'the orphan is retired, not left running');
+  assert.match(row.receipt_json, /ORPHANED_REFRESH_ATTEMPT/,
+    'and the reason says it was orphaned rather than failed for some other reason');
+});
+
+test('a model attempt running beside the source loop is not swept', async (t) => {
+  const { scheduler, store } = harness(t, { readers: [countingReader([])] });
+  seedThread(store, 'thread-4');
+  store.run("INSERT INTO research_intents(id,partner_id,thread_id,authority_hash,proposal_basis_fingerprint,plan_packet_json,selection_json,refresh_sources_json,status,producer,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+    'intent-4', 'partner-001', 'thread-4', 'ah', 'bf', '{}', '{}', '[]', 'reasoning', 'operator', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z');
+  // A plan attempt is legitimately running for as long as the head takes. The sweep is scoped to
+  // `research.refresh_source` precisely so a source pass cannot cancel a model's work.
+  store.run("INSERT INTO research_attempts(id,intent_id,capability_id,capability_version,slot,status,grant_version,created_at) VALUES(?,?,?,?,?,?,?,?)",
+    'attempt-4', 'intent-4', 'research.plan', 'v1', 'plan', 'running', 0, '2026-01-01T00:00:00Z');
+  await scheduler.sourceTick();
+  const row = store.get("SELECT status FROM research_attempts WHERE id=?", 'attempt-4');
+  assert.equal(row.status, 'running', 'the source loop does not touch a model attempt');
 });
 
 // 6. A recovered reconciliation is reported as recovered.
@@ -232,8 +299,9 @@ test('a head pass is withheld while reconciliation is failing', async (t) => {
 
 // The boundary the split must not cross.
 test('the two loops are independent locks', async (t) => {
-  const { scheduler, model } = harness(t, { readers: [] });
+  const { scheduler, model, establishHealth } = harness(t, { readers: [] });
   assert.equal(scheduler.busy, false); assert.equal(scheduler.reasonBusy, false);
+  await establishHealth();
   const thinking = scheduler.reasonTick();
   for (let i = 0; i < 20 && model.pending === 0; i += 1) await new Promise((r) => setTimeout(r, 5));
   assert.equal(scheduler.reasonBusy, true); assert.equal(scheduler.busy, false,

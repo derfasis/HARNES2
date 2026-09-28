@@ -288,8 +288,34 @@ export class ExecutiveLoop {
       catch (e) { if (!(e instanceof AppError)) throw e; }
     }
   }
+  // Refresh attempts that outlived the pass that started them.
+  //
+  // The source loop is not reentrant — `busy` admits one pass at a time — and a refresh attempt
+  // is only ever live inside a single source pass: beginPoll, poll, finishPoll, in that order,
+  // with no await between the bookends that could belong to another pass. So a refresh attempt
+  // still `running` when a *new* source pass begins is not slow, it is orphaned: the pass that
+  // owned it died between beginPoll and finishPoll, and nothing else will ever move it. Before
+  // this, that left the intent waiting on a refresh that could never complete until a restart.
+  //
+  // Model attempts are deliberately NOT touched. `research.plan` and `research.submit_brief` are
+  // legitimately `running` for as long as a reasoning pass takes, and that pass is exactly what
+  // must not be disturbed by a reconciliation running beside it.
+  sweepOrphanedRefreshes() {
+    const orphans = this.db.all(`SELECT a.id AS attempt_id FROM research_attempts a
+      JOIN research_intents i ON i.id=a.intent_id
+      WHERE i.partner_id=? AND a.capability_id='research.refresh_source' AND a.status='running'`,
+      this.partnerId);
+    for (const o of orphans) {
+      this.db.run("UPDATE research_attempts SET status='interrupted_unknown',receipt_json=?,finished_at=? WHERE id=? AND status='running'",
+        JSON.stringify({ outcome: 'unknown', reason: 'ORPHANED_REFRESH_ATTEMPT', attempt_id: o.attempt_id }), now(), o.attempt_id);
+      const row = this.db.get('SELECT * FROM research_intents WHERE id=(SELECT intent_id FROM research_attempts WHERE id=?)', o.attempt_id);
+      if (row && ACTIVE.includes(row.status)) this.terminate(row, 'failed', 'ORPHANED_REFRESH_ATTEMPT');
+    }
+    return orphans.length;
+  }
   reconcile() {
     return this.db.transaction(() => {
+      this.sweepOrphanedRefreshes();
       const cursor = this.db.get('SELECT cursor FROM channel_offsets WHERE channel=? AND account_id=?', CURSOR, this.partnerId)?.cursor ?? '';
       const page = (after, take, before = null) => this.db.all(`SELECT * FROM research_intents WHERE partner_id=? AND id>?
         AND status IN (SELECT value FROM json_each(?)) ${before ? 'AND id<=?' : ''} ORDER BY id LIMIT ?`, this.partnerId, after, JSON.stringify(ACTIVE), ...(before ? [before] : []), take);
