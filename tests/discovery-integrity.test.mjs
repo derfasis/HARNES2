@@ -897,6 +897,7 @@ test('v3 bundle from a clean database imports into the current schema with empty
   delete v3.tables.discovery_situations;
   delete v3.tables.discovery_evidence;
   for (const table of ['partner_threads', 'partner_watches', 'partner_observations', 'partner_turns']) delete v3.tables[table];
+  for (const table of ['research_intents', 'research_attempts']) delete v3.tables[table];
   v3.migrations = v3.migrations.slice(0, 3);
   v3.tables_sha256 = hash(JSON.stringify(v3.tables));
   const file = path.join(directory, 'v3.json'); fs.writeFileSync(file, JSON.stringify(v3));

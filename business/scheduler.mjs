@@ -8,6 +8,7 @@ import { sourceCheckpointState } from './source-ingestion.mjs';
 import { id } from './store.mjs';
 import { now } from './errors.mjs';
 import { processContinuity } from './continuity-reasoning.mjs';
+import { processExecutive } from './executive-reasoning.mjs';
 
 export class Scheduler {
   constructor(service, runtime, telegram, sourceReaders = []) { this.sourceReaders = sourceReaders; this.service = service; this.runtime = runtime; this.telegram = telegram; this.busy = false; this.stopped = false; this.lastReason = null; this.activeRun = null; this.readersAbsentReported = false; this.sourceReadersState = null; this.browserPolls = new Map(); }
@@ -16,7 +17,7 @@ export class Scheduler {
   // attempted and failed may override it, because a failed poll is why the partner is doing
   // nothing. Reader absence is reported separately and never takes this slot: it is a transport
   // condition, and replacing the disposition there took away the reason an operator needs most.
-  status() { return { enabled: this.service.config.scheduler.enabled, busy: this.busy, active_run: this.activeRun, reason: this.lastReason, model: runtimeReadiness(this.service.config), source_readers: this.sourceReadersState, continuity: this.continuityState ?? { disposition: 'not_run' } }; }
+  status() { return { enabled: this.service.config.scheduler.enabled, busy: this.busy, active_run: this.activeRun, reason: this.lastReason, model: runtimeReadiness(this.service.config), source_readers: this.sourceReadersState, continuity: this.continuityState ?? { disposition: 'not_run' }, executive: this.executiveState ?? { disposition: 'not_run' } }; }
   async tick() {
     if (this.busy || this.stopped || !this.service.config.scheduler.enabled) return;
     this.busy = true;
@@ -27,6 +28,9 @@ export class Scheduler {
       let continuityHealthy = true;
       try { await this.service.exclusive(() => this.service.continuity.reconcile()); }
       catch { continuityHealthy = false; this.continuityState = { disposition: 'reconciliation_failed' }; }
+      let executiveHealthy = true;
+      try { await this.service.exclusive(() => this.service.executive.reconcile()); }
+      catch { executiveHealthy = false; this.executiveState = { disposition: 'reconciliation_failed' }; }
       if (cfg.opportunity?.automatic) {
         // A source that is configured but has no reader is not a quiet source. The poll loop
         // below skips it, it sits at its last confirmed cursor forever, and every other signal
@@ -99,8 +103,14 @@ export class Scheduler {
           // Stamped once, before the attempt rather than in one branch after another, so the two
           // outcomes cannot stamp differently and so a source that fails waits exactly as long as
           // one that succeeds.
-          try { await pollSource(this.service, sourceId, transport); }
+          let researchAttempts = [], pollResult = null, pollFailed = false;
+          if (isBrowser && executiveHealthy) {
+            try { researchAttempts = await this.service.exclusive(() => this.service.store.transaction(() => this.service.executive.beginPoll(sourceId))); }
+            catch { executiveHealthy = false; this.executiveState = { disposition: 'receipt_failed' }; }
+          }
+          try { pollResult = await pollSource(this.service, sourceId, transport); }
           catch (error) {
+            pollFailed = true;
             // A poll that fails silently is a source that can end up blocked with no evidence
             // left behind, which would otherwise leave the source failure without durable
             // evidence. Record the class of failure, the cursor it read at and the checkpoint's
@@ -125,6 +135,10 @@ export class Scheduler {
               () => this.service.store.event(cfg.partnerId, null, pollFailureKind(this.service, sourceId), 'system', sourceReadFailure))); }
             catch { /* Telemetry must never stop the queue. */ }
           }
+          if (researchAttempts.length) {
+            try { await this.service.exclusive(() => this.service.store.transaction(() => this.service.executive.finishPoll(researchAttempts, pollResult, pollFailed))); }
+            catch { executiveHealthy = false; this.executiveState = { disposition: 'receipt_failed' }; }
+          }
         }
         if (cfg.discovery?.enabled === true) {
           try { await this.service.reconcileDiscovery(); }
@@ -135,6 +149,15 @@ export class Scheduler {
           catch { this.continuityState = { disposition: 'reasoning_failed' }; }
         }
         const result = await processSourceOpportunity(this.service, this.runtime);
+        if (cfg.executive?.enabled === true && executiveHealthy && continuityHealthy) {
+          try {
+            // Derived work follows existing source/Opportunity processing. Refresh never
+            // adds a poll, changes cadence, or bypasses the per-tick source budget.
+            await this.service.exclusive(() => this.service.continuity.reconcile());
+            await this.service.exclusive(() => this.service.executive.reconcile());
+            this.executiveState = await processExecutive(this.service, this.runtime);
+          } catch { this.executiveState = { disposition: 'processing_failed' }; }
+        }
         // The disposition is the answer to "what is the partner doing", and a failed poll is
         // reported in that same slot because it *is* why the partner is not doing anything. A
         // missing reader is deliberately not: it is a transport fact, already recorded as an event

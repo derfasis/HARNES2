@@ -3,7 +3,7 @@ import path from 'node:path';
 import Ajv from 'ajv';
 import { ROOT, readJson } from './config.mjs';
 import { id } from './store.mjs';
-import { ensure, requiredText, dateTime, now } from './errors.mjs';
+import { ensure, requiredText, dateTime, now, AppError } from './errors.mjs';
 import { sourceEvent, sourceRows, sourceAccessReadiness, sourceTransportKind, browserCheckpoint, digest } from './source-ingestion.mjs';
 
 export const proposalSchema = readJson(path.join(ROOT, 'contracts/continuity-proposal.schema.json'));
@@ -86,6 +86,7 @@ export class ContinuityLoop {
         const reasons = [];
         if (!access.current) reasons.push(access.reason);
         if (!latest || latest.event_id !== String(e.id) || m.operation !== 'upsert') reasons.push('CONTINUITY_EVIDENCE_SUPERSEDED');
+        if (typeof m.text !== 'string' || !m.text.trim()) reasons.push('CONTINUITY_EVIDENCE_UNSUPPORTED');
         const freshnessAt = confirmation ?? e.created_at;
         if (Date.parse(freshnessAt) + row.max_age_seconds * 1000 <= Date.now()) reasons.push('CONTINUITY_EVIDENCE_EXPIRED');
         result.set(String(e.id), { source_event_id: String(e.id), source_ref: watch.source_ref, author_id: m.author_id,
@@ -141,9 +142,14 @@ export class ContinuityLoop {
     check(row, 'CONTINUITY_TURN_NOT_FOUND', 404);
     const { packet_json, output_json, ...rest } = row;
     const current = this.detail(row.thread_id);
+    let reviewable = row.status === 'proposed' && current.ready && current.basis_fingerprint === row.basis_fingerprint;
+    if (reviewable) {
+      try { this.assertCurrent(row); }
+      catch (e) { if (!(e instanceof AppError)) throw e; reviewable = false; }
+    }
     return { ...rest, packet: parse(packet_json), packet_captured_at: row.created_at,
       output: output_json ? parse(output_json) : null,
-      reviewable: row.status === 'proposed' && current.ready && current.basis_fingerprint === row.basis_fingerprint, ...AUTHORITY };
+      reviewable, ...AUTHORITY };
   }
   open(p) {
     this.enabled(); fields(p, ['title', 'objective', 'success_condition', 'source_ids', 'max_age_seconds', 'initial_evidence_event_ids']);
@@ -197,6 +203,13 @@ export class ContinuityLoop {
   assertCurrent(turn) {
     const current = this.detail(turn.thread_id);
     check(current.ready && current.basis_fingerprint === turn.basis_fingerprint, 'CONTINUITY_STALE_BASIS');
+    // A scoped research packet may retain selected items beyond the recent window.
+    // Validate these versions too; the window fingerprint alone cannot guard them.
+    const packet = turn.packet ?? parse(turn.packet_json);
+    const selected = [...packet.evidence, ...packet.memory_evidence].map(e => e.source_event_id);
+    const states = this.evidenceStates(this.thread(turn.thread_id), this.watches(turn.thread_id), selected);
+    check(selected.every(ref => states.get(ref)?.current), 'CONTINUITY_STALE_BASIS');
+    this.service.executive?.assertTurnCurrent(turn);
   }
   propose(p, producer = 'operator') {
     fields(p, ['turn_id', 'output']); const turn = this.turn(p.turn_id);
@@ -239,7 +252,9 @@ export class ContinuityLoop {
     check(actor?.kind === 'operator', 'CONTINUITY_OPERATOR_REQUIRED', 403);
     if (action === 'continuity.open') return this.open(p);
     if (action === 'continuity.capture') return this.capture(p);
-    if (action === 'continuity.propose') { this.enabled(); return this.propose(p); }
+    if (action === 'continuity.propose') {
+      this.enabled(); check(!this.turn(p.turn_id).packet.research, 'EXECUTIVE_SUBMIT_REQUIRED'); return this.propose(p);
+    }
     if (action === 'continuity.review') return this.review(p);
     if (action === 'continuity.note') {
       this.enabled(); fields(p, ['thread_id', 'expected_revision', 'text']); const row = this.thread(p.thread_id);

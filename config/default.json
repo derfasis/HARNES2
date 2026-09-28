@@ -1,4 +1,10 @@
 {
+  "executive": {
+    "enabled": false,
+    "modelEnabled": false,
+    "autoPlan": false,
+    "maxModelRunsPerDay": 5
+  },
   "server": {
     "host": "127.0.0.1",
     "port": 8790

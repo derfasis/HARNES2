@@ -11,6 +11,7 @@ const panel = (title,content,action='') => `<section class="panel"><div class="p
 let token='',state=null,tab='overview',selected=null,detail=null;
 let reviewFilter='pending',reviewOffset=0,reviewDetail=null;
 const pending = new Map();
+let researchView = null;
 async function api(route,body) {
   const response = await fetch(route,{method:body === undefined?'GET':'POST',headers:{'x-partner-token':token,...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});
   const data = await response.json(); if(!response.ok) throw new Error(data.error ?? 'Операция не завершена'); return data;
@@ -24,13 +25,17 @@ async function refresh() {
   state=await api('/api/state');if(selected) detail=await api(`/api/conversations/${encodeURIComponent(selected)}`);
   if(tab==='tasks')state.opportunity_reviews=await api(`/api/opportunities?status=${encodeURIComponent(reviewFilter)}&offset=${reviewOffset}`);
   if(tab==='discovery')await loadDiscovery();
+  if(tab==='research'){
+    researchView ??= (await import('./research.js')).createResearchView({ api, command, esc, panel, button, empty, field, modal, refresh });
+    await researchView.load();
+  }
   $('#model-status').textContent=state.runtime.ready?'Модель подключена':'Ожидает подключения ИИ';
   $('#model-status').className=`pill${state.runtime.ready?' ready':''}`;render();
 }
 function render(){
-  const titles={overview:'Обзор',people:'Люди и диалоги',tasks:'Задачи',discovery:'Discovery',experience:'Память и опыт',capabilities:'Способности',runs:'История работы',settings:'Подключения'};
+  const titles={overview:'Обзор',people:'Люди и диалоги',tasks:'Задачи',discovery:'Discovery',research:'Исследования',experience:'Память и опыт',capabilities:'Способности',runs:'История работы',settings:'Подключения'};
   $('#page-title').textContent=titles[tab];document.querySelectorAll('[data-tab]').forEach(x=>x.classList.toggle('active',x.dataset.tab===tab));
-  $('#content').innerHTML=({overview:overview,people:people,tasks:tasks,discovery:discoveryTab,experience:experience,capabilities:capabilities,runs:runs,settings:settings}[tab])();
+  $('#content').innerHTML=({overview:overview,people:people,tasks:tasks,discovery:discoveryTab,research:()=>researchView.render(),experience:experience,capabilities:capabilities,runs:runs,settings:settings}[tab])();
 }
 function overview(){
   const m=state.metrics,pendingTasks=state.tasks.filter(t=>['pending','proposed','running'].includes(t.status));
@@ -272,6 +277,7 @@ function modal(title,content,onSubmit){
 const convOptions=()=>[['','Общая работа партнёра'],...state.conversations.map(c=>[c.id,c.name])];
 const convPayload=()=>({conversation_id:selected});
 async function act(action,itemId,extra){
+  if(action.startsWith('research-')){await researchView.act(action,itemId);return;}
   if(action==='discovery-select'){await selectSituation(itemId);render();return;}
   if(action==='discovery-next'){await nextDiscoveryPage();render();return;}
   // Stage 4E: operator decisions call the existing commands with the exact current basis, and a

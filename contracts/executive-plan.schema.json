@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object", "additionalProperties": false, "required": ["kind", "reason", "plan"],
+  "properties": {
+    "kind": { "enum": ["research", "no_research"] },
+    "reason": { "type": "string", "minLength": 1, "maxLength": 2000, "pattern": "\\S" },
+    "plan": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/plan" }] }
+  },
+  "$defs": {
+    "text": { "type": "string", "minLength": 1, "maxLength": 2000, "pattern": "\\S" },
+    "plan": {
+      "type": "object", "additionalProperties": false,
+      "required": ["question", "decision_to_inform", "completion_criterion", "evidence_event_ids", "refresh_source_ids"],
+      "properties": {
+        "question": { "$ref": "#/$defs/text" }, "decision_to_inform": { "$ref": "#/$defs/text" },
+        "completion_criterion": { "$ref": "#/$defs/text" },
+        "evidence_event_ids": { "type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[1-9][0-9]*$", "maxLength": 20 } },
+        "refresh_source_ids": { "type": "array", "maxItems": 2, "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1, "maxLength": 300 } }
+      }
+    }
+  }
+}

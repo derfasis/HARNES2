@@ -10,11 +10,13 @@ import { REVIEW_ACTIONS, reviewOpportunity, opportunityReviewDetail, opportunity
 import { EngagementLoop, ENGAGEMENT_ACTIONS, ENGAGEMENT_AGENT_ACTIONS } from './engagement.mjs';
 import { ContinuityLoop } from './continuity.mjs';
 import { CONTINUITY_ACTIONS } from './continuity-tables.mjs';
+import { ExecutiveLoop } from './executive.mjs';
+import { EXECUTIVE_ACTIONS } from './executive-tables.mjs';
 import { discoveryCommand, discoveryDecisionQueue, discoveryDetail, discoveryPresentationDetail, discoveryReasonStates, ensureDiscoveryApplied, hasDiscoveryPending, invalidateDiscoveryOffers, markDiscoveryPending, reconcileDiscoveryPending, recordDiscoveryFailure, staleMaterialEvidence, DISCOVERY_ACTIONS, DISCOVERY_REVIEW_TASK } from './discovery.mjs';
 
 const OUTCOMES = new Set(['qualified','call_proposed','call_accepted','call_booked','call_attended','no_show','joined','declined','business_value']);
 export class BusinessService {
-  constructor(store, config) { this.store = store; this.config = config; this.tail = Promise.resolve(); this.telegramAccountId = null; this.engagement = new EngagementLoop(this); this.continuity = new ContinuityLoop(this); this.discoveryApply = ensureDiscoveryApplied; this.reconcileDiscovery = () => reconcileDiscoveryPending(this, 50); }
+  constructor(store, config) { this.store = store; this.config = config; this.tail = Promise.resolve(); this.telegramAccountId = null; this.engagement = new EngagementLoop(this); this.continuity = new ContinuityLoop(this); this.executive = new ExecutiveLoop(this); this.discoveryApply = ensureDiscoveryApplied; this.reconcileDiscovery = () => reconcileDiscoveryPending(this, 50); }
   exclusive(fn) { const job = this.tail.then(fn); this.tail = job.catch(() => {}); return job; }
   partner() { return this.store.get('SELECT * FROM partners WHERE id=?', this.config.partnerId); }
   person(personId) {
@@ -105,7 +107,9 @@ export class BusinessService {
       ensure(!['fact.propose','task.propose','lesson.propose','capability.propose'].includes(action),'Use engagement-scoped proposals',403);
     }
     let result;
-    if (CONTINUITY_ACTIONS.has(action)) {
+    if (EXECUTIVE_ACTIONS.has(action)) {
+      result = this.executive.command(action, p, actor);
+    } else if (CONTINUITY_ACTIONS.has(action)) {
       result = this.continuity.command(action, p, actor);
     } else if (DISCOVERY_ACTIONS.has(action)) {
       result = discoveryCommand(this, action, p, actor);
@@ -369,7 +373,9 @@ export class BusinessService {
       }
       default: throw new AppError('Неизвестная команда', 400);
     }
-    this.store.event(this.config.partnerId, conversationId, action, actor.kind, { ...p, result, run_id: actor.runId ?? null,
+    // Imported donor extras are untrusted and intentionally discarded, not echoed into audit.
+    const auditPayload = action === 'executive.import_candidates' ? { format: 'openoutfind-jsonl', raw_input_persisted: false } : p;
+    this.store.event(this.config.partnerId, conversationId, action, actor.kind, { ...auditPayload, result, run_id: actor.runId ?? null,
       ...(REVIEW_ACTIONS.includes(action) ? { request_id: requestId } : {}) });
     this.store.run('INSERT INTO command_receipts VALUES(?,?,?,?)', requestId, fingerprint, JSON.stringify(result), now());
     return result;

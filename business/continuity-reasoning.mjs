@@ -28,6 +28,8 @@ function prepare(service) {
   const page = (after, take, before = null) => service.store.all(`SELECT p.id FROM partner_threads p
     WHERE p.partner_id=? AND p.status='OPEN' AND p.attention=1 AND p.id>?
     ${before === null ? '' : 'AND p.id<=?'}
+    AND NOT EXISTS (SELECT 1 FROM research_intents r WHERE r.thread_id=p.id
+      AND r.status IN ('plan_requested','planning','proposed','waiting_sources','ready','reasoning','brief_proposed'))
     AND NOT EXISTS (SELECT 1 FROM partner_turns t WHERE t.thread_id=p.id AND
       (t.basis_revision=p.revision OR t.status IN ('running','captured','proposed'))) ORDER BY p.id LIMIT ?`,
     cfg.partnerId, after, ...(before === null ? [] : [before]), take);

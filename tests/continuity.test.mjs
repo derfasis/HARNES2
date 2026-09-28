@@ -11,6 +11,7 @@ import { processContinuity } from '../business/continuity-reasoning.mjs';
 import { Scheduler } from '../business/scheduler.mjs';
 import { exportPartner } from '../business/export.mjs';
 import { CONTINUITY_TABLES } from '../business/continuity-tables.mjs';
+import { EXECUTIVE_TABLES } from '../business/executive-tables.mjs';
 import { spawnSync } from 'node:child_process';
 import { hash } from '../business/store.mjs';
 import { pollBrowserSource } from '../business/sources/browser-readonly.mjs';
@@ -350,7 +351,7 @@ test('new memory and cursors export/import; a four-migration bundle shape restor
   for (const legacy of [false, true]) {
     const data = structuredClone(bundle);
     if (legacy) {
-      for (const table of CONTINUITY_TABLES) delete data.tables[table];
+      for (const table of [...CONTINUITY_TABLES, ...EXECUTIVE_TABLES]) delete data.tables[table];
       data.migrations = data.migrations.slice(0, 4); data.tables_sha256 = hash(JSON.stringify(data.tables));
     }
     const file = path.join(h.directory, `bundle-${legacy}.json`); fs.writeFileSync(file, JSON.stringify(data));
@@ -559,7 +560,7 @@ test('an actual four-migration SQLite database upgrades in place without rewriti
   try {
     assert.deepEqual(store.all('SELECT * FROM events'), before);
     assert.equal(store.get('SELECT mission FROM partners').mission, 'Original baseline mission');
-    assert.equal(store.all('SELECT * FROM schema_migrations').length, 5);
+    assert.equal(store.all('SELECT * FROM schema_migrations').length, 6);
     assert.deepEqual(store.all('PRAGMA foreign_key_check'), []);
     noEffects({ store });
     for (const table of CONTINUITY_TABLES) assert.equal(store.get(`SELECT COUNT(*) n FROM ${table}`).n, 0);

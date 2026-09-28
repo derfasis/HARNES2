@@ -15,9 +15,10 @@ import { MtprotoTelegramChannel } from './channels/telegram-mtproto.mjs';
 import { BrowserSourceReader, browserPolicy } from './sources/browser-readonly.mjs';
 import { toolDefinitions, callTool } from './tools.mjs';
 import { exportPartner } from './export.mjs';
+import { listCandidates } from './executive-donors.mjs';
 import { AppError, ensure, requiredText } from './errors.mjs';
 
-const publicFiles = new Map([['/', ['index.html','text/html; charset=utf-8']], ['/app.js',['app.js','text/javascript; charset=utf-8']], ['/styles.css',['styles.css','text/css; charset=utf-8']], ['/favicon.svg',['favicon.svg','image/svg+xml']]]);
+const publicFiles = new Map([['/', ['index.html','text/html; charset=utf-8']], ['/app.js',['app.js','text/javascript; charset=utf-8']], ['/research.js',['research.js','text/javascript; charset=utf-8']], ['/styles.css',['styles.css','text/css; charset=utf-8']], ['/favicon.svg',['favicon.svg','image/svg+xml']]]);
 const validateCommand = new Ajv().compile(readJson(path.join(ROOT,'contracts/command.schema.json')));
 const tokenEquals = (a,b) => typeof a === 'string' && Buffer.byteLength(a) === Buffer.byteLength(b) && timingSafeEqual(Buffer.from(a),Buffer.from(b));
 async function readBody(req) {
@@ -115,6 +116,22 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
         return send(404,{error:'not found'});
       }
       ensure(tokenEquals(req.headers['x-partner-token'],operatorToken), 'Перезагрузите страницу для обновления сессии', 403);
+      if (req.method === 'GET' && url.pathname.startsWith('/api/executive/')) {
+        if (url.pathname === '/api/executive/candidates') {
+          ensure([...url.searchParams.keys()].every(k => ['limit','cursor'].includes(k))
+            && [...url.searchParams.keys()].every(k => url.searchParams.getAll(k).length === 1), 'Invalid candidate query', 400);
+          return send(200, listCandidates(service, { limit: Number(url.searchParams.get('limit') ?? 20), cursor: url.searchParams.get('cursor') ?? '0' }));
+        }
+        if (url.pathname === '/api/executive/intents') {
+          ensure([...url.searchParams.keys()].every(k => ['limit','cursor','thread_id'].includes(k))
+            && [...url.searchParams.keys()].every(k => url.searchParams.getAll(k).length === 1), 'Invalid executive query', 400);
+          return send(200, service.executive.list({ limit: Number(url.searchParams.get('limit') ?? 20),
+            cursor: url.searchParams.get('cursor') ?? '', thread_id: url.searchParams.get('thread_id') }));
+        }
+        const match = /^\/api\/executive\/intents\/([^/]+)$/.exec(url.pathname);
+        if (match) { ensure([...url.searchParams].length === 0, 'Invalid executive query', 400); return send(200, service.executive.detail(decodeURIComponent(match[1]))); }
+        return send(404, { error: 'not found' });
+      }
       if (req.method === 'GET' && url.pathname.startsWith('/api/continuity/')) {
         if (url.pathname === '/api/continuity/threads') {
           ensure([...url.searchParams.keys()].every(k => ['limit','cursor'].includes(k))
@@ -180,6 +197,8 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
   invalidateRevokedDiscoverySources(service);
   try { service.continuity.reconcile(); }
   catch { scheduler.continuityState = { disposition: 'reconciliation_failed' }; }
+  try { service.executive.reconcile(); }
+  catch { scheduler.executiveState = { disposition: 'reconciliation_failed' }; }
   fs.mkdirSync(path.join(directory,'runtime'),{recursive:true});
   fs.writeFileSync(path.join(directory,'runtime/mcp-connection.json'),JSON.stringify({url:`http://127.0.0.1:${config.server.port}`,token:mcpToken}),{mode:0o600});
   fs.writeFileSync(path.join(directory,'runtime/service.json'),JSON.stringify({pid:process.pid,port:config.server.port,started_at:new Date().toISOString()}));
