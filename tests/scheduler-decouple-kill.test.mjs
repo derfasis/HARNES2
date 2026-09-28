@@ -587,6 +587,41 @@ test('a reader replaced by a new one is the only one the boundary may ask', asyn
   assert.equal(second.owns(service), true, 'the newest reader is the one that answers');
 });
 
+// The whole point of the latch, in the exact state the latch exists for: the read failed, the
+// write that would have recorded it failed too, and durable storage still says `current`.
+test('a failure that could not be written leaves the source not current', async (t) => {
+  const { service, store } = harness(t, { readers: [] });
+  const sourceId = 'browser:example';
+  const reader = new BrowserSourceReader(browserPolicy(service, sourceId), { service,
+    request: async () => ({ body: Buffer.from('<p>ok</p>'), statusCode: 200,
+      headers: { 'content-type': 'text/html' } }), lookup: async () => [{ address: '93.184.216.34', family: 4 }] });
+  await pollBrowserSource(service, sourceId, reader);
+  assert.equal(sourceAccessReadiness(service, sourceId).current, true);
+
+  // Break the store, then fail the read. The read failure must not be what the operator is told,
+  // because the record of it is exactly what did not happen.
+  const transaction = service.store.transaction.bind(service.store);
+  service.store.transaction = () => { throw new Error('db gone'); };
+  reader.readPage = async () => { throw new BrowserFetchError('BROWSER_DNS_FAILED'); };
+  await assert.rejects(() => pollBrowserSource(service, sourceId, reader),
+    (e) => e.code === 'BROWSER_CHECKPOINT_UPDATE_FAILED',
+    'the unrecordable failure is reported as the unrecordable failure');
+  service.store.transaction = transaction;
+
+  // Durable state is stale, and that is the scenario, not a setup accident.
+  assert.equal(browserCheckpoint(service, sourceId).phase, 'current',
+    'the checkpoint still claims current because nothing could be written');
+  assert.equal(sourceAccessReadiness(service, sourceId).current, false,
+    'and the source is still refused, because the reader knows better than the record does');
+  assert.equal(sourceAccessReadiness(service, sourceId).reason, 'SOURCE_TRANSPORT_DIRTY');
+
+  // And it recovers on its own once the store works again.
+  await pollBrowserSource(service, sourceId, reader);
+  assert.equal(sourceAccessReadiness(service, sourceId).current, true,
+    'a later good read restores the source without any operator action');
+  void store;
+});
+
 // The boundary the split must not cross.
 test('the two loops are independent locks', async (t) => {
   const { scheduler, model, establishHealth } = harness(t, { readers: [] });

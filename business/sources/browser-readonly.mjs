@@ -153,7 +153,16 @@ export async function pollBrowserSource(service, sourceId, transport) {
     const code = /^[A-Z][A-Z0-9_]{1,63}$/.test(raw) ? raw : 'BROWSER_READ_FAILED';
     try { await service.exclusive(() => service.store.transaction(() => writeBrowserCheckpoint(service, sourceId,
       { source_id: sourceId, policy_hash: browserPolicyHash(policy), phase: 'retrying', confirmed_at: null, reason: code }))); }
-    catch { /* The read already failed; a failure to record it must not replace the real cause. */ }
+    catch {
+      // Not swallowed. The reader's latch already withholds the source, so nothing unsafe is
+      // believed either way — but durable storage now disagrees with reality, and an operator
+      // reading a `current` checkpoint for a source that just failed to be read has to be told
+      // that, not handed the read failure as if the record had been updated. The code names the
+      // condition and carries nothing from either underlying error.
+      const failure = new AppError('The browser checkpoint could not be updated', 409, 'BROWSER_CHECKPOINT_UPDATE_FAILED');
+      failure.code = 'BROWSER_CHECKPOINT_UPDATE_FAILED';
+      throw failure;
+    }
     throw error;
   }
 
