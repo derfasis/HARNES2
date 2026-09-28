@@ -64,7 +64,21 @@ export async function processContinuity(service, runtime) {
   try {
     return await service.exclusive(() => service.store.transaction(() => {
       const turn = service.continuity.turn(prepared.turn.id);
-      if (turn.status !== 'running') return { disposition: 'interrupted' };
+      if (turn.status !== 'running') {
+        // The turn was retired while the worker was away — an operator refused it, or
+        // reconciliation closed it. The answer is correctly not applied, but the run row opened
+        // by `prepare` still has to be closed: returning here without accounting for it left it
+        // `running` for the life of the process, with no `finished_at` and no cost status, and it
+        // kept counting against the daily usage guard until a restart. The sibling loop handles
+        // the identical case — a worker returning to a row someone else retired — by still
+        // writing its receipt, and this is the same requirement.
+        const spent = usageAccounting(JSON.parse(prepared.run.context_json).model_config, result?.usage);
+        service.store.run(`UPDATE runs SET status='interrupted',result_json=?,error='TURN_RETIRED',input_tokens=?,output_tokens=?,estimated_cost_usd=?,cost_status=?,finished_at=? WHERE id=? AND status='running'`,
+          JSON.stringify({ disposition: 'interrupted', turn_id: turn.id, model_identity: modelIdentity(result),
+            model_identity_reason: modelIdentity(result) ? null : 'runtime_identity_missing_or_invalid' }),
+          'TURN_RETIRED', spent.input, spent.output, spent.cost, spent.costStatus, now(), prepared.run.id);
+        return { disposition: 'interrupted', turn_id: turn.id };
+      }
       const { input, output, cost, costStatus } = usageAccounting(JSON.parse(prepared.run.context_json).model_config, result?.usage);
       const tools = result?.tool_calls != null && (!Array.isArray(result.tool_calls) || result.tool_calls.length > 0)
         || result?.messages != null && !Array.isArray(result.messages)

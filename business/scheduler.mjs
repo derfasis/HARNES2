@@ -106,7 +106,11 @@ export class Scheduler {
       // The head is told which of the two reconciliations are trustworthy rather than being asked
       // to find out. A failed reconciliation is a reason to withhold derived work, and it is
       // recorded once per pass instead of being rediscovered inside every inference.
-      const continuityHealthy = this.continuityHealthy, executiveHealthy = this.executiveHealthy;
+      // `let`, not `const`: both flags are cleared below when a receipt cannot be written, and
+      // `const` on a name that is reassigned throws a `TypeError` at the first failure — which is
+      // the exact moment this code exists to handle. The instance flags are written at the same
+      // time so the next pass sees the failure too; the locals carry it through this one.
+      let continuityHealthy = this.continuityHealthy, executiveHealthy = this.executiveHealthy;
       if (cfg.opportunity?.automatic) {
         // A source that is configured but has no reader is not a quiet source. The poll loop
         // below skips it, it sits at its last confirmed cursor forever, and every other signal
