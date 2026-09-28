@@ -4,7 +4,7 @@ import path from 'node:path';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import Ajv from 'ajv';
-import { loadConfig, validateAllowedSourceRefs, validateTelegramSources, ROOT, DATA, readJson, runtimeReadiness } from './config.mjs';
+import { loadConfig, validateAllowedSourceRefs, validateTelegramSources, validateBrowserSources, ROOT, DATA, readJson, runtimeReadiness } from './config.mjs';
 import { Store } from './store.mjs';
 import { BusinessService } from './service.mjs';
 import { invalidateRevokedDiscoverySources } from './discovery.mjs';
@@ -67,6 +67,13 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
   ensure(config.server.host === '127.0.0.1', 'Only loopback dashboard binding is supported', 409);
   validateAllowedSourceRefs(config);
   validateTelegramSources(config);
+  // Browser sources are validated here for the same reason the other two are: `start({ config })`
+  // accepts a hand-built config, and only `loadConfig()` would have checked this list. Without
+  // this call an invalid browser policy — one off the allowlist, or one whose reading interval
+  // cannot honour its own freshness budget — reached the reader and only refused at the first
+  // poll, which is a running service that looks configured and is not. Refuse before the port is
+  // taken, the store is opened, and any reader exists.
+  validateBrowserSources(config);
   const store = new Store(directory), service = new BusinessService(store,config);
   ensure(service.partner(), 'partnerId не совпадает с профилем', 500);
   const operatorToken = randomBytes(32).toString('hex'), mcpToken = randomBytes(32).toString('hex'), runTokens = new Map();
@@ -180,7 +187,10 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
       }
       if (req.method === 'POST' && url.pathname === '/api/scheduler/wake') {
         const ready = runtimeReadiness(config); ensure(ready.ready,`Модель не подключена: ${ready.missing.join(', ')}`,409);
-        void scheduler.tick().catch(()=>{}); return send(202,{accepted:true});
+        // Both loops. A wake that only ran the source pass left the operator's "run it now" doing
+        // nothing an operator could see, because the disposition they asked for comes from the
+        // head, not the eyes.
+        void scheduler.tick().catch(()=>{}); void scheduler.reasonTick().catch(()=>{}); return send(202,{accepted:true});
       }
       return send(404,{error:'not found'});
     } catch (error) {
@@ -211,7 +221,13 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
     // The in-flight tick keeps running after stop(), and it is that tick that polls the readers.
     // Draining it before Telegram goes away is what keeps a reader from being released underneath
     // a read that is still using it.
-    while (scheduler.busy || telegram.polling) await new Promise(resolve=>setTimeout(resolve,50));
+    //
+    // `reasonBusy` belongs in this wait for the same reason. Reasoning now runs on its own loop,
+    // so a shutdown that drained only `busy` would close the store while a completion transaction
+    // was still writing its receipt — the database disappearing from under a worker that is
+    // committing to it, which is how a run ends as `interrupted` with the receipt half-written.
+    // Both loops are drained here, and the store is closed after both are quiet.
+    while (scheduler.busy || scheduler.reasonBusy || telegram.polling) await new Promise(resolve=>setTimeout(resolve,50));
     await closed; await telegram.stop(); store.close();
   };
   for (const signal of ['SIGINT','SIGTERM']) process.once(signal,()=>close().then(()=>process.exit(0)));

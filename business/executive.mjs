@@ -165,6 +165,22 @@ export class ExecutiveLoop {
       if (reason && ACTIVE.includes(row.status)) this.terminate(row, 'failed', reason);
     }
   }
+  // Retire attempts whose receipt could not be written. The poll itself already happened and its
+  // source truth is durable; what is missing is the proof that ties that truth to this intent, so
+  // the attempt ends unproven rather than running. `interrupted_unknown` is the same state a crash
+  // mid-receipt leaves, deliberately: an operator must be able to tell "we know it failed" from
+  // "we never found out", and neither may be presented as a completed refresh.
+  abandonPoll(attemptIds, reason = 'RECEIPT_PERSIST_FAILED') {
+    for (const aid of attemptIds) {
+      const a = this.db.get("SELECT * FROM research_attempts WHERE id=? AND status='running'", aid);
+      if (!a) continue;
+      this.db.run("UPDATE research_attempts SET status='interrupted_unknown',receipt_json=?,finished_at=? WHERE id=?",
+        JSON.stringify({ outcome: 'unknown', reason, attempt_id: aid }), now(), aid);
+      const row = this.db.get('SELECT * FROM research_intents WHERE id=?', a.intent_id);
+      if (row && ACTIVE.includes(row.status))
+        this.terminate(row, 'failed', reason);
+    }
+  }
   captureEvidence(row) {
     this.current(row);
     const refresh = this.db.all("SELECT * FROM research_attempts WHERE intent_id=? AND capability_id='research.refresh_source'", row.id);
