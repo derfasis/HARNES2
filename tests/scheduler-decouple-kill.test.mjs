@@ -259,19 +259,21 @@ test('an answer that arrives after its work was cancelled is not applied', async
   for (let i = 0; i < 40 && model.pending === 0; i += 1) await new Promise((r) => setTimeout(r, 5));
   assert.equal(model.pending, 1, 'the model really is mid-call, so there is something to cancel');
 
-  // While the worker is away the operator cancels what it was reasoning about. The completion path
-  // re-reads the turn and must find it is no longer running, so its answer cannot be applied.
-  const cancelled = store.all("SELECT id FROM partner_turns WHERE status='running'");
-  assert.ok(cancelled.length > 0, 'the head created a running turn to cancel');
-  store.run("UPDATE partner_turns SET status='cancelled' WHERE id=?", cancelled[0].id);
+  // While the worker is away the turn is retired underneath it. `failed` is the state an operator
+  // puts a turn in when they will not accept it; there is no `cancelled` in the schema, and the
+  // completion path's rule is simply that a turn which is no longer `running` cannot have its
+  // answer applied. The assertion is that rule, not a particular terminal word.
+  const running = store.all("SELECT id FROM partner_turns WHERE status='running'");
+  assert.ok(running.length > 0, 'the head created a running turn to retire');
+  store.run("UPDATE partner_turns SET status='failed' WHERE id=?", running[0].id);
   model.releaseAll(); await thinking;
 
   assert.equal(store.get("SELECT COUNT(*) n FROM partner_turns WHERE status='proposed'").n, 0,
-    'a cancelled turn produced no proposal');
+    'a retired turn produced no proposal');
   assert.equal(store.get("SELECT COUNT(*) n FROM runs WHERE status='running'").n, 0,
     'and no run is left running after the head finished');
   assert.equal(store.get("SELECT COUNT(*) n FROM partner_turns WHERE status='running'").n, 0,
-    'and the cancelled turn is not left claimed by a worker that has already gone');
+    'and the retired turn is not left claimed by a worker that has already gone');
 });
 
 // 4. Shutdown does not close the store from under a worker.
