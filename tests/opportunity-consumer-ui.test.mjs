@@ -140,7 +140,9 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // The real child-process crash + restore tests in continuity.test.mjs cover both.
     // Executive extends export with intent/attempt tables and interrupts in-flight research.
     // Its crash and restore acceptance cases live in executive.test.mjs.
-    "business/store.mjs": "ce3ad01aa929c691f4330101f090c7336e6a44b8",
+    // Bounded Action adds export tables and recovers dispatching as unknown.
+    // Acceptance cases: actions.test.mjs (not run under the current no-tests instruction).
+    "business/store.mjs": "c01118884bd97b30eb04e21d3a31b24230421f65",
     "adapters/hermes/credentials.py": "2797bd89081eaf4a950178cec3d637015ee8f45f",
     "adapters/hermes/runner.py": "e631237829d9b7a4521799b4a19c4c500b33f5aa",
     // Deliberate v0 extension: existing worker, no-tool envelope tested in opportunity-runtime.test.mjs.

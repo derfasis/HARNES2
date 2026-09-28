@@ -22,6 +22,6 @@ export function exportPartner(store) {
     return { format: 'digital-ai-partner', schema_version: 1, exported_at: now(),
       migrations: store.all('SELECT * FROM schema_migrations ORDER BY version'),
       tables, assets, tables_sha256: hash(JSON.stringify(tables)),
-      excluded: ['secrets', 'runtime caches', 'virtual environment', 'upstream checkout', 'browser sessions'] };
+      excluded: ['secrets', 'runtime caches', 'virtual environment', 'upstream checkout', 'browser sessions', 'action artifact bytes', 'transferable action authority'] };
   });
 }

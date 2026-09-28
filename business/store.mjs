@@ -7,13 +7,15 @@ import { now } from './errors.mjs';
 import { ENGAGEMENT_TABLES } from './engagement-tables.mjs';
 import { DISCOVERY_TABLES } from './discovery-tables.mjs';
 import { CONTINUITY_TABLES } from './continuity-tables.mjs';
+import { ACTION_TABLES } from './action-tables.mjs';
 import { EXECUTIVE_TABLES } from './executive-tables.mjs';
 
 export const id = () => randomUUID();
 export const hash = value => createHash('sha256').update(value).digest('hex');
-export const TABLES = ['partners','persons','channel_identities','conversations','messages','facts','tasks','runs','drafts','draft_versions','approvals','delivery_attempts','outcome_events','lessons','capability_proposals','skill_versions','events','command_receipts','channel_offsets','tool_calls',...ENGAGEMENT_TABLES,...DISCOVERY_TABLES,...CONTINUITY_TABLES,...EXECUTIVE_TABLES];
+export const TABLES = ['partners','persons','channel_identities','conversations','messages','facts','tasks','runs','drafts','draft_versions','approvals','delivery_attempts','outcome_events','lessons','capability_proposals','skill_versions','events','command_receipts','channel_offsets','tool_calls',...ENGAGEMENT_TABLES,...DISCOVERY_TABLES,...CONTINUITY_TABLES,...EXECUTIVE_TABLES,...ACTION_TABLES];
 export class Store {
   constructor(directory = DATA) {
+    this.directory = path.resolve(directory);
     fs.mkdirSync(directory, { recursive: true });
     this.db = new DatabaseSync(path.join(directory, 'partner.sqlite'));
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;');
@@ -40,6 +42,17 @@ export class Store {
   }
   recover() {
     this.transaction(() => {
+      this.run(`INSERT INTO events(partner_id,conversation_id,kind,actor,payload_json,created_at)
+        SELECT p.partner_id,NULL,'action.recovered_unknown','system',json_object('action_id',p.id,'attempt_id',a.id,'reason','PROCESS_RESTART'),?
+        FROM action_attempts a JOIN action_proposals p ON p.id=a.action_id WHERE a.status='dispatching'`, now());
+      this.run("UPDATE action_proposals SET status='failed',reason='PROCESS_RESTART',revision=revision+1,updated_at=? WHERE status='planning'", now());
+      this.run(`UPDATE action_proposals SET status=CASE WHEN status IN ('revoked','rejected','stale') THEN status ELSE 'unknown' END,
+        verify_requested=1,revision=revision+1,updated_at=? WHERE EXISTS
+        (SELECT 1 FROM action_attempts a WHERE a.action_id=action_proposals.id AND a.status='dispatching')`, now());
+      this.run("UPDATE action_attempts SET status='unknown',finished_at=? WHERE status='dispatching'", now());
+      // Last verification is historical evidence, not proof that local bytes survived
+      // a power loss or offline move. Re-probe, never replay, after every startup.
+      this.run("UPDATE action_proposals SET verify_requested=1 WHERE status='completed'");
       this.run(`UPDATE research_intents SET status='interrupted_unknown',reason='PROCESS_RESTART',revision=revision+1,updated_at=?
         WHERE status IN ('planning','waiting_sources','reasoning') AND EXISTS
         (SELECT 1 FROM research_attempts a WHERE a.intent_id=research_intents.id AND a.status='running')`, now());

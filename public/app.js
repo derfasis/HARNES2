@@ -11,7 +11,7 @@ const panel = (title,content,action='') => `<section class="panel"><div class="p
 let token='',state=null,tab='overview',selected=null,detail=null;
 let reviewFilter='pending',reviewOffset=0,reviewDetail=null;
 const pending = new Map();
-let researchView = null;
+let researchView = null, actionsView = null;
 async function api(route,body) {
   const response = await fetch(route,{method:body === undefined?'GET':'POST',headers:{'x-partner-token':token,...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});
   const data = await response.json(); if(!response.ok) throw new Error(data.error ?? 'Операция не завершена'); return data;
@@ -29,13 +29,17 @@ async function refresh() {
     researchView ??= (await import('./research.js')).createResearchView({ api, command, esc, panel, button, empty, field, modal, refresh });
     await researchView.load();
   }
+  if(tab==='actions'){
+    actionsView ??= (await import('./actions.js')).createActionsView({ api, command, esc, panel, button, empty, field, modal, refresh });
+    await actionsView.load();
+  }
   $('#model-status').textContent=state.runtime.ready?'Модель подключена':'Ожидает подключения ИИ';
   $('#model-status').className=`pill${state.runtime.ready?' ready':''}`;render();
 }
 function render(){
-  const titles={overview:'Обзор',people:'Люди и диалоги',tasks:'Задачи',discovery:'Discovery',research:'Исследования',experience:'Память и опыт',capabilities:'Способности',runs:'История работы',settings:'Подключения'};
+  const titles={overview:'Обзор',people:'Люди и диалоги',tasks:'Задачи',discovery:'Discovery',research:'Исследования',actions:'Действия',experience:'Память и опыт',capabilities:'Способности',runs:'История работы',settings:'Подключения'};
   $('#page-title').textContent=titles[tab];document.querySelectorAll('[data-tab]').forEach(x=>x.classList.toggle('active',x.dataset.tab===tab));
-  $('#content').innerHTML=({overview:overview,people:people,tasks:tasks,discovery:discoveryTab,research:()=>researchView.render(),experience:experience,capabilities:capabilities,runs:runs,settings:settings}[tab])();
+  $('#content').innerHTML=({overview:overview,people:people,tasks:tasks,discovery:discoveryTab,research:()=>researchView.render(),actions:()=>actionsView.render(),experience:experience,capabilities:capabilities,runs:runs,settings:settings}[tab])();
 }
 function overview(){
   const m=state.metrics,pendingTasks=state.tasks.filter(t=>['pending','proposed','running'].includes(t.status));
@@ -220,7 +224,7 @@ function people(){
   ${panel('Результаты',outcomes.length?outcomes.map(o=>`<div class="feature"><div>${esc(label(o.kind))}<small>${esc(o.evidence)}</small></div><span class="muted tiny">${date(o.created_at)}</span></div>`).join(''):empty('Результат ещё не зафиксирован','Предложение звонка, согласие и состоявшаяся встреча — отдельные события.'),button('Записать результат','outcome'))}</div></div>`;
 }
 function tasks(){
-  const work=state.tasks.filter(t=>!['opportunity_review','discovery_review'].includes(t.kind));
+  const work=state.tasks.filter(t=>!['opportunity_review','discovery_review','owner_action'].includes(t.kind));
   return opportunityQueuePanel()+panel('Очередь работы',`${work.length?`<div class="table-wrap"><table class="data-table"><thead><tr><th>Задача</th><th>Срок</th><th>Состояние</th><th>Действия</th></tr></thead><tbody>${work.map(t=>`<tr><td>${esc(t.title)}<small>${esc(t.instructions)}</small></td><td>${date(t.due_at)}</td><td>${badge(t.status)}</td><td>${t.status==='proposed'?button('Принять','task-approve',t.id):''}${['failed','interrupted','blocked','cancelled'].includes(t.status)?button('Повторить','task-retry',t.id):''}${!['done','cancelled'].includes(t.status)?button('Отменить','task-cancel',t.id):''}</td></tr>`).join('')}</tbody></table></div>`:empty('Очередь свободна','')}`,`<div class="actions">${button('Обработать очередь','wake')}${button('+ Задача','task-new','','primary')}</div>`)+`<details><summary>Ручные snapshots</summary>${opportunityPanel()}</details>`;
 }
 function opportunityQueuePanel(){
@@ -277,6 +281,7 @@ function modal(title,content,onSubmit){
 const convOptions=()=>[['','Общая работа партнёра'],...state.conversations.map(c=>[c.id,c.name])];
 const convPayload=()=>({conversation_id:selected});
 async function act(action,itemId,extra){
+  if(action.startsWith('action-')){await actionsView.act(action,itemId);return;}
   if(action.startsWith('research-')){await researchView.act(action,itemId);return;}
   if(action==='discovery-select'){await selectSituation(itemId);render();return;}
   if(action==='discovery-next'){await nextDiscoveryPage();render();return;}

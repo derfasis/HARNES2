@@ -1,0 +1,10 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object", "additionalProperties": false,
+  "required": ["kind", "reason", "proposal"],
+  "properties": {
+    "kind": {"enum": ["action", "no_action"]},
+    "reason": {"type": "string", "minLength": 1, "maxLength": 2000, "pattern": "\\S"},
+    "proposal": {"anyOf": [{"type": "null"}, {"$ref": "action-proposal.schema.json"}]}
+  }
+}

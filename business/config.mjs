@@ -134,6 +134,10 @@ export function loadConfig() {
     || cfg.executive.enabled && !cfg.continuity.enabled || cfg.executive.modelEnabled && !cfg.executive.enabled
     || cfg.executive.autoPlan && !cfg.executive.modelEnabled || !Number.isInteger(cfg.executive.maxModelRunsPerDay)
     || cfg.executive.maxModelRunsPerDay < 1 || cfg.executive.maxModelRunsPerDay > 30) throw new Error('Invalid executive configuration');
+  if (['enabled','modelEnabled'].some(k => typeof cfg.actions?.[k] !== 'boolean')
+    || cfg.actions.enabled && !cfg.continuity.enabled || cfg.actions.modelEnabled && !cfg.actions.enabled
+    || !Number.isInteger(cfg.actions.maxModelRunsPerDay) || cfg.actions.maxModelRunsPerDay < 1 || cfg.actions.maxModelRunsPerDay > 30)
+    throw new Error('Invalid actions configuration');
   if (typeof cfg.discovery?.enabled !== 'boolean') throw new Error('Invalid discovery.enabled');
   if (typeof cfg.opportunity?.automatic !== 'boolean') throw new Error('Invalid opportunity.automatic');
   validateAllowedSourceRefs(cfg);

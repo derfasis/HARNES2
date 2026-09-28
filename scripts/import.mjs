@@ -6,6 +6,7 @@ import { Store, TABLES, hash } from '../business/store.mjs';
 import { ENGAGEMENT_TABLES } from '../business/engagement-tables.mjs';
 import { DISCOVERY_TABLES } from '../business/discovery-tables.mjs';
 import { CONTINUITY_TABLES } from '../business/continuity-tables.mjs';
+import { ACTION_TABLES } from '../business/action-tables.mjs';
 import { EXECUTIVE_TABLES } from '../business/executive-tables.mjs';
 
 const [source,destinationArg] = process.argv.slice(2);
@@ -15,12 +16,13 @@ const relative = path.relative(ROOT,destination);
 if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Choose a new staging directory inside this project.');
 if (fs.existsSync(destination)) throw new Error('Destination already exists. Choose a NEW directory.');
 if (bundle.format !== 'digital-ai-partner' || bundle.schema_version !== 1 || !bundle.tables) throw new Error('Unsupported bundle');
-const continuityTables = TABLES.filter(t => !EXECUTIVE_TABLES.includes(t));
+const executiveTables = TABLES.filter(t => !ACTION_TABLES.includes(t));
+const continuityTables = executiveTables.filter(t => !EXECUTIVE_TABLES.includes(t));
 const discoveryTables = continuityTables.filter(t => !CONTINUITY_TABLES.includes(t));
 const legacyTables = discoveryTables.filter(t => !ENGAGEMENT_TABLES.includes(t) && !DISCOVERY_TABLES.includes(t));
 const coreTables = discoveryTables.filter(t => !DISCOVERY_TABLES.includes(t));
 const migrationCount = Array.isArray(bundle.migrations) ? bundle.migrations.length : -1;
-const inputTables = migrationCount === 2 ? legacyTables : migrationCount === 3 ? coreTables : migrationCount === 4 ? discoveryTables : migrationCount === 5 ? continuityTables : TABLES;
+const inputTables = migrationCount === 2 ? legacyTables : migrationCount === 3 ? coreTables : migrationCount === 4 ? discoveryTables : migrationCount === 5 ? continuityTables : migrationCount === 6 ? executiveTables : TABLES;
 const legacy = migrationCount < 4;
 if (Object.keys(bundle.tables).sort().join('|') !== [...inputTables].sort().join('|')) throw new Error('Bundle table list differs from this release');
 if (hash(JSON.stringify(bundle.tables)) !== bundle.tables_sha256) throw new Error('Table checksum mismatch');
@@ -51,6 +53,16 @@ try {
         if (!row || typeof row !== 'object' || Object.keys(row).sort().join('|') !== [...columns].sort().join('|')) throw new Error(`Unexpected columns in ${table}`);
         statement.run(...columns.map(c=>row[c]));
       }
+    }
+    // Exported grants are history, never transferable execution authority. Artifact
+    // bytes are deliberately excluded from a whole-partner export.
+    for (const row of store.all('SELECT id,partner_id,status FROM action_proposals')) {
+      store.run("UPDATE action_grants SET status='revoked',reason='TRANSFER_REQUIRES_NEW_PROPOSAL',updated_at=? WHERE action_id=? AND status IN ('active','consumed')", new Date().toISOString(), row.id);
+      store.run("UPDATE action_attempts SET status=CASE WHEN status='prepared' THEN 'not_executed' WHEN status='dispatching' THEN 'unknown' ELSE status END,verification_state='unavailable',verification_json=?,verified_at=NULL WHERE action_id=?",
+        JSON.stringify({state:'unavailable',reason:'TRANSFER_BOUNDARY'}), row.id);
+      store.run("UPDATE action_proposals SET status='revoked',reason='TRANSFER_REQUIRES_NEW_PROPOSAL',verify_requested=0,revision=revision+1 WHERE id=?", row.id);
+      store.run("UPDATE tasks SET status='cancelled' WHERE id=(SELECT task_id FROM action_proposals WHERE id=?) AND status IN ('proposed','pending')", row.id);
+      store.event(row.partner_id, null, 'action.transfer_invalidated', 'system', {action_id:row.id, previous_status:row.status, artifact_bytes_transferred:false});
     }
     if (store.all('PRAGMA foreign_key_check').length) throw new Error('Imported references are inconsistent');
   });

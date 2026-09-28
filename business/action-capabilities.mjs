@@ -1,0 +1,115 @@
+// Thin adapters over Node fs and the existing task table, not a general tool executor.
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { constants } from 'node:fs';
+import { id, hash } from './store.mjs';
+import { now } from './errors.mjs';
+import { actionCheck as check } from './actions.mjs';
+import { HUMAN_ACTION_TASK } from './action-tables.mjs';
+
+export function actionArtifact(row) {
+  return { format: 'harnes2-owner-brief-v1', action_id: row.id, proposal_hash: row.proposal_hash,
+    proposal: JSON.parse(row.proposal_json), packet: JSON.parse(row.packet_json),
+    contact_permission: false, external_write: false, business_outcome: 'not_verified' };
+}
+export const artifactBytes = row => Buffer.from(JSON.stringify(actionArtifact(row), null, 2) + '\n');
+const taskValues = row => {
+  const p = JSON.parse(row.proposal_json);
+  return { title: p.title, instructions: `${p.instructions}\n\nExpected result (not observed): ${p.expected_result}`,
+    due_at: p.due_at ?? row.created_at, evidence: JSON.stringify({ action_id: row.id, proposal_hash: row.proposal_hash,
+      thread_id: row.thread_id, turn_id: row.turn_id, basis_fingerprint: row.basis_fingerprint, epistemic_status: 'unverified_interpretation' }) };
+};
+export class LocalActionCapabilities {
+  constructor(service) { this.service = service; this.directory = service.store.directory; }
+  async vault(create = false) {
+    // This deployment requires an owner-controlled directory. Refuse symlinks/junctions
+    // in the path we own; checking only the final file would miss a replaced vault.
+    const root = path.resolve(this.directory), vault = path.join(root, 'action-artifacts');
+    const rootStat = await fs.lstat(root);
+    check(rootStat.isDirectory() && !rootStat.isSymbolicLink(), 'ACTION_VAULT_UNSAFE');
+    check(path.resolve(await fs.realpath(root)).toLowerCase() === root.toLowerCase(), 'ACTION_VAULT_UNSAFE');
+    let st;
+    try { st = await fs.lstat(vault); }
+    catch (e) {
+      if (e.code !== 'ENOENT') throw e;
+      if (!create) return null;
+      // Inspect before creating; never traverse an existing junction with mkdir.
+      try { await fs.mkdir(vault, { mode: 0o700 }); } catch (error) { if (error.code !== 'EEXIST') throw error; }
+      st = await fs.lstat(vault);
+    }
+    check(st.isDirectory() && !st.isSymbolicLink() && path.resolve(await fs.realpath(vault)).toLowerCase() === vault.toLowerCase(), 'ACTION_VAULT_UNSAFE');
+    return vault;
+  }
+  file(vault, row) {
+    check(/^[0-9a-f-]{36}$/i.test(row.id), 'ACTION_ID_INVALID');
+    return path.join(vault, `${row.id}.json`);
+  }
+  async read(row) {
+    const vault = await this.vault(); if (!vault) return null;
+    const file = this.file(vault, row); let st;
+    try { st = await fs.lstat(file); } catch (e) { if (e.code === 'ENOENT') return null; throw e; }
+    check(st.isFile() && !st.isSymbolicLink() && st.size <= 600000, 'ACTION_ARTIFACT_UNSAFE');
+    const fd = await fs.open(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    try {
+      const opened = await fd.stat();
+      check(opened.isFile() && opened.size <= 600000 && opened.ino === st.ino && opened.dev === st.dev, 'ACTION_ARTIFACT_UNSAFE');
+      const data = await fd.readFile(); check(data.length <= 600000, 'ACTION_ARTIFACT_UNSAFE');
+      await this.vault(); return data;
+    } finally { await fd.close(); }
+  }
+  async execute(row, attempt, beforeEffect) {
+    const p = JSON.parse(row.proposal_json);
+    if (p.capability_id === 'owner_handoff.create.v1') {
+      return this.service.exclusive(() => this.service.store.transaction(() => {
+        beforeEffect(); const db = this.service.store, v = taskValues(row), taskId = row.id;
+        check(!db.get('SELECT id FROM tasks WHERE id=? OR dedupe_key=?', taskId, `action:${row.id}`), 'ACTION_EFFECT_EXISTS');
+        db.run(`INSERT INTO tasks(id,partner_id,conversation_id,kind,title,instructions,due_at,status,evidence,dedupe_key,author,created_at)
+          VALUES(?,?,NULL,?,?,?,?,'proposed',?,?,?,?)`, taskId, row.partner_id, HUMAN_ACTION_TASK, v.title, v.instructions, v.due_at, v.evidence, `action:${row.id}`, 'operator', now());
+        db.run('UPDATE action_proposals SET task_id=? WHERE id=?', taskId, row.id);
+        return { outcome: 'local_task_created', task_id: taskId };
+      }));
+    }
+    check(p.capability_id === 'brief.publish_local.v1', 'ACTION_CAPABILITY_UNAVAILABLE');
+    const vault = await this.vault(true), file = this.file(vault, row), stage = path.join(vault, `.${row.id}.${id()}.tmp`);
+    const data = artifactBytes(row); check(data.length <= 600000, 'ACTION_ARTIFACT_TOO_LARGE');
+    let opened = false;
+    try {
+      const fd = await fs.open(stage, 'wx', 0o600); opened = true;
+      try { await fd.writeFile(data); await fd.sync(); } finally { await fd.close(); }
+      await this.vault();
+      // Final authorization check and dispatch are adjacent; an already in-flight
+      // OS operation cannot be rolled back by a later revoke. Record that truth.
+      await this.service.exclusive(() => { beforeEffect(); return fs.link(stage, file); });
+      // No overwrite fallback: an existing name or unsupported hard links fail closed.
+      return { outcome: 'local_file_published', artifact_id: row.id, sha256: hash(data), bytes: data.length };
+    } finally {
+      if (opened) { await this.vault(); await fs.unlink(stage).catch(e => { if (e.code !== 'ENOENT') throw e; }); }
+    }
+  }
+  async verify(row) {
+    const p = JSON.parse(row.proposal_json);
+    try {
+      if (p.capability_id === 'owner_handoff.create.v1') {
+        const db = this.service.store, task = db.get('SELECT * FROM tasks WHERE id=? OR dedupe_key=?', row.id, `action:${row.id}`);
+        if (!task) return { state: 'absent', method: 'durable_task_read' };
+        const v = taskValues(row), linked = db.get('SELECT task_id FROM action_proposals WHERE id=?', row.id)?.task_id;
+        const match = task.id === row.id && linked === task.id && task.partner_id === row.partner_id && task.conversation_id === null
+          && task.kind === HUMAN_ACTION_TASK && task.author === 'operator' && task.dedupe_key === `action:${row.id}`
+          && task.title === v.title && task.instructions === v.instructions && task.evidence === v.evidence && task.due_at === v.due_at
+          && ['proposed','pending','done','cancelled'].includes(task.status);
+        return { state: match ? 'present' : 'mismatch', method: 'durable_task_read', task_id: task.id, business_outcome: 'not_verified' };
+      }
+      check(p.capability_id === 'brief.publish_local.v1', 'ACTION_CAPABILITY_UNAVAILABLE');
+      const data = await this.read(row);
+      if (data === null) return { state: 'absent', method: 'independent_file_read' };
+      const expected = artifactBytes(row), match = data.equals(expected);
+      return { state: match ? 'present' : 'mismatch', method: 'independent_file_read', sha256: hash(data), expected_sha256: hash(expected), bytes: data.length };
+    } catch { return { state: 'unavailable', method: 'independent_read', reason: 'ACTION_VERIFICATION_UNAVAILABLE' }; }
+  }
+  async artifact(row) {
+    check(JSON.parse(row.proposal_json ?? 'null')?.capability_id === 'brief.publish_local.v1', 'ACTION_NO_ARTIFACT', 404);
+    const bytes = await this.read(row);
+    check(bytes && bytes.equals(artifactBytes(row)), 'ACTION_ARTIFACT_NOT_VERIFIED');
+    return JSON.parse(bytes.toString('utf8'));
+  }
+}

@@ -10,13 +10,15 @@ import { REVIEW_ACTIONS, reviewOpportunity, opportunityReviewDetail, opportunity
 import { EngagementLoop, ENGAGEMENT_ACTIONS, ENGAGEMENT_AGENT_ACTIONS } from './engagement.mjs';
 import { ContinuityLoop } from './continuity.mjs';
 import { CONTINUITY_ACTIONS } from './continuity-tables.mjs';
+import { ActionLoop, ACTION_STALE_ERRORS } from './actions.mjs';
+import { ACTION_COMMANDS, HUMAN_ACTION_TASK } from './action-tables.mjs';
 import { ExecutiveLoop } from './executive.mjs';
 import { EXECUTIVE_ACTIONS } from './executive-tables.mjs';
 import { discoveryCommand, discoveryDecisionQueue, discoveryDetail, discoveryPresentationDetail, discoveryReasonStates, ensureDiscoveryApplied, hasDiscoveryPending, invalidateDiscoveryOffers, markDiscoveryPending, reconcileDiscoveryPending, recordDiscoveryFailure, staleMaterialEvidence, DISCOVERY_ACTIONS, DISCOVERY_REVIEW_TASK } from './discovery.mjs';
 
 const OUTCOMES = new Set(['qualified','call_proposed','call_accepted','call_booked','call_attended','no_show','joined','declined','business_value']);
 export class BusinessService {
-  constructor(store, config) { this.store = store; this.config = config; this.tail = Promise.resolve(); this.telegramAccountId = null; this.engagement = new EngagementLoop(this); this.continuity = new ContinuityLoop(this); this.executive = new ExecutiveLoop(this); this.discoveryApply = ensureDiscoveryApplied; this.reconcileDiscovery = () => reconcileDiscoveryPending(this, 50); }
+  constructor(store, config) { this.store = store; this.config = config; this.tail = Promise.resolve(); this.telegramAccountId = null; this.engagement = new EngagementLoop(this); this.continuity = new ContinuityLoop(this); this.executive = new ExecutiveLoop(this); this.actions = new ActionLoop(this); this.discoveryApply = ensureDiscoveryApplied; this.reconcileDiscovery = () => reconcileDiscoveryPending(this, 50); }
   exclusive(fn) { const job = this.tail.then(fn); this.tail = job.catch(() => {}); return job; }
   partner() { return this.store.get('SELECT * FROM partners WHERE id=?', this.config.partnerId); }
   person(personId) {
@@ -57,6 +59,18 @@ export class BusinessService {
       try {
         result = this.store.transaction(() => this.execute(action, payload, requestId, actor));
       } catch (error) {
+        if (ACTION_COMMANDS.has(action)) {
+          const target = typeof payload?.action_id === 'string' && this.store.get('SELECT id FROM action_proposals WHERE id=? AND partner_id=?', payload.action_id, this.config.partnerId);
+          this.store.transaction(() => {
+            // A failed command can be the first observer of revoked/stale scope.
+            // Persist that observation after its command transaction rolled back.
+            if (target && actor.kind === 'operator' && ACTION_STALE_ERRORS.has(error.code)) this.actions.invalidate(this.actions.get(target.id), error.code);
+            this.store.event(this.config.partnerId, null, 'action.command_denied',
+            ['operator','agent','channel','system'].includes(actor.kind) ? actor.kind : 'unknown',
+            { action, action_id: target?.id ?? null, code: error.code ?? 'ACTION_COMMAND_FAILED',
+              request_id: typeof requestId === 'string' && /^[a-f0-9-]{36}$/i.test(requestId) ? requestId : null });
+          });
+        }
         if (REVIEW_ACTIONS.includes(action)) {
           // Denials survive the rolled-back command, without persisting untrusted text or grants.
           const task = typeof payload?.task_id === 'string' && this.store.get('SELECT id FROM tasks WHERE id=? AND partner_id=? AND kind=?', payload.task_id, this.config.partnerId, OPPORTUNITY_TASK);
@@ -107,7 +121,9 @@ export class BusinessService {
       ensure(!['fact.propose','task.propose','lesson.propose','capability.propose'].includes(action),'Use engagement-scoped proposals',403);
     }
     let result;
-    if (EXECUTIVE_ACTIONS.has(action)) {
+    if (ACTION_COMMANDS.has(action)) {
+      result = this.actions.command(action, p, actor);
+    } else if (EXECUTIVE_ACTIONS.has(action)) {
       result = this.executive.command(action, p, actor);
     } else if (CONTINUITY_ACTIONS.has(action)) {
       result = this.continuity.command(action, p, actor);
@@ -281,6 +297,7 @@ export class BusinessService {
       case 'task.retry': {
         const task = this.store.get('SELECT * FROM tasks WHERE id=? AND partner_id=?', p.task_id, this.config.partnerId);
         ensure(task, 'Задача не найдена', 404); conversationId = task.conversation_id;
+        ensure(task.kind !== HUMAN_ACTION_TASK, 'Use the explicit action handoff commands', 409, 'human_only_task');
         ensure(task.kind !== DISCOVERY_REVIEW_TASK && (task.kind !== OPPORTUNITY_TASK || action === 'task.cancel'), 'Review candidate нельзя менять generic task-командами', 409, 'candidate_not_executable');
         if (action === 'task.approve') ensure(task.status === 'proposed', 'Задача уже рассмотрена', 409);
         if (action === 'task.retry') ensure(task.kind !== DISCOVERY_REVIEW_TASK && task.status !== 'proposed' && task.status !== 'pending', 'Review task нельзя перезапускать', 409, 'candidate_not_executable');
