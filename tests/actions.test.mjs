@@ -286,7 +286,12 @@ test('a real server exposes authenticated detail and artifact, and drains execut
   const ready = new Promise(r => { entered = r; }), hold = new Promise(r => { release = r; });
   const local = app.scheduler.actionRuntime.capabilities, original = local.execute.bind(local);
   local.execute = async (...args) => { const receipt = await original(...args); entered(); await hold; return receipt; };
-  await app.scheduler.sourceTick(); const tick = app.scheduler.actionTick(); await ready;
+  await app.scheduler.sourceTick(); const tick = app.scheduler.actionTick();
+  // Bounded: if the adapter throws before it ever signals, `ready` would otherwise never resolve
+  // and the file hangs until the workflow timeout — 27 minutes to learn that an adapter was not
+  // reached. Five seconds answers the same question in five.
+  await Promise.race([ready, new Promise((_, reject) => setTimeout(() => reject(new Error(
+    'adapter never reached held point')), 5000))]);
   let closed = false; const closing = app.close().then(() => { closed = true; });
   await new Promise(r => setTimeout(r, 30)); assert.equal(closed, false); release(); await tick; await closing;
   h.restart(); await h.runtime.tick(); assert.equal(h.detail(a).attempts[0].verification_state, 'present'); noOutbound(h);

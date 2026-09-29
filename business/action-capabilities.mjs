@@ -70,20 +70,30 @@ export class LocalActionCapabilities {
       }));
     }
     check(p.capability_id === 'brief.publish_local.v1', 'ACTION_CAPABILITY_UNAVAILABLE');
-    const vault = await this.vault(true), file = this.file(vault, row), stage = path.join(vault, `.${row.id}.${id()}.tmp`);
+    const vault = await this.vault(true), file = this.file(vault, row);
+    const staged = path.join(vault, `.${row.id}.${id()}.tmp`);
     const data = artifactBytes(row); check(data.length <= 600000, 'ACTION_ARTIFACT_TOO_LARGE');
-    let opened = false;
+    // Which step failed — a fixed word, never the message. A thrown error carries the path, the
+    // filename and whatever the OS felt like saying, and this receipt is durable and read by an
+    // operator. Naming the step is what turns "something went wrong" into "the publish link did".
+    let stage = 'stage_open', opened = false, failure = null;
     try {
-      const fd = await fs.open(stage, 'wx', 0o600); opened = true;
-      try { await fd.writeFile(data); await fd.sync(); } finally { await fd.close(); }
-      await this.vault();
+      const fd = await fs.open(staged, 'wx', 0o600);
+      opened = true;
+      try { stage = 'stage_write'; await fd.writeFile(data);
+        stage = 'stage_sync'; await fd.sync(); }
+      finally { await fd.close(); }
+      stage = 'vault_recheck'; await this.vault();
       // Final authorization check and dispatch are adjacent; an already in-flight
       // OS operation cannot be rolled back by a later revoke. Record that truth.
-      await this.service.exclusive(() => { beforeEffect(); return fs.link(stage, file); });
+      stage = 'publish_link';
+      await this.service.exclusive(() => { beforeEffect(); return fs.link(staged, file); });
       // No overwrite fallback: an existing name or unsupported hard links fail closed.
       return { outcome: 'local_file_published', artifact_id: row.id, sha256: hash(data), bytes: data.length };
-    } finally {
-      if (opened) { await this.vault(); await fs.unlink(stage).catch(e => { if (e.code !== 'ENOENT') throw e; }); }
+    } catch (error) { failure = error; if (!error.failure_stage) error.failure_stage = stage; throw error; }
+    finally {
+      if (opened) { try { await this.vault(); await fs.unlink(staged).catch(e => { if (e.code !== 'ENOENT') throw e; }); }
+        catch (error) { if (!failure) { failure = error; stage = 'stage_cleanup'; } throw error; } }
     }
   }
   async verify(row) {

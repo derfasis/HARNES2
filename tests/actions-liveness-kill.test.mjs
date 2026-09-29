@@ -149,4 +149,47 @@ test('the identity still changes when the text changes', (t) => {
     'different text is a different action');
 });
 
+// 3. The diagnostic must be usable without being a leak.
+//
+// A receipt is durable and read by an operator, and the error that produced it carries a path, a
+// filename and whatever the OS said. The stage and the class are what make a failure actionable;
+// anything beyond them is the whole problem the receipt exists to avoid.
+test('a failed publication records its stage and class and nothing of the error', async (t) => {
+  const h = harness(t);
+  const thread = await h.accepted();
+  const action = await h.propose(thread);
+  await h.grant(action);
+  // Force the publication itself to fail, with a message that names everything worth leaking.
+  const local = new LocalActionCapabilities(h.service);
+  const runtime = new ActionRuntime(h.service, { capabilities: {
+    async execute(row) { return local.execute(row, { id: 'x' }, () => {
+      throw Object.assign(new Error('link failed for D:\\Users\\runneradmin\\secret\\artifact.json sk-live-abc'),
+        { code: 'EPERM' }); }); },
+    verify: (row) => local.verify(row) } });
+  await runtime.tick();
+  const receipt = JSON.parse(h.store.get('SELECT receipt_json FROM action_attempts WHERE id=?',
+    h.store.get('SELECT id FROM action_attempts WHERE action_id=?', action).id).receipt_json);
+  assert.equal(receipt.outcome, 'unknown');
+  assert.equal(receipt.failure_class, 'EPERM', 'the class is kept — it is what the operator acts on');
+  assert.equal(receipt.failure_stage, 'publish_link', 'and the step that did not complete');
+  const stored = JSON.stringify(receipt);
+  for (const token of ['runneradmin', 'secret', 'sk-live', 'D:\\\\', '.json', 'link failed'])
+    assert.ok(!stored.includes(token), `nothing of the error may survive: ${token}`);
+});
+
+test('an unrecognised failure still yields a declared stage and class', async (t) => {
+  const h = harness(t);
+  const thread = await h.accepted();
+  const action = await h.propose(thread);
+  await h.grant(action);
+  const runtime = new ActionRuntime(h.service, { capabilities: {
+    async execute() { throw Object.assign(new Error('something entirely unexpected'), { code: 'WEIRD_CODE_X' }); },
+    verify: async () => ({ state: 'absent' }) } });
+  await runtime.tick();
+  const receipt = JSON.parse(h.store.get('SELECT receipt_json FROM action_attempts WHERE id=?',
+    h.store.get('SELECT id FROM action_attempts WHERE action_id=?', action).id).receipt_json);
+  assert.equal(receipt.failure_class, 'UNKNOWN', 'an unanticipated code becomes the declared fallback');
+  assert.equal(receipt.failure_stage, 'unknown', 'and an adapter that names no step says so');
+});
+
 void LocalActionCapabilities;

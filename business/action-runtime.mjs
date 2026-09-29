@@ -8,6 +8,25 @@ import { LocalActionCapabilities } from './action-capabilities.mjs';
 const owners = new WeakSet();
 const lostReceipts = new WeakMap();
 const CURSOR = 'action-execution-v1';
+// What a failed execution is allowed to say about itself.
+//
+// The receipt is durable and read by an operator, and the error that produced it carries a path,
+// a filename and whatever the operating system felt like saying. Neither the message nor the stack
+// may be stored; what may is which step of the publication did not complete, and the closed class
+// of the underlying failure. Together those answer the question the operator actually has —
+// permissions, filesystem, cross-device, an unsupported call, or one of our own refusals — without
+// reproducing a single byte of the thing that went wrong.
+const STAGES = new Set(['stage_open','stage_write','stage_sync','vault_recheck','publish_link','stage_cleanup','unknown']);
+const CLASSES = new Set(['EPERM','EACCES','EEXIST','EXDEV','EINVAL','ENOTSUP','EMFILE','ENOSPC','EISDIR','ENOTDIR','EIO','UNKNOWN']);
+const safeStage = (error) => {
+  const value = String(error?.failure_stage ?? '');
+  return STAGES.has(value) ? value : 'unknown';
+};
+const safeClass = (error) => {
+  const raw = String(error?.code ?? error?.name ?? '');
+  if (raw === 'AppError' || /^ACTION_[A-Z0-9_]+$/.test(raw)) return raw;
+  return CLASSES.has(raw) ? raw : 'UNKNOWN';
+};
 const retired = status => ['revoked','rejected','stale'].includes(status);
 export class ActionRuntime {
   constructor(service, { ready = () => true, capabilities = new LocalActionCapabilities(service) } = {}) {
@@ -109,7 +128,9 @@ export class ActionRuntime {
       try {
         const result = await this.capabilities.execute(work.row, work.attempt, () => this.assertDispatch(work));
         receipt = { ...result, action_id: work.row.id, attempt_id: work.attempt.id, grant_id: work.grant.id, proposal_hash: work.row.proposal_hash }; succeeded = true;
-      } catch { receipt = { outcome: 'unknown', reason: 'EXECUTION_NOT_PROVEN', action_id: work.row.id, attempt_id: work.attempt.id, grant_id: work.grant.id }; }
+      } catch (error) { receipt = { outcome: 'unknown', reason: 'EXECUTION_NOT_PROVEN',
+        failure_stage: safeStage(error), failure_class: safeClass(error),
+        action_id: work.row.id, attempt_id: work.attempt.id, grant_id: work.grant.id }; }
       try {
         await this.service.exclusive(() => db.transaction(() => {
           const row = a.get(work.row.id);
