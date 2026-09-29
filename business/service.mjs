@@ -529,7 +529,10 @@ export class BusinessService {
       this.invalidate(conversationId, p.kind);
       this.store.run("UPDATE tasks SET status='cancelled' WHERE conversation_id=? AND status IN ('pending','proposed','running')", conversationId);
     }
-    const result = { outcome_id: outcomeId }; this.engagement.outcome(p,result);
+    // `decision_id` travels with the outcome so `engagement.outcome` writes the association and
+    // its attribution. The feedback loop used to write `decision_outcomes` itself on top of this,
+    // which is a second insert against the same primary key.
+    const result = { outcome_id: outcomeId }; this.engagement.outcome({ ...p, decision_id: p.decision_id ?? null }, result);
     const e=this.engagement.current(conversationId);
     if(e){this.invalidate(conversationId,'outcome_recorded');this.engagement.signal(this.engagement.get(e.id),'outcome',{outcome_id:outcomeId});}
     return result;

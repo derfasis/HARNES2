@@ -30,9 +30,14 @@ const harness = (t, { windowSeconds = 604800 } = {}) => {
     const created = await command('person.create', { name: 'Candidate', source: 'offline test' }, id());
     return store.get('SELECT * FROM conversations WHERE id=?', created.conversation_id);
   };
-  const inbound = async (conv, text = 'Спасибо, договорились') => {
+  // `at` is set explicitly because a window only counts a reply that arrived while it was open:
+  // `message.record` stamps the real clock, which in a fixture would place every reply decades
+  // after the window closed, and every assertion about observing a reply would assert nothing.
+  const inbound = async (conv, text = 'Спасибо, договорились', at = null) => {
     await command('message.record', { conversation_id: conv.id, direction: 'in', text, source: 'offline test' }, id(), { kind: 'channel' });
-    return store.get('SELECT * FROM messages WHERE conversation_id=? AND direction=\x27in\x27 ORDER BY id DESC LIMIT 1', conv.id);
+    const message = store.get("SELECT * FROM messages WHERE conversation_id=? AND direction='in' ORDER BY id DESC LIMIT 1", conv.id);
+    if (at) store.run('UPDATE messages SET created_at=? WHERE id=?', at, message.id);
+    return store.get('SELECT * FROM messages WHERE id=?', message.id);
   };
   return { directory, store, service, config, command, conversation, inbound };
 };
@@ -63,7 +68,7 @@ test('a reply is observed as a candidate and is never an outcome by itself', asy
   const h = harness(t);
   const conv = await h.conversation();
   sendAndObserve(h, conv, '2026-01-01T00:00:00.000Z');
-  const reply = await h.inbound(conv, 'Записался на четверг');
+  const reply = await h.inbound(conv, 'Спасибо', '2026-01-01T12:00:00.000Z');
   h.service.outcomes.reconcile({ now: Date.parse('2026-01-02T00:00:00.000Z') });
 
   const candidate = h.store.get('SELECT * FROM outcome_candidates WHERE conversation_id=?', conv.id);
@@ -97,7 +102,7 @@ test('coverage counts what is unknown, not only what is known', async (t) => {
   const a = await h.conversation();
   // Two conversations: one answered, one that will not be.
   sendAndObserve(h, a, '2026-01-01T00:00:00.000Z');
-  await h.inbound(a, 'Yes');
+  await h.inbound(a, 'Yes', '2026-01-01T00:00:30.000Z');
   // A second conversation for a second person: the denominator is every message we sent, not
   // only the ones somebody happened to reply to.
   const second = await h.command('person.create', { name: 'Another', source: 'offline test' }, id());
@@ -117,7 +122,7 @@ test('only an operator may promote a candidate, and the model may not', async (t
   const h = harness(t);
   const conv = await h.conversation();
   sendAndObserve(h, conv, '2026-01-01T00:00:00.000Z');
-  await h.inbound(conv);
+  await h.inbound(conv, 'Спасибо', '2026-01-01T12:00:00.000Z');
   h.service.outcomes.reconcile({ now: Date.parse('2026-01-02T00:00:00.000Z') });
   const candidate = h.store.get('SELECT * FROM outcome_candidates WHERE conversation_id=?', conv.id);
 
@@ -136,7 +141,7 @@ test('the loop itself refuses a non-operator, not only the command bus', async (
   const h = harness(t);
   const conv = await h.conversation();
   sendAndObserve(h, conv, '2026-01-01T00:00:00.000Z');
-  await h.inbound(conv);
+  await h.inbound(conv, 'Спасибо', '2026-01-01T12:00:00.000Z');
   h.service.outcomes.reconcile({ now: Date.parse('2026-01-02T00:00:00.000Z') });
   const candidate = h.store.get('SELECT * FROM outcome_candidates WHERE conversation_id=?', conv.id);
   for (const actor of [{ kind: 'agent' }, { kind: 'system' }]) {
@@ -151,12 +156,15 @@ test('promotion writes the same outcome the manual path always wrote', async (t)
   const h = harness(t);
   const conv = await h.conversation();
   sendAndObserve(h, conv, '2026-01-01T00:00:00.000Z');
-  await h.inbound(conv);
+  await h.inbound(conv, 'Спасибо', '2026-01-01T12:00:00.000Z');
   h.service.outcomes.reconcile({ now: Date.parse('2026-01-02T00:00:00.000Z') });
   const candidate = h.store.get('SELECT * FROM outcome_candidates WHERE conversation_id=?', conv.id);
   const result = await h.command('outcome.candidate_confirm', { candidate_id: candidate.id, kind: 'qualified', evidence: 'Called and confirmed' });
   assert.equal(result.causal_credit, 'not_established');
-  assert.equal(result.association, 'observed_association');
+  // No decision was named, so there is no association to report. Returning a value here would be
+  // an answer to a question nobody asked.
+  assert.equal(result.association, null);
+  assert.equal(result.causal_credit, 'not_established');
   const outcome = h.store.get('SELECT * FROM outcome_events WHERE id=?', result.outcome_id);
   assert.equal(outcome.kind, 'qualified');
   assert.equal(outcome.author, 'operator');
@@ -167,7 +175,7 @@ test('an unrecognised outcome kind is refused on both paths', async (t) => {
   const h = harness(t);
   const conv = await h.conversation();
   sendAndObserve(h, conv, '2026-01-01T00:00:00.000Z');
-  await h.inbound(conv);
+  await h.inbound(conv, 'Спасибо', '2026-01-01T12:00:00.000Z');
   h.service.outcomes.reconcile({ now: Date.parse('2026-01-02T00:00:00.000Z') });
   const candidate = h.store.get('SELECT * FROM outcome_candidates WHERE conversation_id=?', conv.id);
   // A candidate kind is not an outcome kind. Promotion must not accept the vocabulary of
@@ -183,7 +191,7 @@ test('a candidate is proposed once however often the evidence is scanned', async
   const h = harness(t);
   const conv = await h.conversation();
   sendAndObserve(h, conv, '2026-01-01T00:00:00.000Z');
-  await h.inbound(conv);
+  await h.inbound(conv, 'Спасибо', '2026-01-01T12:00:00.000Z');
   for (let i = 0; i < 5; i += 1) h.service.outcomes.reconcile({ now: Date.parse('2026-01-02T00:00:00.000Z') });
   assert.equal(h.store.get('SELECT COUNT(*) n FROM outcome_candidates WHERE conversation_id=?', conv.id).n, 1,
     'a re-scan is a no-op, not a second claim');
@@ -193,7 +201,7 @@ test('a resolved candidate cannot be resolved twice', async (t) => {
   const h = harness(t);
   const conv = await h.conversation();
   sendAndObserve(h, conv, '2026-01-01T00:00:00.000Z');
-  await h.inbound(conv);
+  await h.inbound(conv, 'Спасибо', '2026-01-01T12:00:00.000Z');
   h.service.outcomes.reconcile({ now: Date.parse('2026-01-02T00:00:00.000Z') });
   const candidate = h.store.get('SELECT * FROM outcome_candidates WHERE conversation_id=?', conv.id);
   await h.command('outcome.candidate_confirm', { candidate_id: candidate.id, kind: 'qualified', evidence: 'x' });
@@ -208,7 +216,7 @@ test('a rejection is a recorded answer and is not silently re-proposed', async (
   const h = harness(t);
   const conv = await h.conversation();
   sendAndObserve(h, conv, '2026-01-01T00:00:00.000Z');
-  await h.inbound(conv, 'Не актуально');
+  await h.inbound(conv, 'Спасибо', '2026-01-01T12:00:00.000Z');
   h.service.outcomes.reconcile({ now: Date.parse('2026-01-02T00:00:00.000Z') });
   const candidate = h.store.get('SELECT * FROM outcome_candidates WHERE conversation_id=?', conv.id);
   await h.command('outcome.candidate_reject', { candidate_id: candidate.id, note: 'Not a result', note_kind: 'declined' });
@@ -246,7 +254,7 @@ test('export carries the observation tables', async (t) => {
   const h = harness(t);
   const conv = await h.conversation();
   sendAndObserve(h, conv, '2026-01-01T00:00:00.000Z');
-  await h.inbound(conv);
+  await h.inbound(conv, 'Спасибо', '2026-01-01T12:00:00.000Z');
   h.service.outcomes.reconcile({ now: Date.parse('2026-01-02T00:00:00.000Z') });
   const { exportPartner } = await import('../business/export.mjs');
   const bundle = await h.service.exclusive(() => exportPartner(h.store));
@@ -264,7 +272,7 @@ test('a rate that improved by recording less is visible as such', async (t) => {
     const conv = h.store.get('SELECT * FROM conversations WHERE id=?', created.conversation_id);
     void person;
     sendAndObserve(h, conv, '2026-01-01T00:00:00.000Z');
-    if (i < 2) await h.inbound(conv, 'Yes');
+    if (i < 2) await h.inbound(conv, 'Спасибо', '2026-01-01T00:00:30.000Z');
   }
   h.service.outcomes.reconcile({ now: Date.parse('2026-01-03T00:00:00.000Z') });
   const metrics = h.service.metrics();
@@ -306,7 +314,7 @@ test('a promoted candidate does everything a manually recorded outcome does', as
   const h = harness(t);
   const conv = await h.conversation();
   sendAndObserve(h, conv, '2026-01-01T00:00:00.000Z');
-  await h.inbound(conv, 'Записался');
+  await h.inbound(conv, 'Записался', '2026-01-01T12:00:00.000Z');
   h.service.outcomes.reconcile({ now: Date.parse('2026-01-02T00:00:00.000Z') });
   const candidate = h.store.get('SELECT * FROM outcome_candidates WHERE conversation_id=?', conv.id);
 
@@ -347,7 +355,7 @@ test('a candidate carries the draft that was sent, so attribution is decidable',
   assert.equal(h.store.get("SELECT draft_id FROM outcome_observation_windows WHERE message_id=?", messageId).draft_id, draftId,
     'the window remembers which draft went out');
 
-  await h.inbound(conv, 'Yes');
+  await h.inbound(conv, 'Yes', '2026-01-01T12:00:00.000Z');
   h.service.outcomes.reconcile({ now: Date.parse('2026-01-02T00:00:00.000Z') });
   const candidate = h.store.get("SELECT * FROM outcome_candidates WHERE conversation_id=?", conv.id);
   assert.equal(candidate.draft_id, draftId, 'so the candidate that observes the reply points back at it');
@@ -371,4 +379,31 @@ test('a misconfigured observation window is refused', async (t) => {
   assert.equal(validateOutcomes({ outcomes: { ...base.outcomes, enabled: true, responseWindowSeconds: 604800 } }).outcomes.responseWindowSeconds, 604800);
   // And a layer that is off is never checked, so a stale config cannot block startup.
   assert.doesNotThrow(() => validateOutcomes({ outcomes: { ...base.outcomes, enabled: false, responseWindowSeconds: 0 } }));
+});
+
+// The starvation the review named, as a test.
+//
+// The scan is bounded, so the question is what a bound excludes. Bounding the two kinds of work
+// together — "has this been answered" and "has this run out of patience" — means twenty silent
+// conversations hold the front of every pass and a conversation that was replied to an hour ago
+// waits behind them for ever. The cheap question is answered without a bound; only the deadline
+// question is rationed.
+test('an answered conversation is never starved by twenty silent ones', async (t) => {
+  const h = harness(t, { windowSeconds: 60 });
+  // Twenty conversations go quiet and stay quiet.
+  for (let i = 0; i < 20; i += 1) {
+    const created = await h.command('person.create', { name: `Quiet${i}`, source: 'offline test' }, id());
+    const quiet = h.store.get('SELECT * FROM conversations WHERE id=?', created.conversation_id);
+    sendAndObserve(h, quiet, '2026-01-01T00:00:00.000Z');
+  }
+  // A twenty-first is replied to, and its window closes last.
+  const last = await h.command('person.create', { name: 'Answered', source: 'offline test' }, id());
+  const conv = h.store.get('SELECT * FROM conversations WHERE id=?', last.conversation_id);
+  sendAndObserve(h, conv, '2026-01-01T00:00:00.000Z');
+  await h.inbound(conv, 'Yes', '2026-01-01T00:00:30.000Z');
+
+  h.service.outcomes.reconcile({ now: Date.parse('2026-01-03T00:00:00.000Z') });
+  assert.equal(h.store.get("SELECT outcome FROM outcome_observation_windows WHERE conversation_id=?", conv.id).outcome, 'answered',
+    'the answered conversation is settled in the first pass, however many silent ones are queued');
+  assert.ok(h.store.get("SELECT id FROM outcome_candidates WHERE conversation_id=?", conv.id), 'and it left a candidate');
 });

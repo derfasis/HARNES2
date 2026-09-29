@@ -71,7 +71,7 @@ export class OutcomeLoop {
   // The candidate is the whole deliverable of an automatic pass. It is created only when the
   // durable unique key is free, so re-scanning the same evidence — after a restart, or on the next
   // tick, or because an operator re-ran a detector — is a no-op rather than a second claim.
-  propose({ conversationId, kind, detector, basis, evidence, messageId = null, draftId = null, decisionId = null, observedAt = null }) {
+  propose({ conversationId, kind, detector, basis, evidence, messageId = null, draftId = null, decisionId = null, windowId = null, observedAt = null }) {
     this.enabled();
     check(CANDIDATE_KINDS.has(kind), 'OUTCOME_CANDIDATE_KIND_INVALID', 400);
     check(DETECTORS.includes(detector), 'OUTCOME_DETECTOR_INVALID', 400);
@@ -80,10 +80,14 @@ export class OutcomeLoop {
     check(Buffer.byteLength(JSON.stringify(evidence)) <= 8000, 'OUTCOME_EVIDENCE_TOO_LARGE', 400);
     const at = observedAt ?? now();
     check(typeof at === 'string' && Number.isFinite(Date.parse(at)), 'OUTCOME_OBSERVED_AT_INVALID', 400);
-    // Identity: what was seen, where, and by which rule. A candidate is a statement about one
-    // observation, and the same observation seen twice is the same statement.
+    // Identity is the window when there is one. Two drafts can be outstanding in one conversation
+    // and a single reply answers both, so keying on the message collapsed them into one candidate
+    // carrying the first window's draft — the second proposal's provenance was simply gone. A
+    // window is a question about one sent message, and it gets its own answer.
     const key = digest({ partner: this.partnerId, conversation: conversationId, detector, message: messageId, kind });
-    const existing = this.db.get('SELECT id,status FROM outcome_candidates WHERE partner_id=? AND conversation_id=? AND detector=? AND IFNULL(source_message_id,\'\')=? AND kind=?',
+    const existing = windowId
+      ? this.db.get("SELECT id,status FROM outcome_candidates WHERE partner_id=? AND detector=? AND kind=? AND json_extract(evidence_json,'$.window_id')=?", this.partnerId, detector, kind, windowId)
+      : this.db.get('SELECT id,status FROM outcome_candidates WHERE partner_id=? AND conversation_id=? AND detector=? AND IFNULL(source_message_id,\'\')=? AND kind=?',
       this.partnerId, conversationId, detector, messageId ?? '', kind);
     if (existing) return { candidate_id: existing.id, duplicate: true, status: existing.status };
     const candidateId = id();
@@ -115,42 +119,62 @@ export class OutcomeLoop {
       // Ordered by when each window closes, not by a rotating cursor.
       //
       // A cursor that only advances past settled windows starves the tail: with twenty waiting
-      // windows at the front, the cursor never moves, and a window that has already been answered
-      // sits behind them for ever. Ordering by deadline gives the same fairness without the trap —
-      // the window that closes soonest is examined first because it becomes answerable soonest, and
-      // a waiting window cannot hold a position against one that is already resolved.
+      // settleAnswered() first, then a bounded pass over what is still silent. A reply is a fact the
+      // database can answer on its own and it costs one indexed lookup, so it is never rationed; a
+      // silence that has run out is the part that needs a deadline to judge.
+      const answered = this.settleAnswered(at);
       const rows = this.db.all(
         `SELECT * FROM outcome_observation_windows WHERE partner_id=? AND outcome='pending'
          ORDER BY closes_at, id LIMIT ?`, this.partnerId, limit);
-      let answered = 0, expired = 0;
-      for (const row of rows) {
-        const closed = this.closeWindow(row, at);
-        if (closed === 'answered') answered += 1;
-        if (closed === 'expired_unanswered') expired += 1;
-      }
-      return { windows: rows.length, answered, expired };
+      let expired = 0;
+      for (const row of rows) if (this.closeWindow(row, at) === 'expired_unanswered') expired += 1;
+      return { windows: answered + expired, answered, expired };
     });
   }
 
-  // A window ends in one of three ways, and the third is the one the layer exists to record: it
-  // stayed open and nobody answered. That is a fact about the message, and treating it as
-  // "unknown" rather than as a failure is what keeps the rate honest.
+  // Every waiting window that has in fact been answered, settled in one bounded statement.
+  //
+  // `answered` is not a judgement that costs anything — it is "is there an inbound message after
+  // this one" — so it must not sit behind a limit that is there for the other kind of work. When
+  // both were rationed together, twenty silent conversations held the front of every pass and a
+  // conversation someone had already replied to waited behind them indefinitely.
+  settleAnswered(at = Date.now()) {
+    const rows = this.db.all(
+      `SELECT w.id, w.conversation_id, w.message_id, w.draft_id, w.opened_at, w.closes_at
+         FROM outcome_observation_windows w
+        WHERE w.partner_id=? AND w.outcome='pending'
+          AND EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id=w.conversation_id
+                       AND m.direction='in' AND m.created_at>=? AND m.created_at<=?)
+        ORDER BY w.closes_at, w.id`,
+      this.partnerId, this.minOpenedAt(), new Date(at).toISOString());
+    for (const row of rows) {
+      // The reply has to be inside the window, not merely later than the send. A reply that
+      // arrives after the patience ran out is a late reply, and counting it as an answer would
+      // make the outcome of a window depend on whether the service happened to be running when
+      // the window closed.
+      const reply = this.db.get(
+        `SELECT id, created_at FROM messages WHERE conversation_id=? AND direction='in'
+           AND created_at>=? AND created_at<=? ORDER BY created_at LIMIT 1`,
+        row.conversation_id, row.opened_at, this.windowClosesAt(row, at));
+      if (!reply) continue;
+      const candidate = this.propose({ conversationId: row.conversation_id, kind: 'reply_observed',
+        detector: 'reply_after_send', basis: 'An inbound message arrived inside the observation window.',
+        evidence: { window_id: row.id, sent_message_id: row.message_id, reply_message_id: reply.id, reply_at: reply.created_at },
+        messageId: reply.id, draftId: row.draft_id ?? null, windowId: row.id, observedAt: reply.created_at });
+      this.db.run("UPDATE outcome_observation_windows SET outcome='answered',answered_at=?,candidate_id=? WHERE id=?",
+        reply.created_at, candidate.candidate_id, row.id);
+      this.record('window_answered', { window_id: row.id, candidate_id: candidate.candidate_id });
+    }
+    return rows.length;
+  }
+
+  minOpenedAt() { return '1970-01-01T00:00:00.000Z'; }
+  windowClosesAt(row, at = Date.now()) { return row.closes_at ?? new Date(at).toISOString(); }
+
+  // Settling a silence. `answered` is already handled by settleAnswered, unbudgeted;
+  // what is left is the one question that needs a deadline: has the patience run out.
   closeWindow(row, at = Date.now()) {
     if (row.outcome !== 'pending') return row.outcome;
-    const replies = this.db.get(
-      `SELECT m.id, m.created_at FROM messages m WHERE m.conversation_id=? AND m.direction='in' AND m.created_at>=?
-       ORDER BY m.created_at LIMIT 1`, row.conversation_id, row.opened_at);
-    if (replies) {
-      const candidate = this.propose({ conversationId: row.conversation_id, kind: 'reply_observed',
-        detector: 'reply_after_send', basis: 'An inbound message arrived after a delivered message.',
-        evidence: { window_id: row.id, sent_message_id: row.message_id, reply_message_id: replies.id,
-          reply_at: replies.created_at },
-        messageId: replies.id, draftId: row.draft_id ?? null, observedAt: replies.created_at });
-      this.db.run("UPDATE outcome_observation_windows SET outcome='answered',answered_at=?,candidate_id=? WHERE id=?",
-        replies.created_at, candidate.candidate_id, row.id);
-      this.record('window_answered', { window_id: row.id, candidate_id: candidate.candidate_id });
-      return 'answered';
-    }
     if (Date.parse(row.closes_at) > at) return 'pending';
     const candidate = this.propose({ conversationId: row.conversation_id, kind: 'no_response_observed',
       detector: 'window_expired', basis: 'The observation window closed with no inbound message.',
@@ -186,22 +210,21 @@ export class OutcomeLoop {
     // the result just made pointless, and the engagement signal — so a confirmed `joined` would
     // leave the partner still treating the conversation as live.
     const recorded = this.service.recordOutcome(row.conversation_id, {
-      kind, evidence: text, value, source_message_id: row.source_message_id, draft_id: row.draft_id });
+      kind, evidence: text, value, source_message_id: row.source_message_id, draft_id: row.draft_id,
+      decision_id: decision });
     const outcomeId = recorded.outcome_id;
     void conversation;
-    if (decision) {
-      // Association, never causal credit — and the distinction is recorded rather than implied,
-      // because a rewrite between the decision and the result is exactly the case that must not
-      // be credited to the version the model wrote.
-      const draft = row.draft_id ? this.db.get('SELECT current_version FROM drafts WHERE id=?', row.draft_id) : null;
-      const attribution = draft && draft.current_version > 1 ? 'human_assisted' : 'observed_association';
-      this.db.run('INSERT INTO decision_outcomes(outcome_id,decision_id,attribution,created_at) VALUES(?,?,?,?)',
-        outcomeId, decision, attribution, now());
-    }
+    // The association and its attribution are written by `engagement.outcome`, which is the only
+    // place that decides them. Reading the row back — rather than restating a guess here — is what
+    // stops the API from reporting `observed_association` for an outcome the database recorded as
+    // `human_assisted`, which is precisely the case a caller would want to be told about.
+    const attribution = decision
+      ? this.db.get('SELECT attribution FROM decision_outcomes WHERE outcome_id=?', outcomeId)?.attribution ?? null
+      : null;
     this.db.run("UPDATE outcome_candidates SET status='confirmed',outcome_id=?,resolution_note=?,updated_at=?,revision=revision+1 WHERE id=?",
       outcomeId, note, now(), candidateId);
     this.record('candidate_confirmed', { candidate_id: candidateId, outcome_id: outcomeId, kind, decision_id: decision });
-    return { outcome_id: outcomeId, candidate_id: candidateId, association: 'observed_association', causal_credit: 'not_established' };
+    return { outcome_id: outcomeId, candidate_id: candidateId, association: attribution, causal_credit: 'not_established' };
   }
 
   reject(candidateId, { note, note_kind = null }, actor) {
