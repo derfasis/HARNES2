@@ -65,7 +65,13 @@ test('proposal needs an exact owner grant; receipt and independent verification 
   const h = harness(t), a = await h.propose(await h.accepted());
   await h.runtime.tick(); assert.equal(h.detail(a).attempts.length, 0);
   await h.grant(a); await h.runtime.tick();
-  assert.equal(h.detail(a).status, 'verifying'); assert.equal(h.detail(a).attempts[0].verification_state, 'unchecked');
+  // The receipt is carried into the failure message on purpose. A publication that fails on a
+  // platform we do not develop on is exactly the case this suite exists to catch, and an
+  // assertion that only says 'verifying !== unknown' tells whoever reads the log nothing about
+  // which step failed. `failure_stage` and `failure_class` are the whole point of that field.
+  assert.equal(h.detail(a).status, 'verifying',
+    `publication did not complete: ${JSON.stringify(h.detail(a).attempts[0]?.receipt ?? null)}`);
+  assert.equal(h.detail(a).attempts[0].verification_state, 'unchecked');
   await h.runtime.tick(); assert.equal(h.detail(a).status, 'completed');
   assert.equal(h.detail(a).attempts[0].verification_state, 'present');
   const artifact = JSON.parse(fs.readFileSync(path.join(h.directory, 'action-artifacts', `${a}.json`), 'utf8'));
@@ -112,7 +118,11 @@ test('duplicate requests, semantic duplicates, and concurrent workers produce on
   assert.deepEqual(await h.command('action.grant', p, request), await h.command('action.grant', p, request));
   await Promise.all([h.runtime.tick(), new ActionRuntime(h.service).tick(), h.runtime.tick()]);
   assert.equal(h.detail(a).attempts.length, 1); await h.runtime.tick();
-  assert.equal(h.detail(a).status, 'completed');
+  // Same reasoning as the other publication assertion: the receipt travels into the failure
+  // message, so a platform-specific publication failure is legible from the log rather than a
+  // bare `completed !== unknown` that says nothing about which step failed.
+  assert.equal(h.detail(a).status, 'completed',
+    `publication did not complete: ${JSON.stringify(h.detail(a).attempts[0]?.receipt ?? null)}`);
   assert.equal(fs.readdirSync(path.join(h.directory, 'action-artifacts')).length, 1); noOutbound(h);
 });
 
