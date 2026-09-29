@@ -24,10 +24,22 @@ export class LocalActionCapabilities {
   async vault(create = false) {
     // This deployment requires an owner-controlled directory. Refuse symlinks/junctions
     // in the path we own; checking only the final file would miss a replaced vault.
+    //
+    // The check is identity, not spelling. Comparing the resolved path to the path we asked for
+    // refuses the same directory twice under two names: Windows reports a temporary directory as
+    // `RUNNER~1` and resolves it to the long account name, so the strings differ while the
+    // directory is the one we created and own. That is a false refusal of a safe directory, and
+    // it is what a hosted Windows runner produced. `dev` and `ino` answer the question the check
+    // is actually asking — is this the same directory, or has something been put in its place —
+    // and a substituted or junctioned directory has different ones.
     const root = path.resolve(this.directory), vault = path.join(root, 'action-artifacts');
+    const sameDirectory = async (target) => {
+      const [wanted, resolved] = await Promise.all([fs.stat(target), fs.stat(await fs.realpath(target))]);
+      return wanted.dev === resolved.dev && wanted.ino === resolved.ino;
+    };
     const rootStat = await fs.lstat(root);
     check(rootStat.isDirectory() && !rootStat.isSymbolicLink(), 'ACTION_VAULT_UNSAFE');
-    check(path.resolve(await fs.realpath(root)).toLowerCase() === root.toLowerCase(), 'ACTION_VAULT_UNSAFE');
+    check(await sameDirectory(root), 'ACTION_VAULT_UNSAFE');
     let st;
     try { st = await fs.lstat(vault); }
     catch (e) {
@@ -37,7 +49,7 @@ export class LocalActionCapabilities {
       try { await fs.mkdir(vault, { mode: 0o700 }); } catch (error) { if (error.code !== 'EEXIST') throw error; }
       st = await fs.lstat(vault);
     }
-    check(st.isDirectory() && !st.isSymbolicLink() && path.resolve(await fs.realpath(vault)).toLowerCase() === vault.toLowerCase(), 'ACTION_VAULT_UNSAFE');
+    check(st.isDirectory() && !st.isSymbolicLink() && await sameDirectory(vault), 'ACTION_VAULT_UNSAFE');
     return vault;
   }
   file(vault, row) {
