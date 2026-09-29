@@ -532,6 +532,10 @@ export class BusinessService {
     return { ...counts, ...usage, total_sent: totalSent, edited_sent: editedSent, edit_rate: totalSent ? editedSent / totalSent : null,
       cost_per_qualified: !usage.unknown_cost_runs && counts.qualified ? usage.known_cost_usd / counts.qualified : null,
       cost_per_joined: !usage.unknown_cost_runs && counts.joined ? usage.known_cost_usd / counts.joined : null,
-      cost_scope: 'Model costs only; operator time and infrastructure are not yet measured.' };
+      cost_scope: 'Model costs only; operator time and infrastructure are not yet measured.',
+      // Carried beside the rates, not in a footnote: a cost-per-qualified that improved because
+      // fewer outcomes were recorded is a worse number than no number at all, and the only way to
+      // see that is to report the unobserved share next to the observed one.
+      outcome_coverage: this.config.outcomes?.enabled === true ? this.outcomes.coverage() : { disabled: true } };
   }
 }

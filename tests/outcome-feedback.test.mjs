@@ -253,3 +253,27 @@ test('export carries the new tables and import restores them', async (t) => {
   assert.equal(bundle.tables.outcome_candidates.length, 1, 'candidates travel with the bundle');
   assert.equal(bundle.tables.outcome_observation_windows.length, 1);
 });
+
+test('a rate that improved by recording less is visible as such', async (t) => {
+  const h = harness(t, { windowSeconds: 60 });
+  // Ten messages go out, two are answered. The cost-per-outcome will look excellent; the
+  // coverage figure is what says that eight conversations were never observed at all.
+  for (let i = 0; i < 10; i += 1) {
+    const person = h.store.get('SELECT * FROM persons LIMIT 1');
+    const created = await h.command('person.create', { name: `C${i}`, source: 'offline test' }, id());
+    const conv = h.store.get('SELECT * FROM conversations WHERE id=?', created.conversation_id);
+    void person;
+    sendAndObserve(h, conv, '2026-01-01T00:00:00.000Z');
+    if (i < 2) await h.inbound(conv, 'Yes');
+  }
+  h.service.outcomes.reconcile({ now: Date.parse('2026-01-03T00:00:00.000Z') });
+  const metrics = h.service.metrics();
+  assert.equal(metrics.outcome_coverage.windows, 10, 'every message is in the denominator');
+  assert.equal(metrics.outcome_coverage.answered, 2);
+  assert.equal(metrics.outcome_coverage.expired_unanswered, 8);
+  assert.equal(metrics.outcome_coverage.unknown_windows, 0,
+    'nothing is left uncounted once every window has been settled');
+  // The headline: how much of what we sent we still cannot say anything about.
+  assert.ok(metrics.outcome_coverage.windows >= metrics.outcome_coverage.answered,
+    'coverage is reported next to the rates, not instead of them');
+});

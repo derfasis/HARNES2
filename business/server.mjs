@@ -179,6 +179,10 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
         // Drain the body before refusing, so the client sees 405 instead of a reset connection.
         if (req.method !== 'GET') { for await (const _ of req) { /* discard */ } return send(405,{error:'Метод не поддерживается',code:'method_not_allowed'}); }
         if (url.pathname === '/api/discovery/reason-states') return send(200,discoveryReasonStatesQuery(url,service));
+        if (url.pathname.startsWith('/api/outcomes/'))
+          return send(200, service.outcomes.detail(decodeURIComponent(url.pathname.split('/').at(-1))));
+        if (url.pathname === '/api/outcomes')
+          return send(200, service.outcomes.list({ status: url.searchParams.get('status') ?? 'pending', limit: Number(url.searchParams.get('limit') ?? 20), cursor: url.searchParams.get('cursor') ?? '' }));
         if (url.pathname === '/api/discovery/decisions') return send(200,service.discoveryDecisionQueue(discoveryQueryOptions(url), { kind: 'operator' }));
         return send(200,service.discoveryPresentationDetail(decodeURIComponent(url.pathname.split('/').at(-1)), { kind: 'operator' }));
       }
