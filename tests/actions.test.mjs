@@ -151,7 +151,12 @@ test('revocation while an adapter is waiting does not block observation or resto
   const runtime = new ActionRuntime(h.service, { capabilities: { verify: row => local.verify(row), async execute(...args) {
     const receipt = await local.execute(...args); entered(); await blocked; return receipt;
   } } });
-  const pass = runtime.tick(); await started;
+  const pass = runtime.tick();
+  // Bounded for the same reason as the other held-point wait: `started` only resolves once the
+  // adapter has published, so an adapter that throws first leaves this awaiting for ever and the
+  // file runs to the workflow timeout — a long wait that reports nothing about why.
+  await Promise.race([started, new Promise((_, reject) => setTimeout(() => reject(new Error(
+    'adapter never reached held point')), 5000))]);
   await h.command('action.revoke', { action_id: a, expected_revision: h.detail(a).revision, reason: 'Stop while in flight' });
   await h.ingest({ message_id: 'm2', text: 'New observation continues.' });
   assert.equal(h.detail(a).status, 'revoked'); release(); await pass; await runtime.tick();
