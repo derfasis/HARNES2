@@ -3,20 +3,51 @@
 Base: `12dc7f8d50a6a6a76cd9c8a7f715c2b22d38b218`.
 Implementation branch: `codex/bounded-action-v1`.
 
-The owner-reported baseline gate was **846 Node + 15 Python + build PASS** for
-`168179b`, whose tree matches this merged base. That result does **not** certify
-the new Action implementation.
+The owner has since changed the instruction in AGENTS.md: running tests is
+authorized, and only production or customer sends remain gated. The checks below
+are therefore **performed results**, not authored intentions.
 
-The latest user-provided AGENTS.md instruction prohibits running tests or contacting
-models, while allowing `npm run build`. Therefore no functional, regression, UI,
-live or model test was run for this implementation. Tests below are authored
-acceptance cases, **not passing results**. Syntax compilation and `git diff --check`
-are the performed checks; their exact final results are reported in the handoff.
-The branch is an implementation candidate awaiting verification and red-team, not
-a new approved safe baseline.
+Baseline at the merged base was **846 Node + 15 Python + build PASS** for
+`168179b`, whose tree matches this base. That result did **not** certify the new
+Action implementation, and the first run over it found two defects in it.
 
-Build result: **PASS — 120 JavaScript/JSON files and 9 Python files syntax compiled**.
-`git diff --check`: **PASS**. Functional tests and model calls: **not run**.
+## Verification result
+
+`npm run verify` on `a524ecd`: **946 Node tests PASS, 0 fail**; **15 Python
+tests PASS**; build **PASS — 121 JavaScript/JSON files and 9 Python files**.
+`git diff --check`: **PASS**.
+
+No model call, no live network, no Telegram. The two capabilities are local files
+and durable tasks, and both are exercised for real; the model-facing paths are
+covered by fakes confined to the existing no-tool runtime boundary.
+
+### What the first real run found
+
+Both defects were invisible to a static pass and to syntax compilation.
+
+- A manual Verify could starve a retry for ever. `prepare` selected on
+  `verify_requested` and took the latest attempt regardless of which grant it
+  belonged to, so a probe aimed at a finished attempt repeated while the grant
+  the owner was waiting on was never dispatched. The bit was cleared only on the
+  one path that had stopped happening.
+- A browser re-read could revive a revoked action. `proposalHash` hashed the
+  whole evidence packet; a re-read of an unchanged page confirms the existing
+  version rather than producing a new message, so `confirmed_at` moved, the hash
+  moved with it, the duplicate check found nothing, and the exact action whose
+  grant had been revoked could be proposed and granted again. Identity is now
+  what the action says and what it rests on — source, message, version, text —
+  and not when the evidence was last confirmed. Staleness keeps its own refusal
+  and freshness its own gate.
+
+`tests/actions-liveness-kill.test.mjs` covers both, plus the other half of the
+identity rule: the hash must still change when the text changes. All four cases
+fail on `fc95b93` and pass on `a524ecd`; that was checked by stashing the fixes
+and re-running, not assumed.
+
+A third defect was in a guard test rather than in the layer: the excluded-task-kind
+assertion had stopped naming `owner_action`, and its count check shared one `/g`
+regex with an `assert.match`, which reaches a global regex through `test()` and
+advances `lastIndex` — so the count started mid-string and under-reported by one.
 
 ## Added acceptance coverage
 
@@ -47,16 +78,14 @@ review hash/revision, stale controls, current Continuity basis and artifact API 
 Existing migration/legacy-bundle assertions were advanced from schema 6 to 7.
 The Store blob pin was updated only for Action tables and startup recovery; the
 source/router/transport/Hermes pins and convergence assertions remain unchanged.
-Those fixture adaptations have not been executed under the current instruction.
+Those fixture adaptations ran with the rest of the suite and pass.
 
-## Commands for the next authorized verification run
+## Commands used for the verification run
 
 ```powershell
 node --test tests/actions.test.mjs tests/actions-ui.test.mjs
-node --test tests/discovery-convergence-gate.test.mjs tests/continuity.test.mjs tests/executive.test.mjs tests/scheduler-decouple-kill.test.mjs
-npm test
-npm run test:credentials
-npm run build
+node --test tests/actions-liveness-kill.test.mjs
+npm run verify
 git diff --check
 ```
 
@@ -70,5 +99,6 @@ failure; API/UI agreement on historical verification versus current evidence.
 Known limits: source changes conservatively require a new reviewed basis; .tmp
 debris after process death is retained rather than broadly deleted; verification
 is an observation at a timestamp, not a perpetual guarantee; no remote provider
-effects or hosted model calls have been exercised. Do not merge or enable based
-only on syntax compilation.
+effects or hosted model calls have been exercised. The run above is offline and
+covers the local capabilities only — it says nothing about a real provider, a real
+model, or anything leaving the machine, and none of those are authorized here.
