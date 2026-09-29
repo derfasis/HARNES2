@@ -81,9 +81,16 @@ test('capture list and import controls exist inside the existing Tasks product U
 });
 
 test('static queue/tool guards exclude review records even if a task status is corrupted to pending', () => {
-  assert.match(read('business/scheduler.mjs'), /status='pending' AND kind NOT IN \('opportunity_review','discovery_review'\)/);
-  assert.equal((read('business/context.mjs').match(/kind NOT IN \('opportunity_review','discovery_review'\)/g) ?? []).length, 2);
-  assert.equal((read('business/tools.mjs').match(/kind NOT IN \('opportunity_review','discovery_review'\)/g) ?? []).length, 2);
+  // 'owner_action' joins the list for the same reason the other two are on it: an owner-facing
+  // task is not AI work, and a corrupted status must not let the scheduler pick one up.
+  // Two patterns, deliberately. A `/g` regex is stateful under `assert.match`, which reaches it
+  // through `test()` and advances `lastIndex`, so the count that follows would start mid-string
+  // and report one match short. The previous form used one object for both and under-counted.
+  const guarded = /kind NOT IN \('opportunity_review','discovery_review','owner_action'\)/;
+  const everyGuarded = () => new RegExp(guarded, 'g');
+  assert.match(read('business/scheduler.mjs'), guarded);
+  assert.equal((read('business/context.mjs').match(everyGuarded()) ?? []).length, 2);
+  assert.equal((read('business/tools.mjs').match(everyGuarded()) ?? []).length, 2);
   // This is a source guard assertion, not a scheduler execution/integration test.
 });
 

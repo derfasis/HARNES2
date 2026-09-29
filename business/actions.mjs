@@ -73,10 +73,32 @@ export class ActionLoop {
     return { capability_id: value.capability_id, title: value.title, instructions: value.instructions,
       expected_result: value.expected_result, due_at: value.due_at === null ? null : dateTime(value.due_at) };
   }
+  // The identity of "this exact action", and it has to be the identity of the action rather than
+  // of the observations that were fresh when it was proposed.
+  //
+  // Hashing the whole packet made re-reading a page a new action. A browser reread confirms the
+  // existing version rather than producing a new message — the evidence's `confirmed_at` moves —
+  // so the same proposal over the same text hashed differently, `ACTION_DUPLICATE_PROPOSAL` found
+  // nothing, and an action whose grant had been revoked could be proposed again and granted
+  // afresh. That is the exact thing the revoke is supposed to prevent, defeated by a timestamp.
+  //
+  // What identifies the action is what it says and what it rests on: the source, the message, its
+  // version, its text, and the proposal itself. When any of those change the hash must change, and
+  // `current`/`reasons` must not — they are derived from the clock, and a proposal that is still
+  // the same proposal is a duplicate whether or not it is still current. Staleness has its own
+  // refusal, `ACTION_STALE_EVIDENCE`, and freshness has its own; neither is the duplicate check's
+  // business.
+  static staticEvidence(evidence) {
+    return evidence.map((e) => ({ source_event_id: e.source_event_id, source_ref: e.source_ref,
+      author_id: e.author_id, message_id: e.message_id, message_version: e.message_version,
+      text: e.text, truncated: e.truncated }));
+  }
   proposalHash(row, proposal) {
+    const packet = JSON.parse(row.packet_json);
     return digest({ partner_id: this.partnerId, thread_id: row.thread_id, turn_id: row.turn_id,
       authority_hash: row.authority_hash, basis_fingerprint: row.basis_fingerprint,
-      packet: JSON.parse(row.packet_json), proposal, capability: ACTION_CAPABILITIES.find(c => c.id === proposal.capability_id) });
+      packet: { ...packet, evidence: ActionLoop.staticEvidence(packet.evidence ?? []) },
+      proposal, capability: ACTION_CAPABILITIES.find(c => c.id === proposal.capability_id) });
   }
   applyPlan(row, output) {
     fields(output, ['kind','reason','proposal']); requiredText(output.reason, 'reason', 2000);

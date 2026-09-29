@@ -79,7 +79,16 @@ export class ActionRuntime {
           const latestGrant = db.get('SELECT id FROM action_grants WHERE action_id=? ORDER BY version DESC LIMIT 1', row.id);
           // A historical probe may finish after another operator command. It may
           // append its observation, never take ownership of a newer grant.
+          //
+          // The request bit is cleared either way. Leaving it set when the probe belonged to an
+          // older grant is what made a retry unrecoverable: `prepare` selects on
+          // `verify_requested`, re-picks the same finished attempt, verifies it again, and never
+          // reaches the branch that dispatches the grant the operator is actually waiting on. The
+          // owner would watch a live grant sit forever with nothing to act on. The observation is
+          // already durably attached to the attempt above, so clearing the bit loses nothing — it
+          // only stops the same question being asked of the same answer for ever.
           if (latestGrant?.id === work.attempt.grant_id) a.update(row, { status, verify_requested: 0 });
+          else a.update(row, { verify_requested: 0 });
           a.record('verified', { action_id: row.id, attempt_id: work.attempt.id, verification, business_outcome: 'not_verified' });
         }));
         return { disposition: 'verified', action_id: work.row.id, verification_state: verification.state };
