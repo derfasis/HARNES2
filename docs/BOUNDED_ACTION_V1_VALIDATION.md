@@ -3,9 +3,13 @@
 Base: `12dc7f8d50a6a6a76cd9c8a7f715c2b22d38b218`.
 Implementation branch: `codex/bounded-action-v1`.
 
-The owner has since changed the instruction in AGENTS.md: running tests is
-authorized, and only production or customer sends remain gated. The checks below
-are therefore **performed results**, not authored intentions.
+The owner has since changed the instruction in AGENTS.md. Verification tests are
+authorized — local/offline suites, hosted CI, real model/API calls and live
+read-only network, Telegram and Browser tests alike. What remains gated is
+narrower and is not restated here loosely: production or customer sends, any
+weakening of safety defaults, and real outbound messages or actions, each of which
+needs its own explicit task-level authorization. The checks below are therefore
+**performed results**, not authored intentions.
 
 Baseline at the merged base was **846 Node + 15 Python + build PASS** for
 `168179b`, whose tree matches this base. That result did **not** certify the new
@@ -98,7 +102,7 @@ failure; API/UI agreement on historical verification versus current evidence.
 
 Known limits: source changes conservatively require a new reviewed basis; .tmp
 debris after process death is retained rather than broadly deleted; verification
-is an observation at a timestamp, not a perpetual guarantee; no remote provider
-effects or hosted model calls have been exercised. The run above is offline and
-covers the local capabilities only — it says nothing about a real provider, a real
-model, or anything leaving the machine, and none of those are authorized here.
+is an observation at a timestamp, not a perpetual guarantee. This run was offline
+and did not exercise a real provider, a real model, or a live network path; those
+paths are permitted by AGENTS.md and were simply not part of this run. Real
+outbound effects remain separately gated.
