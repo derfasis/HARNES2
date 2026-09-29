@@ -355,24 +355,7 @@ export class BusinessService {
         const lesson = this.store.get('SELECT * FROM lessons WHERE id=? AND partner_id=?', p.lesson_id, this.config.partnerId); ensure(lesson, 'Урок не найден', 404);
         this.store.run('UPDATE lessons SET status=?,reviewed_at=? WHERE id=?', p.status, now(), lesson.id); result = { status: p.status }; break;
       }
-      case 'outcome.record': {
-        const conv = this.conversation(conversationId), outcomeId = id();
-        ensure(OUTCOMES.has(p.kind), 'Неизвестный результат');
-        if (p.source_message_id) ensure(this.store.get('SELECT id FROM messages WHERE id=? AND conversation_id=?', p.source_message_id, conversationId), 'Неверный источник сообщения');
-        if (p.draft_id) ensure(this.draft(p.draft_id).conversation_id === conversationId, 'Черновик из другого разговора');
-        if (p.value !== undefined && p.value !== null) ensure(typeof p.value === 'number' && Number.isFinite(p.value) && p.value >= 0, 'Некорректная величина результата');
-        this.store.run('INSERT INTO outcome_events VALUES(?,?,?,?,?,?,?,?,?,?)', outcomeId, conv.person_id, conversationId, p.kind, requiredText(p.evidence, 'Подтверждение результата', 4000), p.source_message_id ?? null, p.draft_id ?? null, p.value ?? null, 'operator', now());
-        this.store.run('UPDATE conversations SET stage=? WHERE id=?', p.kind, conversationId);
-        if (['joined','declined'].includes(p.kind)) {
-          this.store.run("UPDATE conversations SET ownership='HUMAN_OWNED' WHERE id=?", conversationId);
-          this.invalidate(conversationId, p.kind);
-          this.store.run("UPDATE tasks SET status='cancelled' WHERE conversation_id=? AND status IN ('pending','proposed','running')", conversationId);
-        }
-        result = { outcome_id: outcomeId }; this.engagement.outcome(p,result);
-        const e=this.engagement.current(conversationId);
-        if(e){this.invalidate(conversationId,'outcome_recorded');this.engagement.signal(this.engagement.get(e.id),'outcome',{outcome_id:outcomeId});}
-        break;
-      }
+      case 'outcome.record': result = this.recordOutcome(conversationId, p); break;
       case 'capability.propose': {
         const proposalId = id();
         const permissions = p.permissions ?? []; ensure(Array.isArray(permissions) && permissions.length <= 20 && permissions.every(x => typeof x === 'string' && x.length <= 200), 'Нужен список прав');
@@ -523,6 +506,33 @@ export class BusinessService {
       proposals: this.store.all('SELECT * FROM capability_proposals WHERE partner_id=? ORDER BY created_at DESC', partnerId),
       skills: this.store.all('SELECT s.* FROM skill_versions s JOIN capability_proposals p ON p.id=s.proposal_id WHERE p.partner_id=? ORDER BY s.created_at DESC', partnerId),
       metrics: this.metrics(), events: this.store.all('SELECT id,kind,actor,created_at FROM events WHERE partner_id=? ORDER BY id DESC LIMIT 30', partnerId) };
+  }
+  // The one place an outcome is written, whoever asked for it.
+  //
+  // The feedback loop used to insert the row itself. That skipped everything this does around
+  // the insert — advancing the conversation stage, taking ownership on a join or a decline,
+  // cancelling the work it just made pointless, invalidating the engagement, and signalling the
+  // engagement loop. So a candidate could be confirmed as `joined` and the partner would go on
+  // treating the conversation as live. Every side effect that makes a confirmed outcome mean
+  // anything lives here, and the manual path and the promoted-candidate path both call it, so the
+  // two can never disagree about what recording a result does.
+  recordOutcome(conversationId, p) {
+    const conv = this.conversation(conversationId), outcomeId = id();
+    ensure(OUTCOMES.has(p.kind), 'Неизвестный результат');
+    if (p.source_message_id) ensure(this.store.get('SELECT id FROM messages WHERE id=? AND conversation_id=?', p.source_message_id, conversationId), 'Неверный источник сообщения');
+    if (p.draft_id) ensure(this.draft(p.draft_id).conversation_id === conversationId, 'Черновик из другого разговора');
+    if (p.value !== undefined && p.value !== null) ensure(typeof p.value === 'number' && Number.isFinite(p.value) && p.value >= 0, 'Некорректная величина результата');
+    this.store.run('INSERT INTO outcome_events VALUES(?,?,?,?,?,?,?,?,?,?)', outcomeId, conv.person_id, conversationId, p.kind, requiredText(p.evidence, 'Подтверждение результата', 4000), p.source_message_id ?? null, p.draft_id ?? null, p.value ?? null, 'operator', now());
+    this.store.run('UPDATE conversations SET stage=? WHERE id=?', p.kind, conversationId);
+    if (['joined','declined'].includes(p.kind)) {
+      this.store.run("UPDATE conversations SET ownership='HUMAN_OWNED' WHERE id=?", conversationId);
+      this.invalidate(conversationId, p.kind);
+      this.store.run("UPDATE tasks SET status='cancelled' WHERE conversation_id=? AND status IN ('pending','proposed','running')", conversationId);
+    }
+    const result = { outcome_id: outcomeId }; this.engagement.outcome(p,result);
+    const e=this.engagement.current(conversationId);
+    if(e){this.invalidate(conversationId,'outcome_recorded');this.engagement.signal(this.engagement.get(e.id),'outcome',{outcome_id:outcomeId});}
+    return result;
   }
   metrics() {
     const counts = Object.fromEntries(this.store.all('SELECT kind,COUNT(DISTINCT person_id) AS n FROM outcome_events GROUP BY kind').map(x => [x.kind,x.n]));

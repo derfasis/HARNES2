@@ -49,6 +49,9 @@ CREATE TABLE outcome_observation_windows (
  partner_id TEXT NOT NULL REFERENCES partners(id),
  conversation_id TEXT NOT NULL REFERENCES conversations(id),
  message_id TEXT NOT NULL REFERENCES messages(id),
+ -- Which draft was sent. Without it a reply cannot be tied back to the proposal that asked for
+ -- it, so `human_assisted` is undecidable and `decision_outcomes` has nothing to attach to.
+ draft_id TEXT REFERENCES drafts(id),
  opened_at TEXT NOT NULL,
  closes_at TEXT NOT NULL,
  outcome TEXT NOT NULL CHECK(outcome IN ('pending','answered','expired_unanswered','superseded')),

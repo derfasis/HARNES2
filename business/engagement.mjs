@@ -224,7 +224,13 @@ export class EngagementLoop {
     // "nobody replied" a fact the partner can later record instead of an absence it cannot see.
     // It opens for every delivered message, operator-authored ones included, because the partner
     // is not the only author whose effect is worth measuring.
-    try { this.service.outcomes?.observeSent(draft.conversation_id, messageId, message?.created_at); }
+    //
+    // The delivery time is read back from the row that was just written rather than taken from a
+    // caller argument. An earlier version referenced a `message` binding that does not exist in
+    // this scope, and the catch below swallowed the ReferenceError — so no window was ever opened,
+    // and the layer looked alive precisely where it was dead.
+    const sent = this.db.get('SELECT created_at FROM messages WHERE id=?', messageId);
+    try { this.service.outcomes?.observeSent(draft.conversation_id, messageId, sent?.created_at ?? null); }
     catch { /* An observation window must never fail a delivery that already happened. */ }
     const a=this.db.get('SELECT * FROM engagement_actions WHERE draft_id=?',draft.id);if(!a)return;
     const d=this.decision(a.decision_id);

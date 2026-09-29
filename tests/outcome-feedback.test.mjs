@@ -12,7 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Store, id } from '../business/store.mjs';
 import { BusinessService } from '../business/service.mjs';
-import { loadConfig, readJson, ROOT } from '../business/config.mjs';
+import { loadConfig, readJson, ROOT, validateOutcomes } from '../business/config.mjs';
 import { OUTCOME_KINDS, OUTCOME_CANDIDATE_KINDS } from '../business/outcome-tables.mjs';
 
 const harness = (t, { windowSeconds = 604800 } = {}) => {
@@ -242,7 +242,7 @@ test('a delivery failure must not be caused by an observation window', async (t)
   h.service.outcomes.observeSent = original;
 });
 
-test('export carries the new tables and import restores them', async (t) => {
+test('export carries the observation tables', async (t) => {
   const h = harness(t);
   const conv = await h.conversation();
   sendAndObserve(h, conv, '2026-01-01T00:00:00.000Z');
@@ -276,4 +276,99 @@ test('a rate that improved by recording less is visible as such', async (t) => {
   // The headline: how much of what we sent we still cannot say anything about.
   assert.ok(metrics.outcome_coverage.windows >= metrics.outcome_coverage.answered,
     'coverage is reported next to the rates, not instead of them');
+});
+
+// A route nested inside another route's prefix answers 404 for ever, and a test that starts a
+// server to prove otherwise is a test that hangs. This reads the wiring instead, which is what the
+// failure actually was: the two outcome paths sat inside the /api/discovery/ block, where nothing
+// could reach them.
+test('the review endpoints are wired outside any other route prefix', async (t) => {
+  const source = fs.readFileSync(new URL('../business/server.mjs', import.meta.url), 'utf8');
+  const block = source.slice(source.indexOf("if (url.pathname.startsWith('/api/discovery/'))"));
+  const outcomes = source.indexOf("/api/outcomes')");
+  assert.ok(outcomes > 0, 'the outcome routes exist');
+  assert.ok(outcomes < source.indexOf("/api/discovery/'))"),
+    'and they are declared before the discovery block, not inside it');
+  assert.ok(!block.slice(0, block.indexOf("/api/discovery/reason-states")).includes("/api/outcomes"),
+    'no outcome route is reachable only through the discovery prefix');
+  // The list carries the denominator beside the items, so a page of candidates cannot be read as
+  // "this is everything" while a conversation nobody answered stays invisible.
+  const listRoute = source.slice(source.indexOf("url.pathname === '/api/outcomes'"), source.indexOf("url.pathname === '/api/outcomes'") + 320);
+  assert.ok(listRoute.includes('coverage: service.outcomes.coverage()'),
+    'the list response includes coverage');
+});
+
+// Promoting a candidate must go through the same writer the manual path uses. An earlier version
+// inserted the row itself, which skipped everything around the insert — so a candidate confirmed
+// as `joined` left the conversation AI-owned, the stage unmoved, and the engagement still live.
+// The row existing is not the same as the result having been acted on.
+test('a promoted candidate does everything a manually recorded outcome does', async (t) => {
+  const h = harness(t);
+  const conv = await h.conversation();
+  sendAndObserve(h, conv, '2026-01-01T00:00:00.000Z');
+  await h.inbound(conv, 'Записался');
+  h.service.outcomes.reconcile({ now: Date.parse('2026-01-02T00:00:00.000Z') });
+  const candidate = h.store.get('SELECT * FROM outcome_candidates WHERE conversation_id=?', conv.id);
+
+  await h.command('outcome.candidate_confirm', { candidate_id: candidate.id, kind: 'joined', evidence: 'They joined the call' });
+  assert.equal(h.store.get('SELECT stage FROM conversations WHERE id=?', conv.id).stage, 'joined',
+    'the conversation advanced');
+  assert.equal(h.store.get('SELECT ownership FROM conversations WHERE id=?', conv.id).ownership, 'HUMAN_OWNED',
+    'a join hands the conversation to a person, as the manual path always did');
+  // And the manual path still produces the same shape, so history does not fork.
+  const second = await h.command('person.create', { name: 'Third', source: 'offline test' }, id());
+  const other = h.store.get('SELECT * FROM conversations WHERE id=?', second.conversation_id);
+  const manual = await h.command('outcome.record', { conversation_id: other.id, kind: 'declined', evidence: 'Not now' });
+  assert.equal(h.store.get('SELECT ownership FROM conversations WHERE id=?', other.id).ownership, 'HUMAN_OWNED');
+  assert.ok(manual.outcome_id);
+});
+
+// A reply has to lead back to the proposal that asked for it. The window is where that link is
+// captured: a reply arrives with no memory of which draft invited it, so if the sent draft is not
+// recorded at the moment of delivery, attribution is undecidable afterwards and every confirmed
+// outcome is attributed as if the model had written the final text.
+test('a candidate carries the draft that was sent, so attribution is decidable', async (t) => {
+  const h = harness(t);
+  const conv = await h.conversation();
+  // A real draft, so the link is the production one rather than a column filled in by hand.
+  const draftId = id();
+  h.store.run("INSERT INTO drafts(id,conversation_id,action,reason,status,context_revision,current_version,created_at) VALUES(?,?,?,?,?,?,?,?)",
+    draftId, conv.id, 'reply', 'fixture', 'sent', 1, 2, '2026-01-01T00:00:00.000Z');
+  // Two versions: the model wrote the first, the owner rewrote it. That is the case where
+  // attributing the result to the model would be wrong.
+  h.store.run("INSERT INTO draft_versions(id,draft_id,version,text,author,reason,created_at) VALUES(?,?,?,?,?,?,?)",
+    id(), draftId, 1, 'Model draft', 'model', 'initial', '2026-01-01T00:00:00.000Z');
+  h.store.run("INSERT INTO draft_versions(id,draft_id,version,text,author,reason,created_at) VALUES(?,?,?,?,?,?,?)",
+    id(), draftId, 2, 'Owner rewrite', 'operator', 'edited', '2026-01-01T00:00:10.000Z');
+  const messageId = id();
+  h.store.run("INSERT INTO messages(id,conversation_id,direction,text,author,source,draft_id,created_at) VALUES(?,?,?,?,?,?,?,?)",
+    messageId, conv.id, 'out', 'Proposing Thursday.', 'agent_assisted', 'offline test', draftId, '2026-01-01T00:00:00.000Z');
+  h.service.outcomes.observeSent(conv.id, messageId, '2026-01-01T00:00:00.000Z');
+  assert.equal(h.store.get("SELECT draft_id FROM outcome_observation_windows WHERE message_id=?", messageId).draft_id, draftId,
+    'the window remembers which draft went out');
+
+  await h.inbound(conv, 'Yes');
+  h.service.outcomes.reconcile({ now: Date.parse('2026-01-02T00:00:00.000Z') });
+  const candidate = h.store.get("SELECT * FROM outcome_candidates WHERE conversation_id=?", conv.id);
+  assert.equal(candidate.draft_id, draftId, 'so the candidate that observes the reply points back at it');
+
+  // Promotion carries that link into the outcome row rather than dropping it, and still refuses
+  // to claim causation.
+  const result = await h.command('outcome.candidate_confirm', { candidate_id: candidate.id, kind: 'qualified', evidence: 'Confirmed by call' });
+  assert.equal(result.causal_credit, 'not_established');
+  assert.equal(h.store.get("SELECT draft_id FROM outcome_events WHERE id=?", result.outcome_id).draft_id, draftId,
+    'the recorded outcome points back at the draft that was sent');
+});
+
+test('a misconfigured observation window is refused', async (t) => {
+  const base = readJson(path.join(ROOT, 'config/default.json'));
+  // Zero would close every window the instant it opened; a year would mean a conversation is
+  // never settled. Both are refused at load rather than discovered at runtime.
+  for (const responseWindowSeconds of [0, -1, 31536001, 1.5]) {
+    assert.throws(() => validateOutcomes({ outcomes: { ...base.outcomes, enabled: true, responseWindowSeconds } }),
+      /responseWindowSeconds/, `${responseWindowSeconds} must be refused`);
+  }
+  assert.equal(validateOutcomes({ outcomes: { ...base.outcomes, enabled: true, responseWindowSeconds: 604800 } }).outcomes.responseWindowSeconds, 604800);
+  // And a layer that is off is never checked, so a stale config cannot block startup.
+  assert.doesNotThrow(() => validateOutcomes({ outcomes: { ...base.outcomes, enabled: false, responseWindowSeconds: 0 } }));
 });

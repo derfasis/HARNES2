@@ -40,6 +40,11 @@ export class OutcomeLoop {
   // patience runs out. Opening it is what makes "nobody replied" a recordable observation rather
   // than an absence we cannot see.
   observeSent(conversationId, messageId, deliveredAt = null) {
+    // Gated here as well as at the scheduler. The scheduler only calls this pass when the feature
+    // is on, but the call comes from the delivery path, and a caller that reaches it while the
+    // layer is disabled must not be able to switch it on by writing a row. A layer that ships off
+    // and records anyway is worse than one that ships off.
+    if (this.service.config.outcomes?.enabled !== true) return null;
     const window = this.db.get('SELECT id,ownership FROM conversations WHERE id=?', conversationId);
     check(window, 'CONVERSATION_NOT_FOUND', 404);
     const existing = this.db.get('SELECT id FROM outcome_observation_windows WHERE partner_id=? AND message_id=?',
@@ -52,8 +57,12 @@ export class OutcomeLoop {
     // earlier, and after a restart the delay between the send and the first pass would silently
     // become patience the operator never granted.
     const id_ = id(), opened = deliveredAt ?? now();
-    this.db.run(`INSERT INTO outcome_observation_windows(id,partner_id,conversation_id,message_id,opened_at,closes_at,outcome,created_at)
-      VALUES(?,?,?,?,?,?,'pending',?)`, id_, this.partnerId, conversationId, messageId, opened,
+    // The sent draft is recorded with the window, not looked up later: by the time a reply
+    // arrives the mapping from reply back to the proposal that asked for it is the only thing
+    // that makes attribution decidable, and it is not recoverable from the reply alone.
+    const sent = this.db.get('SELECT draft_id FROM messages WHERE id=?', messageId);
+    this.db.run(`INSERT INTO outcome_observation_windows(id,partner_id,conversation_id,message_id,draft_id,opened_at,closes_at,outcome,created_at)
+      VALUES(?,?,?,?,?,?,?,'pending',?)`, id_, this.partnerId, conversationId, messageId, sent?.draft_id ?? null, opened,
     new Date(Date.parse(opened) + patience * 1000).toISOString(), opened);
     this.record('window_opened', { window_id: id_, conversation_id: conversationId, message_id: messageId });
     return id_;
@@ -103,27 +112,21 @@ export class OutcomeLoop {
   // source poller uses, for the same reason.
   reconcile({ now: at = Date.now(), limit = 20 } = {}) {
     return this.db.transaction(() => {
-      const cursor = this.db.get('SELECT cursor FROM channel_offsets WHERE channel=? AND account_id=?',
-        CURSOR, this.partnerId)?.cursor ?? '';
-      const query = (after, n, before = null) => this.db.all(
-        `SELECT * FROM outcome_observation_windows WHERE partner_id=? AND outcome='pending' AND id>? ${before ? 'AND id<=?' : ''}
-         ORDER BY id LIMIT ?`, this.partnerId, after, ...(before ? [before] : []), n);
-      let rows = query(cursor, limit);
-      if (cursor && rows.length < limit) rows = rows.concat(query('', limit - rows.length, cursor));
+      // Ordered by when each window closes, not by a rotating cursor.
+      //
+      // A cursor that only advances past settled windows starves the tail: with twenty waiting
+      // windows at the front, the cursor never moves, and a window that has already been answered
+      // sits behind them for ever. Ordering by deadline gives the same fairness without the trap —
+      // the window that closes soonest is examined first because it becomes answerable soonest, and
+      // a waiting window cannot hold a position against one that is already resolved.
+      const rows = this.db.all(
+        `SELECT * FROM outcome_observation_windows WHERE partner_id=? AND outcome='pending'
+         ORDER BY closes_at, id LIMIT ?`, this.partnerId, limit);
       let answered = 0, expired = 0;
       for (const row of rows) {
         const closed = this.closeWindow(row, at);
         if (closed === 'answered') answered += 1;
         if (closed === 'expired_unanswered') expired += 1;
-        // The cursor only advances past a window that is finished. Moving it past one that is
-        // still waiting would exclude that window from every later pass — the scan would walk
-        // forward and never come back, and a conversation that stays silent would simply stop
-        // being observed rather than being observed as silent. Fairness is about rotation among
-        // live work, not about forgetting it.
-        if (closed !== 'pending') {
-          this.db.run('INSERT INTO channel_offsets VALUES(?,?,?) ON CONFLICT(channel,account_id) DO UPDATE SET cursor=excluded.cursor',
-            CURSOR, this.partnerId, row.id);
-        }
       }
       return { windows: rows.length, answered, expired };
     });
@@ -142,7 +145,7 @@ export class OutcomeLoop {
         detector: 'reply_after_send', basis: 'An inbound message arrived after a delivered message.',
         evidence: { window_id: row.id, sent_message_id: row.message_id, reply_message_id: replies.id,
           reply_at: replies.created_at },
-        messageId: replies.id, observedAt: replies.created_at });
+        messageId: replies.id, draftId: row.draft_id ?? null, observedAt: replies.created_at });
       this.db.run("UPDATE outcome_observation_windows SET outcome='answered',answered_at=?,candidate_id=? WHERE id=?",
         replies.created_at, candidate.candidate_id, row.id);
       this.record('window_answered', { window_id: row.id, candidate_id: candidate.candidate_id });
@@ -152,7 +155,7 @@ export class OutcomeLoop {
     const candidate = this.propose({ conversationId: row.conversation_id, kind: 'no_response_observed',
       detector: 'window_expired', basis: 'The observation window closed with no inbound message.',
       evidence: { window_id: row.id, sent_message_id: row.message_id, opened_at: row.opened_at, closes_at: row.closes_at },
-      messageId: row.message_id, observedAt: row.closes_at });
+      messageId: row.message_id, draftId: row.draft_id ?? null, observedAt: row.closes_at });
     this.db.run("UPDATE outcome_observation_windows SET outcome='expired_unanswered',answered_at=?,candidate_id=? WHERE id=?",
       row.closes_at, candidate.candidate_id, row.id);
     this.record('window_expired', { window_id: row.id, candidate_id: candidate.candidate_id });
@@ -178,10 +181,14 @@ export class OutcomeLoop {
         decision, row.conversation_id);
       check(owned, 'OUTCOME_DECISION_NOT_IN_CONVERSATION', 400);
     }
-    const outcomeId = id();
-    this.db.run(`INSERT INTO outcome_events(id,person_id,conversation_id,kind,evidence,source_message_id,draft_id,value,author,created_at)
-      VALUES(?,?,?,?,?,?,?,?,'operator',?)`, outcomeId, conversation.person_id, row.conversation_id, kind, text,
-    row.source_message_id, row.draft_id, value, now());
+    // The canonical path, not a second writer. A promotion that inserted the row itself would
+    // skip the stage change, the ownership handover on a join or decline, the cancellation of work
+    // the result just made pointless, and the engagement signal — so a confirmed `joined` would
+    // leave the partner still treating the conversation as live.
+    const recorded = this.service.recordOutcome(row.conversation_id, {
+      kind, evidence: text, value, source_message_id: row.source_message_id, draft_id: row.draft_id });
+    const outcomeId = recorded.outcome_id;
+    void conversation;
     if (decision) {
       // Association, never causal credit — and the distinction is recorded rather than implied,
       // because a rewrite between the decision and the result is exactly the case that must not

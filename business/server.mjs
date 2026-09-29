@@ -175,14 +175,16 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
         knowledge:fs.readdirSync(path.join(ROOT,'partner/knowledge')).filter(f=>f.endsWith('.json')).map(f=>readJson(path.join(ROOT,'partner/knowledge',f))),
         configuration:{opportunity_automatic:config.opportunity.automatic===true,runtime_enabled:config.runtime.enabled,provider:config.runtime.provider,model:config.runtime.model,base_url:config.runtime.baseUrl, max_runs_per_day:config.runtime.maxRunsPerDay,daily_budget_usd:config.runtime.dailyBudgetUsd,timezone:config.scheduler.timezone},
         release:{version:'0.1.0-engagement-v1',tests:'see_docs_PERSISTENT_ENGAGEMENT_VALIDATION',model_validation:'controlled_disposable_smoke_pass'} });
+      // Outside the discovery block on purpose: a route nested inside another route's prefix
+      // is unreachable, and these two paths are not discovery routes at all.
+      if (req.method === 'GET' && url.pathname.startsWith('/api/outcomes/'))
+        return send(200, service.outcomes.detail(decodeURIComponent(url.pathname.split('/').at(-1))));
+      if (req.method === 'GET' && url.pathname === '/api/outcomes')
+        return send(200, { ...service.outcomes.list({ status: url.searchParams.get('status') ?? 'pending', limit: Number(url.searchParams.get('limit') ?? 20), cursor: url.searchParams.get('cursor') ?? '' }), coverage: service.outcomes.coverage() });
       if (url.pathname.startsWith('/api/discovery/')) {
         // Drain the body before refusing, so the client sees 405 instead of a reset connection.
         if (req.method !== 'GET') { for await (const _ of req) { /* discard */ } return send(405,{error:'Метод не поддерживается',code:'method_not_allowed'}); }
         if (url.pathname === '/api/discovery/reason-states') return send(200,discoveryReasonStatesQuery(url,service));
-        if (url.pathname.startsWith('/api/outcomes/'))
-          return send(200, service.outcomes.detail(decodeURIComponent(url.pathname.split('/').at(-1))));
-        if (url.pathname === '/api/outcomes')
-          return send(200, service.outcomes.list({ status: url.searchParams.get('status') ?? 'pending', limit: Number(url.searchParams.get('limit') ?? 20), cursor: url.searchParams.get('cursor') ?? '' }));
         if (url.pathname === '/api/discovery/decisions') return send(200,service.discoveryDecisionQueue(discoveryQueryOptions(url), { kind: 'operator' }));
         return send(200,service.discoveryPresentationDetail(decodeURIComponent(url.pathname.split('/').at(-1)), { kind: 'operator' }));
       }
