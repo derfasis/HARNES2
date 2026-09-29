@@ -9,5 +9,10 @@
     "outputUsdPerMillion": null
   },
   "telegram": { "enabled": false, "liveSending": false, "transport": "bot_api", "allowedChatIds": [] },
-  "scheduler": { "dailyPlanning": false }
+  "scheduler": { "dailyPlanning": false },
+  "actions": {
+    "enabled": false,
+    "modelEnabled": false,
+    "maxModelRunsPerDay": 5
+  }
 }

@@ -70,5 +70,10 @@
     "ttlSeconds": 604800,
     "maxOpenSituations": 100,
     "purpose": "Assess the bounded public source situation for operator review only."
+  },
+  "actions": {
+    "enabled": false,
+    "modelEnabled": false,
+    "maxModelRunsPerDay": 5
   }
 }

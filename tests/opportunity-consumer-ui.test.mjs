@@ -81,9 +81,16 @@ test('capture list and import controls exist inside the existing Tasks product U
 });
 
 test('static queue/tool guards exclude review records even if a task status is corrupted to pending', () => {
-  assert.match(read('business/scheduler.mjs'), /status='pending' AND kind NOT IN \('opportunity_review','discovery_review'\)/);
-  assert.equal((read('business/context.mjs').match(/kind NOT IN \('opportunity_review','discovery_review'\)/g) ?? []).length, 2);
-  assert.equal((read('business/tools.mjs').match(/kind NOT IN \('opportunity_review','discovery_review'\)/g) ?? []).length, 2);
+  // 'owner_action' joins the list for the same reason the other two are on it: an owner-facing
+  // task is not AI work, and a corrupted status must not let the scheduler pick one up.
+  // Two patterns, deliberately. A `/g` regex is stateful under `assert.match`, which reaches it
+  // through `test()` and advances `lastIndex`, so the count that follows would start mid-string
+  // and report one match short. The previous form used one object for both and under-counted.
+  const guarded = /kind NOT IN \('opportunity_review','discovery_review','owner_action'\)/;
+  const everyGuarded = () => new RegExp(guarded, 'g');
+  assert.match(read('business/scheduler.mjs'), guarded);
+  assert.equal((read('business/context.mjs').match(everyGuarded()) ?? []).length, 2);
+  assert.equal((read('business/tools.mjs').match(everyGuarded()) ?? []).length, 2);
   // This is a source guard assertion, not a scheduler execution/integration test.
 });
 
@@ -140,7 +147,9 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // The real child-process crash + restore tests in continuity.test.mjs cover both.
     // Executive extends export with intent/attempt tables and interrupts in-flight research.
     // Its crash and restore acceptance cases live in executive.test.mjs.
-    "business/store.mjs": "ce3ad01aa929c691f4330101f090c7336e6a44b8",
+    // Bounded Action adds export tables and recovers dispatching as unknown.
+    // Acceptance cases: actions.test.mjs (not run under the current no-tests instruction).
+    "business/store.mjs": "c01118884bd97b30eb04e21d3a31b24230421f65",
     "adapters/hermes/credentials.py": "2797bd89081eaf4a950178cec3d637015ee8f45f",
     "adapters/hermes/runner.py": "e631237829d9b7a4521799b4a19c4c500b33f5aa",
     // Deliberate v0 extension: existing worker, no-tool envelope tested in opportunity-runtime.test.mjs.

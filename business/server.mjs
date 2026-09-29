@@ -18,7 +18,7 @@ import { exportPartner } from './export.mjs';
 import { listCandidates } from './executive-donors.mjs';
 import { AppError, ensure, requiredText } from './errors.mjs';
 
-const publicFiles = new Map([['/', ['index.html','text/html; charset=utf-8']], ['/app.js',['app.js','text/javascript; charset=utf-8']], ['/research.js',['research.js','text/javascript; charset=utf-8']], ['/styles.css',['styles.css','text/css; charset=utf-8']], ['/favicon.svg',['favicon.svg','image/svg+xml']]]);
+const publicFiles = new Map([['/', ['index.html','text/html; charset=utf-8']], ['/app.js',['app.js','text/javascript; charset=utf-8']], ['/research.js',['research.js','text/javascript; charset=utf-8']], ['/actions.js',['actions.js','text/javascript; charset=utf-8']], ['/styles.css',['styles.css','text/css; charset=utf-8']], ['/favicon.svg',['favicon.svg','image/svg+xml']]]);
 const validateCommand = new Ajv().compile(readJson(path.join(ROOT,'contracts/command.schema.json')));
 const tokenEquals = (a,b) => typeof a === 'string' && Buffer.byteLength(a) === Buffer.byteLength(b) && timingSafeEqual(Buffer.from(a),Buffer.from(b));
 async function readBody(req) {
@@ -127,6 +127,23 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
         return send(404,{error:'not found'});
       }
       ensure(tokenEquals(req.headers['x-partner-token'],operatorToken), 'Перезагрузите страницу для обновления сессии', 403);
+      if (req.method === 'GET' && url.pathname === '/api/actions') {
+        ensure([...url.searchParams.keys()].every(k => ['limit','cursor'].includes(k))
+          && [...url.searchParams.keys()].every(k => url.searchParams.getAll(k).length === 1), 'Invalid actions query', 400);
+        return send(200, service.actions.list({ limit: Number(url.searchParams.get('limit') ?? 20), cursor: url.searchParams.get('cursor') ?? '' }));
+      }
+      if (req.method === 'GET' && url.pathname.startsWith('/api/actions/')) {
+        const match = /^\/api\/actions\/([^/]+)(\/artifact)?$/.exec(url.pathname);
+        ensure(match && [...url.searchParams].length === 0, 'Invalid action query', 400);
+        const actionId = decodeURIComponent(match[1]);
+        if (match[2]) return send(200, { artifact: await scheduler.actionRuntime.capabilities.artifact(service.actions.get(actionId)),
+          current: service.actions.detail(actionId).current });
+        return send(200, service.actions.detail(actionId));
+      }
+      if (req.method === 'POST' && url.pathname === '/api/actions/wake') {
+        ensure([...url.searchParams].length === 0, 'Invalid action query', 400);
+        return send(200, await scheduler.actionTick() ?? { disposition: 'disabled' });
+      }
       if (req.method === 'GET' && url.pathname.startsWith('/api/executive/')) {
         if (url.pathname === '/api/executive/candidates') {
           ensure([...url.searchParams.keys()].every(k => ['limit','cursor'].includes(k))
@@ -216,6 +233,8 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
   catch { scheduler.continuityState = { disposition: 'reconciliation_failed' }; }
   try { service.executive.reconcile(); }
   catch { scheduler.executiveState = { disposition: 'reconciliation_failed' }; }
+  try { service.actions.reconcile(); }
+  catch { scheduler.actionState = { disposition: 'reconciliation_failed' }; }
   fs.mkdirSync(path.join(directory,'runtime'),{recursive:true});
   fs.writeFileSync(path.join(directory,'runtime/mcp-connection.json'),JSON.stringify({url:`http://127.0.0.1:${servicePort}`,token:mcpToken}),{mode:0o600});
   fs.writeFileSync(path.join(directory,'runtime/service.json'),JSON.stringify({pid:process.pid,port:servicePort,started_at:new Date().toISOString()}));
@@ -234,7 +253,7 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
     // was still writing its receipt — the database disappearing from under a worker that is
     // committing to it, which is how a run ends as `interrupted` with the receipt half-written.
     // Both loops are drained here, and the store is closed after both are quiet.
-    while (scheduler.busy || scheduler.reasonBusy || telegram.polling) await new Promise(resolve=>setTimeout(resolve,50));
+    while (scheduler.busy || scheduler.reasonBusy || scheduler.actionRuntime.busy || telegram.polling) await new Promise(resolve=>setTimeout(resolve,50));
     await closed; await telegram.stop(); store.close();
   };
   for (const signal of ['SIGINT','SIGTERM']) process.once(signal,()=>close().then(()=>process.exit(0)));

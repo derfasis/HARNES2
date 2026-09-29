@@ -8,6 +8,8 @@ import { sourceCheckpointState } from './source-ingestion.mjs';
 import { id } from './store.mjs';
 import { now } from './errors.mjs';
 import { processContinuity } from './continuity-reasoning.mjs';
+import { ActionRuntime } from './action-runtime.mjs';
+import { processActionPlan } from './action-reasoning.mjs';
 import { processExecutive } from './executive-reasoning.mjs';
 
 export class Scheduler {
@@ -17,7 +19,9 @@ export class Scheduler {
     // start told the operator the partner was broken when the only true thing was that it had not
     // looked yet. `null` is that third answer, and reasoning treats it exactly like `false`: not
     // established is not healthy, and the model still does not run.
-    this.continuityHealthy = null; this.executiveHealthy = null; }
+    this.continuityHealthy = null; this.executiveHealthy = null; this.actionHealthy = null;
+    this.actionRuntime = new ActionRuntime(service, { ready: () => !this.stopped && !this.busy
+      && this.continuityHealthy === true && this.executiveHealthy === true && this.actionHealthy === true }); }
   // Two loops, one clock, on purpose.
   //
   // The source loop is the partner's eyes: it polls readers, advances watch cursors and retires
@@ -38,6 +42,7 @@ export class Scheduler {
     // pass would put the head back on the eyes' clock, which is the whole defect.
     this.timer = setInterval(() => this.sourceTick().catch(failed), seconds);
     this.reasonTimer = setInterval(() => this.reasonTick().catch(failed), seconds);
+    this.actionTimer = setInterval(() => this.actionTick().catch(failed), seconds);
   }
   // One full pass, eyes then head, in that order. This is what an operator or a test means by
   // "run a tick", and it is what `/api/scheduler/wake` uses. The scheduled loops never call it,
@@ -46,6 +51,12 @@ export class Scheduler {
   async tick() {
     await this.sourceTick();
     await this.reasonTick();
+    await this.actionTick();
+  }
+  async actionTick() {
+    if (this.stopped || !this.service.config.scheduler.enabled) return;
+    this.actionState = await this.actionRuntime.tick();
+    return this.actionState;
   }
   // `reason` normally carries the pipeline's business disposition; a source poll that was actually
   // attempted and failed may override it, because a failed poll is why the partner is doing
@@ -54,7 +65,7 @@ export class Scheduler {
   // `reason_busy` is reported beside `busy` rather than inside it: the two loops are independent,
   // and an operator looking at one long-running tick must be able to tell whether the eyes or the
   // head is the thing that is working.
-  status() { return { enabled: this.service.config.scheduler.enabled, busy: this.busy, reason_busy: this.reasonBusy, active_run: this.activeRun, reason: this.lastReason, model: runtimeReadiness(this.service.config), source_readers: this.sourceReadersState, continuity: this.continuityState ?? { disposition: 'not_run' }, executive: this.executiveState ?? { disposition: 'not_run' } }; }
+  status() { return { enabled: this.service.config.scheduler.enabled, busy: this.busy, reason_busy: this.reasonBusy, action_busy: this.actionRuntime.busy, actions: this.actionState ?? { disposition: 'not_run' }, active_run: this.activeRun, reason: this.lastReason, model: runtimeReadiness(this.service.config), source_readers: this.sourceReadersState, continuity: this.continuityState ?? { disposition: 'not_run' }, executive: this.executiveState ?? { disposition: 'not_run' } }; }
   // The source loop. Poll, checkpoint, retire, discover. No model call anywhere in it.
   async sourceTick() {
     if (this.busy || this.stopped || !this.service.config.scheduler.enabled) return;
@@ -110,6 +121,9 @@ export class Scheduler {
       // `const` on a name that is reassigned throws a `TypeError` at the first failure — which is
       // the exact moment this code exists to handle. The instance flags are written at the same
       // time so the next pass sees the failure too; the locals carry it through this one.
+      this.actionHealthy = null;
+      try { await this.service.exclusive(() => this.service.actions.reconcile()); this.actionHealthy = true; }
+      catch { this.actionHealthy = false; this.actionState = { disposition: 'reconciliation_failed' }; }
       let continuityHealthy = this.continuityHealthy, executiveHealthy = this.executiveHealthy;
       if (cfg.opportunity?.automatic) {
         // A source that is configured but has no reader is not a quiet source. The poll loop
@@ -280,7 +294,7 @@ export class Scheduler {
       }
       await this.ensurePlanningTask();
       const prepared = await this.service.exclusive(() => this.service.store.transaction(() => {
-        const task = this.service.store.get("SELECT * FROM tasks WHERE partner_id=? AND status='pending' AND kind NOT IN ('opportunity_review','discovery_review') AND due_at<=? ORDER BY due_at,created_at LIMIT 1", cfg.partnerId, now());
+        const task = this.service.store.get("SELECT * FROM tasks WHERE partner_id=? AND status='pending' AND kind NOT IN ('opportunity_review','discovery_review','owner_action') AND due_at<=? ORDER BY due_at,created_at LIMIT 1", cfg.partnerId, now());
         if (!task) return null;
         if (task.conversation_id && this.service.engagement.managed(task.conversation_id)) {
           const e=this.service.engagement.current(task.conversation_id);
@@ -332,7 +346,13 @@ export class Scheduler {
           }
         }
       }
-    } finally { this.busy = false; this.activeRun = null; }
+    } finally {
+      this.busy = false; this.activeRun = null;
+      // Timers begin together. Wake the independent action pass after observation
+      // as well, or an action timer that always sees busy=true can starve forever.
+      // Do not await effects here: observation must keep its own cadence.
+      if (this.timer && !this.stopped) this.actionTick().catch(() => { this.actionState = { disposition: 'processing_failed' }; });
+    }
   }
   // The reasoning loop. Three bounded inferences, at most one at a time, and never on the source
   // loop's clock.
@@ -373,6 +393,10 @@ export class Scheduler {
         try { this.executiveState = await processExecutive(this.service, this.runtime); }
         catch { this.executiveState = { disposition: 'processing_failed' }; }
       }
+      if (this.actionHealthy === true && this.executiveHealthy === true) {
+        try { this.actionPlanState = await processActionPlan(this.service, this.runtime); }
+        catch { this.actionPlanState = { disposition: 'processing_failed' }; }
+      }
       // The disposition is the head's answer to "what is the partner doing". It does not take the
       // slot from a failed poll: a transport that cannot be read is why the partner is not doing
       // anything, and a business disposition would hide that. The failed poll wins, and it is the
@@ -392,5 +416,5 @@ export class Scheduler {
   // timer alone left the head running, and `runtime.close()` then killed the worker out from
   // under a completion transaction that was mid-write. The caller drains `reasonBusy` before the
   // store is closed; this only stops the clock and says so.
-  stop() { this.stopped = true; clearInterval(this.timer); clearInterval(this.reasonTimer); this.runtime.close(); }
+  stop() { this.stopped = true; clearInterval(this.timer); clearInterval(this.reasonTimer); clearInterval(this.actionTimer); this.actionRuntime.stop(); this.runtime.close(); }
 }
