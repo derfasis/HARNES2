@@ -565,7 +565,7 @@ test('an actual four-migration SQLite database upgrades in place without rewriti
   try {
     assert.deepEqual(store.all('SELECT * FROM events'), before);
     assert.equal(store.get('SELECT mission FROM partners').mission, 'Original baseline mission');
-    assert.equal(store.all('SELECT * FROM schema_migrations').length, 7);
+    assert.equal(store.all('SELECT * FROM schema_migrations').length, 8);
     assert.deepEqual(store.all('PRAGMA foreign_key_check'), []);
     noEffects({ store });
     for (const table of CONTINUITY_TABLES) assert.equal(store.get(`SELECT COUNT(*) n FROM ${table}`).n, 0);

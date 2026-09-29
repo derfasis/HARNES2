@@ -219,6 +219,13 @@ export class EngagementLoop {
     return result;
   }
   onDelivered(draft,messageId) {
+    // The moment a message actually goes out is when we stop knowing what will happen to it.
+    // Opening an observation window here — rather than at send-authorisation time — is what makes
+    // "nobody replied" a fact the partner can later record instead of an absence it cannot see.
+    // It opens for every delivered message, operator-authored ones included, because the partner
+    // is not the only author whose effect is worth measuring.
+    try { this.service.outcomes?.observeSent(draft.conversation_id, messageId, message?.created_at); }
+    catch { /* An observation window must never fail a delivery that already happened. */ }
     const a=this.db.get('SELECT * FROM engagement_actions WHERE draft_id=?',draft.id);if(!a)return;
     const d=this.decision(a.decision_id);
     // Never attribute model promises/explanations to an operator rewrite.

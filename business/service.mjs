@@ -14,11 +14,16 @@ import { ActionLoop, ACTION_STALE_ERRORS } from './actions.mjs';
 import { ACTION_COMMANDS, HUMAN_ACTION_TASK } from './action-tables.mjs';
 import { ExecutiveLoop } from './executive.mjs';
 import { EXECUTIVE_ACTIONS } from './executive-tables.mjs';
+import { OutcomeLoop } from './outcome-feedback.mjs';
+import { OUTCOME_KINDS, OUTCOME_COMMANDS } from './outcome-tables.mjs';
+import { outcomeCommand } from './outcome-feedback.mjs';
 import { discoveryCommand, discoveryDecisionQueue, discoveryDetail, discoveryPresentationDetail, discoveryReasonStates, ensureDiscoveryApplied, hasDiscoveryPending, invalidateDiscoveryOffers, markDiscoveryPending, reconcileDiscoveryPending, recordDiscoveryFailure, staleMaterialEvidence, DISCOVERY_ACTIONS, DISCOVERY_REVIEW_TASK } from './discovery.mjs';
 
-const OUTCOMES = new Set(['qualified','call_proposed','call_accepted','call_booked','call_attended','no_show','joined','declined','business_value']);
+// One list, shared with the feedback loop: a candidate may only ever be promoted to a kind the
+// manual path would also have accepted, or promotion becomes a way around that refusal.
+const OUTCOMES = new Set(OUTCOME_KINDS);
 export class BusinessService {
-  constructor(store, config) { this.store = store; this.config = config; this.tail = Promise.resolve(); this.telegramAccountId = null; this.engagement = new EngagementLoop(this); this.continuity = new ContinuityLoop(this); this.executive = new ExecutiveLoop(this); this.actions = new ActionLoop(this); this.discoveryApply = ensureDiscoveryApplied; this.reconcileDiscovery = () => reconcileDiscoveryPending(this, 50); }
+  constructor(store, config) { this.store = store; this.config = config; this.tail = Promise.resolve(); this.telegramAccountId = null; this.engagement = new EngagementLoop(this); this.continuity = new ContinuityLoop(this); this.executive = new ExecutiveLoop(this); this.actions = new ActionLoop(this); this.outcomes = new OutcomeLoop(this); this.discoveryApply = ensureDiscoveryApplied; this.reconcileDiscovery = () => reconcileDiscoveryPending(this, 50); }
   exclusive(fn) { const job = this.tail.then(fn); this.tail = job.catch(() => {}); return job; }
   partner() { return this.store.get('SELECT * FROM partners WHERE id=?', this.config.partnerId); }
   person(personId) {
@@ -121,7 +126,13 @@ export class BusinessService {
       ensure(!['fact.propose','task.propose','lesson.propose','capability.propose'].includes(action),'Use engagement-scoped proposals',403);
     }
     let result;
-    if (ACTION_COMMANDS.has(action)) {
+    if (OUTCOME_COMMANDS.has(action)) {
+      // Every outcome command is operator-only, checked here as well as inside the loop: this is
+      // the branch that decides who may turn an observation into a business claim, and it should
+      // not depend on the callee remembering.
+      ensure(actor?.kind === 'operator', 'Операция доступна только владельцу', 403);
+      result = outcomeCommand(this, action, p, actor);
+    } else if (ACTION_COMMANDS.has(action)) {
       result = this.actions.command(action, p, actor);
     } else if (EXECUTIVE_ACTIONS.has(action)) {
       result = this.executive.command(action, p, actor);

@@ -1,0 +1,22 @@
+          const target = typeof payload?.action_id === 'string' && this.store.get('SELECT id FROM action_proposals WHERE id=? AND partner_id=?', payload.action_id, this.config.partnerId);
+          this.store.transaction(() => {
+            // A failed command can be the first observer of revoked/stale scope.
+            // Persist that observation after its command transaction rolled back.
+            if (target && actor.kind === 'operator' && ACTION_STALE_ERRORS.has(error.code)) this.actions.invalidate(this.actions.get(target.id), error.code);
+            this.store.event(this.config.partnerId, null, 'action.command_denied',
+            ['operator','agent','channel','system'].includes(actor.kind) ? actor.kind : 'unknown',
+            { action, action_id: target?.id ?? null, code: error.code ?? 'ACTION_COMMAND_FAILED',
+              request_id: typeof requestId === 'string' && /^[a-f0-9-]{36}$/i.test(requestId) ? requestId : null });
+          });
+        }
+        if (REVIEW_ACTIONS.includes(action)) {
+          // Denials survive the rolled-back command, without persisting untrusted text or grants.
+          const task = typeof payload?.task_id === 'string' && this.store.get('SELECT id FROM tasks WHERE id=? AND partner_id=? AND kind=?', payload.task_id, this.config.partnerId, OPPORTUNITY_TASK);
+          this.store.transaction(() => this.store.event(this.config.partnerId, null, 'opportunity.review.denied',
+            ['operator','agent','channel'].includes(actor.kind) ? actor.kind : 'unknown',
+            { action, task_id: task?.id ?? null, code: error.code ?? 'review_command_rejected',
+              request_id: typeof requestId === 'string' && /^[a-f0-9-]{36}$/i.test(requestId) ? requestId : null }));
+        }
+        throw error;
+      }
+      // Source truth commits first. Discovery is a derived projection and may

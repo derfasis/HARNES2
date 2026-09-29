@@ -65,7 +65,7 @@ export class Scheduler {
   // `reason_busy` is reported beside `busy` rather than inside it: the two loops are independent,
   // and an operator looking at one long-running tick must be able to tell whether the eyes or the
   // head is the thing that is working.
-  status() { return { enabled: this.service.config.scheduler.enabled, busy: this.busy, reason_busy: this.reasonBusy, action_busy: this.actionRuntime.busy, actions: this.actionState ?? { disposition: 'not_run' }, active_run: this.activeRun, reason: this.lastReason, model: runtimeReadiness(this.service.config), source_readers: this.sourceReadersState, continuity: this.continuityState ?? { disposition: 'not_run' }, executive: this.executiveState ?? { disposition: 'not_run' } }; }
+  status() { return { enabled: this.service.config.scheduler.enabled, busy: this.busy, reason_busy: this.reasonBusy, action_busy: this.actionRuntime.busy, actions: this.actionState ?? { disposition: 'not_run' }, active_run: this.activeRun, reason: this.lastReason, model: runtimeReadiness(this.service.config), source_readers: this.sourceReadersState, continuity: this.continuityState ?? { disposition: 'not_run' }, executive: this.executiveState ?? { disposition: 'not_run' }, outcomes: this.outcomesState ?? { disposition: 'not_run' } }; }
   // The source loop. Poll, checkpoint, retire, discover. No model call anywhere in it.
   async sourceTick() {
     if (this.busy || this.stopped || !this.service.config.scheduler.enabled) return;
@@ -98,6 +98,15 @@ export class Scheduler {
       this.continuityHealthy = null;
       try {
         await this.service.exclusive(() => this.service.continuity.reconcile());
+        // Outcome observation belongs to the source loop, not the reasoning one: what the loop
+        // owes is "did anything come back", and that is a transport question. It runs before the
+        // reconciliations because a window that has already closed is settled regardless of
+        // whether the reasoning above it is healthy, and leaving it unsettled for want of a model
+        // is how a rate silently improves because nothing was counted.
+        if (cfg.outcomes?.enabled === true) {
+          try { await this.service.exclusive(() => this.service.outcomes.reconcile()); }
+          catch { this.outcomesState = { disposition: "reconcile_failed" }; }
+        }
         this.continuityHealthy = true;
         // A reconciliation that recovers clears its own failure. The state used to be written
         // only on the way down, so one transient fault pinned the partner to

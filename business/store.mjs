@@ -9,10 +9,11 @@ import { DISCOVERY_TABLES } from './discovery-tables.mjs';
 import { CONTINUITY_TABLES } from './continuity-tables.mjs';
 import { ACTION_TABLES } from './action-tables.mjs';
 import { EXECUTIVE_TABLES } from './executive-tables.mjs';
+import { OUTCOME_TABLES } from './outcome-tables.mjs';
 
 export const id = () => randomUUID();
 export const hash = value => createHash('sha256').update(value).digest('hex');
-export const TABLES = ['partners','persons','channel_identities','conversations','messages','facts','tasks','runs','drafts','draft_versions','approvals','delivery_attempts','outcome_events','lessons','capability_proposals','skill_versions','events','command_receipts','channel_offsets','tool_calls',...ENGAGEMENT_TABLES,...DISCOVERY_TABLES,...CONTINUITY_TABLES,...EXECUTIVE_TABLES,...ACTION_TABLES];
+export const TABLES = ['partners','persons','channel_identities','conversations','messages','facts','tasks','runs','drafts','draft_versions','approvals','delivery_attempts','outcome_events','lessons','capability_proposals','skill_versions','events','command_receipts','channel_offsets','tool_calls',...ENGAGEMENT_TABLES,...DISCOVERY_TABLES,...CONTINUITY_TABLES,...EXECUTIVE_TABLES,...ACTION_TABLES,...OUTCOME_TABLES];
 export class Store {
   constructor(directory = DATA) {
     this.directory = path.resolve(directory);

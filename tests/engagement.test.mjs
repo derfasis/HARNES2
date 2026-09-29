@@ -37,7 +37,7 @@ const act={purpose:'reply',text:'Загальну модель пояснено.
 const pending=h=>h.store.get("SELECT COUNT(*) n FROM tasks WHERE conversation_id=? AND status='pending'",h.cid).n;
 
 test('additive migration preserves legacy state; opt-in coalesces consecutive inbound and duplicates',async t=>{
- const h=await harness(t,{auto:true});assert.equal(h.store.all('SELECT * FROM schema_migrations').length,7);
+ const h=await harness(t,{auto:true});assert.equal(h.store.all('SELECT * FROM schema_migrations').length,8);
  const r=await h.inbound('Ще одне питання','same');const rev=h.e.revision;
  const d=await h.inbound('Ще одне питання','same');assert.equal(d.message_id,r.message_id);assert.equal(h.e.revision,rev);
  assert.equal(pending(h),1);assert.equal(h.store.get('SELECT COUNT(*) n FROM engagements').n,1);
@@ -384,7 +384,7 @@ test('existing two-migration SQLite database upgrades in place without changing 
  for(const version of ['001-core.sql','002-conversation-mode.sql']){const sql=fs.readFileSync(path.join(ROOT,'business/migrations',version),'utf8');db.exec(sql);db.prepare('INSERT INTO schema_migrations VALUES(?,?,?)').run(version,hash(sql),'2026-09-01T00:00:00.000Z');}
  db.prepare('INSERT INTO partners VALUES(?,?,?,?,?)').run('partner-001','Old partner','Unchanged mission','1','2026-09-01T00:00:00.000Z');
  db.prepare('INSERT INTO persons(id,partner_id,name,source,permission,created_at) VALUES(?,?,?,?,?,?)').run('old-person','partner-001','Old person','historical source','legacy string','2026-09-01T00:00:00.000Z');db.close();
- const store=new Store(dir);try{assert.equal(store.all('SELECT * FROM schema_migrations').length,7);assert.equal(store.get("SELECT mission FROM partners WHERE id='partner-001'").mission,'Unchanged mission');assert.equal(store.get("SELECT permission FROM persons WHERE id='old-person'").permission,'legacy string');assert.equal(store.get('SELECT COUNT(*) n FROM contact_permissions').n,0);assert.deepEqual(store.all('PRAGMA foreign_key_check'),[]);}finally{store.close();}
+ const store=new Store(dir);try{assert.equal(store.all('SELECT * FROM schema_migrations').length,8);assert.equal(store.get("SELECT mission FROM partners WHERE id='partner-001'").mission,'Unchanged mission');assert.equal(store.get("SELECT permission FROM persons WHERE id='old-person'").permission,'legacy string');assert.equal(store.get('SELECT COUNT(*) n FROM contact_permissions').n,0);assert.deepEqual(store.all('PRAGMA foreign_key_check'),[]);}finally{store.close();}
 });
 
 test('delivered commitment deadline is one-shot; HUMAN obligation never queues AI work',async t=>{
