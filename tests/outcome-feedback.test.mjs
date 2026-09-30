@@ -407,3 +407,34 @@ test('an answered conversation is never starved by twenty silent ones', async (t
     'the answered conversation is settled in the first pass, however many silent ones are queued');
   assert.ok(h.store.get("SELECT id FROM outcome_candidates WHERE conversation_id=?", conv.id), 'and it left a candidate');
 });
+
+// A status that only ever records failure is a status an operator learns to ignore. A layer that
+// recovered from one bad pass was still reported as broken for the rest of the process.
+test('a recovered observation pass stops reporting reconcile_failed', async (t) => {
+  const h = harness(t, { windowSeconds: 60 });
+  const conv = await h.conversation();
+  sendAndObserve(h, conv, '2026-01-01T00:00:00.000Z');
+  const { Scheduler } = await import('../business/scheduler.mjs');
+  const scheduler = new Scheduler(h.service, { close() {}, cancel() {} }, { readiness: () => ({}) }, []);
+  const original = h.service.outcomes.reconcile.bind(h.service.outcomes);
+  let fail = true;
+  h.service.outcomes.reconcile = () => { if (fail) throw new Error('db down'); return original(); };
+  await scheduler.sourceTick();
+  assert.equal(scheduler.outcomesState.disposition, 'reconcile_failed', 'the failure is reported');
+  fail = false;
+  await scheduler.sourceTick();
+  assert.notEqual(scheduler.outcomesState.disposition, 'reconcile_failed',
+    'and a pass that works says so, rather than leaving the layer reported as broken for ever');
+});
+
+// The switches are booleans. A string 'false' is enabled to `=== true` and disabled to a
+// truthiness check, and finding out which one the code believed is worse than refusing it.
+test('the outcome switches refuse anything that is not a boolean', async (t) => {
+  const base = readJson(path.join(ROOT, 'config/default.json'));
+  for (const bad of ['false', 'true', 0, 1, null]) {
+    assert.throws(() => validateOutcomes({ outcomes: { ...base.outcomes, enabled: bad, modelEnabled: bad } }),
+      /Invalid enabled|Invalid modelEnabled/, `${JSON.stringify(bad)} must be refused`);
+  }
+  assert.doesNotThrow(() => validateOutcomes({ outcomes: { ...base.outcomes, enabled: true, modelEnabled: false } }));
+  assert.doesNotThrow(() => validateOutcomes({}), 'a layer that is not configured at all is not an error');
+});

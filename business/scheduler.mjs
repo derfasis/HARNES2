@@ -102,7 +102,13 @@ export class Scheduler {
         // it unsettled for want of an unrelated model-side pass is how a rate silently improves
         // because nothing was counted.
         if (cfg.outcomes?.enabled === true) {
-          try { await this.service.exclusive(() => this.service.outcomes.reconcile()); }
+          try {
+            await this.service.exclusive(() => this.service.outcomes.reconcile());
+            // A pass that recovers clears its own failure, for the same reason the others do. A
+            // status that only ever records failure tells an operator the layer is broken for the
+            // life of the process even though every later pass worked.
+            if (this.outcomesState?.disposition === 'reconcile_failed') this.outcomesState = { disposition: 'reconciled' };
+          }
           catch { this.outcomesState = { disposition: 'reconcile_failed' }; }
         }
         try {

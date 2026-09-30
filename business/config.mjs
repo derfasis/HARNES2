@@ -107,9 +107,17 @@ export function checkAutomaticPrerequisite(config) {
 // other interval here: a zero or a negative closes every window the instant it opens, and an
 // unbounded one never closes at all. Exported so the rule is testable without a config file.
 export function validateOutcomes(config) {
-  if (config?.outcomes?.enabled !== true) return config;
+  const outcomes = config?.outcomes;
+  if (outcomes === undefined || outcomes === null) return config;
+  // The switches are booleans, not merely truthy. A string 'false' would read as enabled to
+  // every `=== true` check and be read as disabled by a plain truthiness one; refusing the
+  // wrong type is cheaper than finding out which of the two the code believed.
+  for (const name of ['enabled', 'modelEnabled']) {
+    if (name in outcomes && typeof outcomes[name] !== 'boolean') throw new Error(`Invalid ${name}`);
+  }
+  if (outcomes.enabled !== true) return config;
   for (const [name, min, max] of [['responseWindowSeconds', 3600, 31536000]]) {
-    const value = config.outcomes[name];
+    const value = outcomes[name];
     if (!Number.isInteger(value) || value < min || value > max) throw new Error(`Invalid ${name}`);
   }
   return config;
