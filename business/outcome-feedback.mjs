@@ -10,7 +10,6 @@
 // say "that reply was a booking". The gap between those two sentences is the layer.
 import { id } from './store.mjs';
 import { ensure, requiredText, now } from './errors.mjs';
-import { digest } from './source-ingestion.mjs';
 import { OUTCOME_KINDS } from './outcome-tables.mjs';
 
 const outcomeCheck = (ok, code, status = 409) => ensure(ok, code, status, code);
@@ -84,7 +83,6 @@ export class OutcomeLoop {
     // and a single reply answers both, so keying on the message collapsed them into one candidate
     // carrying the first window's draft — the second proposal's provenance was simply gone. A
     // window is a question about one sent message, and it gets its own answer.
-    const key = digest({ partner: this.partnerId, conversation: conversationId, detector, message: messageId, kind });
     const existing = windowId
       ? this.db.get("SELECT id,status FROM outcome_candidates WHERE partner_id=? AND detector=? AND kind=? AND json_extract(evidence_json,'$.window_id')=?", this.partnerId, detector, kind, windowId)
       : this.db.get('SELECT id,status FROM outcome_candidates WHERE partner_id=? AND conversation_id=? AND detector=? AND IFNULL(source_message_id,\'\')=? AND kind=?',
@@ -96,7 +94,6 @@ export class OutcomeLoop {
       VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,'pending',?,?)`, candidateId, this.partnerId, conversationId,
     this.engagementIdFor(conversationId), kind, detector, DETECTOR_VERSION, basis, JSON.stringify(evidence),
     messageId, draftId, decisionId, at, now(), now());
-    void key;
     this.record('candidate_created', { candidate_id: candidateId, conversation_id: conversationId, kind, detector, observed_at: at });
     return { candidate_id: candidateId, duplicate: false };
   }
@@ -146,7 +143,7 @@ export class OutcomeLoop {
           AND EXISTS (SELECT 1 FROM messages m WHERE m.conversation_id=w.conversation_id
                        AND m.direction='in' AND m.created_at>=? AND m.created_at<=?)
         ORDER BY w.closes_at, w.id`,
-      this.partnerId, this.minOpenedAt(), new Date(at).toISOString());
+      this.partnerId, OutcomeLoop.MIN_REPLY_AT, new Date(at).toISOString());
     for (const row of rows) {
       // The reply has to be inside the window, not merely later than the send. A reply that
       // arrives after the patience ran out is a late reply, and counting it as an answer would
@@ -168,7 +165,9 @@ export class OutcomeLoop {
     return rows.length;
   }
 
-  minOpenedAt() { return '1970-01-01T00:00:00.000Z'; }
+  // The lower bound of the reply search. No inbound message can predate the epoch, so this is not a
+  // filter that could exclude a real reply.
+  static MIN_REPLY_AT = '1970-01-01T00:00:00.000Z';
   windowClosesAt(row, at = Date.now()) { return row.closes_at ?? new Date(at).toISOString(); }
 
   // Settling a silence. `answered` is already handled by settleAnswered, unbudgeted;
@@ -213,7 +212,6 @@ export class OutcomeLoop {
       kind, evidence: text, value, source_message_id: row.source_message_id, draft_id: row.draft_id,
       decision_id: decision });
     const outcomeId = recorded.outcome_id;
-    void conversation;
     // The association and its attribution are written by `engagement.outcome`, which is the only
     // place that decides them. Reading the row back — rather than restating a guess here — is what
     // stops the API from reporting `observed_association` for an outcome the database recorded as
