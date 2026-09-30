@@ -38,7 +38,7 @@ export class OutcomeLoop {
   // A window opens when a message we sent goes out, and closes when someone answers or when the
   // patience runs out. Opening it is what makes "nobody replied" a recordable observation rather
   // than an absence we cannot see.
-  observeSent(conversationId, messageId, deliveredAt = null) {
+  observeSent(conversationId, messageId, deliveredAt = null, coverage = 'unverified') {
     // Gated here as well as at the scheduler. The scheduler only calls this pass when the feature
     // is on, but the call comes from the delivery path, and a caller that reaches it while the
     // layer is disabled must not be able to switch it on by writing a row. A layer that ships off
@@ -60,10 +60,10 @@ export class OutcomeLoop {
     // arrives the mapping from reply back to the proposal that asked for it is the only thing
     // that makes attribution decidable, and it is not recoverable from the reply alone.
     const sent = this.db.get('SELECT draft_id FROM messages WHERE id=?', messageId);
-    this.db.run(`INSERT INTO outcome_observation_windows(id,partner_id,conversation_id,message_id,draft_id,opened_at,closes_at,outcome,created_at)
-      VALUES(?,?,?,?,?,?,?,'pending',?)`, id_, this.partnerId, conversationId, messageId, sent?.draft_id ?? null, opened,
-    new Date(Date.parse(opened) + patience * 1000).toISOString(), opened);
-    this.record('window_opened', { window_id: id_, conversation_id: conversationId, message_id: messageId });
+    this.db.run(`INSERT INTO outcome_observation_windows(id,partner_id,conversation_id,message_id,draft_id,opened_at,closes_at,coverage,outcome,created_at)
+      VALUES(?,?,?,?,?,?,?,?,'pending',?)`, id_, this.partnerId, conversationId, messageId, sent?.draft_id ?? null, opened,
+    new Date(Date.parse(opened) + patience * 1000).toISOString(), coverage, opened);
+    this.record('window_opened', { window_id: id_, conversation_id: conversationId, message_id: messageId, coverage });
     return id_;
   }
 
@@ -123,9 +123,13 @@ export class OutcomeLoop {
       const rows = this.db.all(
         `SELECT * FROM outcome_observation_windows WHERE partner_id=? AND outcome='pending'
          ORDER BY closes_at, id LIMIT ?`, this.partnerId, limit);
-      let expired = 0;
-      for (const row of rows) if (this.closeWindow(row, at) === 'expired_unanswered') expired += 1;
-      return { windows: answered + expired, answered, expired };
+      let expired = 0, unverified = 0;
+      for (const row of rows) {
+        const closed = this.closeWindow(row, at);
+        if (closed === 'expired_unanswered') expired += 1;
+        if (closed === 'unverified') unverified += 1;
+      }
+      return { windows: answered + expired, answered, expired, unverified };
     });
   }
 
@@ -175,6 +179,15 @@ export class OutcomeLoop {
   closeWindow(row, at = Date.now()) {
     if (row.outcome !== 'pending') return row.outcome;
     if (Date.parse(row.closes_at) > at) return 'pending';
+    // Silence is a claim about the world, not about the table. A transport that drops inbound
+    // while it is busy — the MTProto channel does exactly that, returning early when a poll is in
+    // flight — leaves "nothing arrived" and "something arrived and was thrown away" as the same
+    // row. Only a window whose transport vouched for the whole interval may assert a silence; the
+    // rest stay open and are reported as unknown, which is the honest answer.
+    if (row.coverage !== 'continuous') {
+      this.record('window_unverified', { window_id: row.id, coverage: row.coverage ?? 'unverified' });
+      return 'unverified';
+    }
     const candidate = this.propose({ conversationId: row.conversation_id, kind: 'no_response_observed',
       detector: 'window_expired', basis: 'The observation window closed with no inbound message.',
       evidence: { window_id: row.id, sent_message_id: row.message_id, opened_at: row.opened_at, closes_at: row.closes_at },
@@ -263,6 +276,9 @@ export class OutcomeLoop {
     const confirmed = this.db.get("SELECT COUNT(*) n FROM outcome_candidates WHERE partner_id=? AND status='confirmed'", this.partnerId).n;
     const rejected = this.db.get("SELECT COUNT(*) n FROM outcome_candidates WHERE partner_id=? AND status='rejected'", this.partnerId).n;
     const pending = this.db.get("SELECT COUNT(*) n FROM outcome_candidates WHERE partner_id=? AND status='pending'", this.partnerId).n;
+    // Windows the transport could not vouch for stay open for ever on purpose: they are the
+    // honest answer, and closing them as "no response" would be a claim nobody can support.
+    const unverified = this.db.get("SELECT COUNT(*) n FROM outcome_observation_windows WHERE partner_id=? AND outcome='pending' AND coverage!='continuous'", this.partnerId).n;
     const outcomes = this.db.get('SELECT COUNT(*) n FROM outcome_events WHERE person_id IN (SELECT person_id FROM conversations WHERE id IN (SELECT conversation_id FROM outcome_observation_windows WHERE partner_id=?))', this.partnerId).n;
     // "Unknown" is what is left once answered, unanswered, confirmed, rejected and still-open are
     // counted. It is reported as a number, not as a caveat in a comment.
@@ -270,7 +286,8 @@ export class OutcomeLoop {
     return { windows, answered: by('answered'), expired_unanswered: by('expired_unanswered'),
       pending_windows: by('pending'), confirmed_candidates: confirmed, rejected_candidates: rejected,
       pending_candidates: pending, outcomes,
-      unknown_windows: Math.max(0, windows - accounted),
+      unverified_windows: unverified,
+      unknown_windows: Math.max(0, windows - accounted) + unverified,
       causal_credit: 'not_established',
       scope: 'Observation coverage over delivered messages. A window is unknown when no candidate was ever proposed for it.' };
   }

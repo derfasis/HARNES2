@@ -44,11 +44,14 @@ const harness = (t, { windowSeconds = 604800 } = {}) => {
 
 // A window is opened by delivering a message. Doing it directly keeps these tests about the
 // observation layer rather than about the send path, which has its own acceptance cases.
-const sendAndObserve = (h, conv, at = new Date().toISOString()) => {
+// `coverage` is explicit because a window may only assert silence when the transport vouched for
+// the whole interval. Tests about observing a silence pass `continuous`; the test about what
+// happens when it did not is the one that must omit it.
+const sendAndObserve = (h, conv, at = new Date().toISOString(), coverage = 'continuous') => {
   const messageId = id();
   h.store.run(`INSERT INTO messages(id,conversation_id,direction,text,author,source,created_at)
     VALUES(?,?,'out','Proposing Thursday.','operator','offline test',?)`, messageId, conv.id, at);
-  h.service.outcomes.observeSent(conv.id, messageId, at);
+  h.service.outcomes.observeSent(conv.id, messageId, at, coverage);
   return messageId;
 };
 
@@ -471,4 +474,33 @@ test('the outcome switches refuse anything that is not a boolean', async (t) => 
   }
   assert.doesNotThrow(() => validateOutcomes({ outcomes: { ...base.outcomes, enabled: true, modelEnabled: false } }));
   assert.doesNotThrow(() => validateOutcomes({}), 'a layer that is not configured at all is not an error');
+});
+
+// The defect the review named, and the one this layer had no way to see about itself.
+//
+// The MTProto channel drops an inbound update while a poll is in flight — `handleIncoming` returns
+// early when `this.polling` is set. So for a window opened over that transport, "no reply in the
+// table" and "a reply arrived and was thrown away" are the same row. A layer that asserts silence
+// there is not measuring the conversation, it is measuring its own queue depth.
+test('a window may not assert silence the transport cannot vouch for', async (t) => {
+  const h = harness(t, { windowSeconds: 60 });
+  const conv = await h.conversation();
+  // Opened with no coverage claim: exactly what a channel that may drop updates produces.
+  sendAndObserve(h, conv, '2026-01-01T00:00:00.000Z', 'unverified');
+  h.service.outcomes.reconcile({ now: Date.parse('2026-01-03T00:00:00.000Z') });
+
+  assert.equal(h.store.get("SELECT COUNT(*) n FROM outcome_candidates WHERE conversation_id=? AND kind='no_response_observed'", conv.id).n, 0,
+    'no silence is claimed over a transport that did not vouch for the interval');
+  assert.equal(h.store.get("SELECT outcome FROM outcome_observation_windows WHERE conversation_id=?", conv.id).outcome, 'pending',
+    'the window stays open rather than being settled on evidence nobody has');
+  const coverage = h.service.outcomes.coverage();
+  assert.equal(coverage.unverified_windows, 1, 'and it is counted as unverified, not as an answer');
+  assert.equal(coverage.expired_unanswered, 0);
+
+  // A transport that *does* vouch for the interval may still assert silence.
+  const ok = await h.conversation();
+  sendAndObserve(h, ok, '2026-01-01T00:00:00.000Z', 'continuous');
+  h.service.outcomes.reconcile({ now: Date.parse('2026-01-03T00:00:00.000Z') });
+  assert.equal(h.store.get("SELECT kind FROM outcome_candidates WHERE conversation_id=?", ok.id).kind, 'no_response_observed',
+    'a vouched interval may say that nobody replied');
 });

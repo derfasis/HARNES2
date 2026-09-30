@@ -53,6 +53,10 @@ CREATE TABLE outcome_observation_windows (
  -- it, so `human_assisted` is undecidable and `decision_outcomes` has nothing to attach to.
  draft_id TEXT REFERENCES drafts(id),
  opened_at TEXT NOT NULL,
+ -- Whether the transport could be observed without loss for the whole window.
+ -- `unverified` is the default on purpose: a window that nobody vouched for may not assert silence,
+ -- because "nothing arrived" and "something arrived and was dropped" are the same row.
+ coverage TEXT NOT NULL DEFAULT 'unverified' CHECK(coverage IN ('continuous','gapped','unverified')),
  closes_at TEXT NOT NULL,
  outcome TEXT NOT NULL CHECK(outcome IN ('pending','answered','expired_unanswered','superseded')),
  answered_at TEXT,
