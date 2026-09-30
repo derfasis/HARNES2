@@ -4,7 +4,7 @@ import path from 'node:path';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import Ajv from 'ajv';
-import { loadConfig, validateAllowedSourceRefs, validateTelegramSources, validateBrowserSources, ROOT, DATA, readJson, runtimeReadiness } from './config.mjs';
+import { loadConfig, validateAllowedSourceRefs, validateTelegramSources, validateBrowserSources, validateOutcomes, ROOT, DATA, readJson, runtimeReadiness } from './config.mjs';
 import { Store } from './store.mjs';
 import { BusinessService } from './service.mjs';
 import { invalidateRevokedDiscoverySources } from './discovery.mjs';
@@ -74,6 +74,10 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
   // poll, which is a running service that looks configured and is not. Refuse before the port is
   // taken, the store is opened, and any reader exists.
   validateBrowserSources(config);
+  // `start({ config })` is how tests, the harness and any embedder bring their own configuration,
+  // so it bypasses `loadConfig` entirely. Every other layer therefore re-checks here, or a
+  // misconfigured outcome window reaches a running service having never been validated.
+  validateOutcomes(config);
   const store = new Store(directory), service = new BusinessService(store,config);
   ensure(service.partner(), 'partnerId не совпадает с профилем', 500);
   const operatorToken = randomBytes(32).toString('hex'), mcpToken = randomBytes(32).toString('hex'), runTokens = new Map();

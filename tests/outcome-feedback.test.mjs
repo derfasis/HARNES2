@@ -286,10 +286,44 @@ test('a rate that improved by recording less is visible as such', async (t) => {
     'coverage is reported next to the rates, not instead of them');
 });
 
-// A route nested inside another route's prefix answers 404 for ever, and a test that starts a
-// server to prove otherwise is a test that hangs. This reads the wiring instead, which is what the
-// failure actually was: the two outcome paths sat inside the /api/discovery/ block, where nothing
-// could reach them.
+// The review is right that reading the source is not the same as reaching the endpoint: a test
+// that greps the file passes while the route answers 404. These two routes were nested inside the
+// /api/discovery/ block, where nothing could reach them, and only a real request shows that.
+test('the review endpoints answer, and carry the denominator', async (t) => {
+  const h = harness(t);
+  h.config.scheduler.enabled = false;
+  h.config.server = { ...h.config.server, port: 0 };
+  const { start } = await import('../business/server.mjs');
+  const app = await start({ config: h.config, directory: h.directory });
+  let closed = false;
+  try {
+    const origin = `http://127.0.0.1:${app.server.address().port}`;
+    const { token } = await (await fetch(`${origin}/api/session`)).json();
+    const headers = { 'x-partner-token': token };
+
+    // The pending candidate, made pending by an actual reply.
+    const conv = await h.conversation();
+    sendAndObserve(h, conv, '2026-01-01T00:00:00.000Z');
+    await h.inbound(conv, 'Спасибо', '2026-01-01T12:00:00.000Z');
+    h.service.outcomes.reconcile({ now: Date.parse('2026-01-02T00:00:00.000Z') });
+
+    assert.equal((await fetch(`${origin}/api/outcomes`)).status, 403, 'unauthenticated reads are refused');
+    const list = await (await fetch(`${origin}/api/outcomes`, { headers })).json();
+    assert.ok(Array.isArray(list.items), 'the list answers with a list');
+    assert.equal(list.items.length, 1, 'and the pending candidate is in it');
+    assert.equal(typeof list.coverage.windows, 'number',
+      'the list cannot show a flattering subset without its denominator');
+    const one = await (await fetch(`${origin}/api/outcomes/${list.items[0].id}`, { headers })).json();
+    assert.equal(one.kind, 'reply_observed');
+    assert.equal(one.status, 'pending');
+  } finally {
+    // The directory is left to the harness teardown: the store still holds its files here, and
+    // removing them underneath it fails on Windows.
+    await app.close();
+    closed = true;
+  }
+  assert.equal(closed, true, 'the server was closed before its directory went away');
+});
 test('the review endpoints are wired outside any other route prefix', async (t) => {
   const source = fs.readFileSync(new URL('../business/server.mjs', import.meta.url), 'utf8');
   const block = source.slice(source.indexOf("if (url.pathname.startsWith('/api/discovery/'))"));
