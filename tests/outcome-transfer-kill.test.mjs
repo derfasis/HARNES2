@@ -19,10 +19,13 @@ const legacyWindowColumns = ['answered_at','candidate_id','closes_at','conversat
 const noCoverage008Checksum = '9bf883d940a6a174c88a1e68ecde384966b14632813f616322beafbae154498e';
 
 function createPreRelease008(directory, checksum = noCoverage008Checksum) {
-  const old008 = spawnSync('git', ['show', '9855eb99a014f56f46389215e17e0c2d3f079ee2:business/migrations/008-outcome-candidates.sql'],
-    { cwd: ROOT, encoding: 'utf8', windowsHide: true });
-  assert.equal(old008.status, 0, old008.stderr);
-  assert.equal(hash(old008.stdout), noCoverage008Checksum, 'the fixture is the actual pre-release migration, not an invented schema');
+  // The pre-release migration is a file in this repository, not something read out of git
+  // history. `git show` made the test depend on a full clone, so it passed locally and failed on a
+  // runner with the default shallow checkout — and would fail again behind any other clone,
+  // archive or squashed history. The bytes are pinned by checksum either way, and the checksum is
+  // what makes this the actual migration rather than an invented schema.
+  const old008 = fs.readFileSync(new URL('./fixtures/pre-release-008-outcome-candidates.sql', import.meta.url), 'utf8');
+  assert.equal(hash(old008), noCoverage008Checksum, 'the fixture is the actual pre-release migration, not an invented schema');
   fs.mkdirSync(directory, { recursive: true });
   const db = new DatabaseSync(path.join(directory, 'partner.sqlite'));
   try {
@@ -34,7 +37,7 @@ function createPreRelease008(directory, checksum = noCoverage008Checksum) {
       db.prepare('INSERT INTO schema_migrations VALUES(?,?,?)').run(file, hash(sql), '2026-09-01T00:00:00.000Z');
     }
     db.exec(checksum === 'a255f1b438928fd000279ed19b87b57ba3881512d32d613f292e99ecae640a64'
-      ? old008.stdout.replace(/\r?\n/g, '\r\n') : old008.stdout);
+      ? old008.replace(/\r?\n/g, '\r\n') : old008);
     db.prepare('INSERT INTO schema_migrations VALUES(?,?,?)').run('008-outcome-candidates.sql', checksum, '2026-09-01T00:00:00.000Z');
   } finally { db.close(); }
 }
