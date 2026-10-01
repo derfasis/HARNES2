@@ -108,13 +108,15 @@ export function checkAutomaticPrerequisite(config) {
 // unbounded one never closes at all. Exported so the rule is testable without a config file.
 export function validateOutcomes(config) {
   const outcomes = config?.outcomes;
-  if (outcomes === undefined || outcomes === null) return config;
-  // The switches are booleans, not merely truthy. A string 'false' would read as enabled to
-  // every `=== true` check and be read as disabled by a plain truthiness one; refusing the
-  // wrong type is cheaper than finding out which of the two the code believed.
-  for (const name of ['enabled', 'modelEnabled']) {
-    if (name in outcomes && typeof outcomes[name] !== 'boolean') throw new Error(`Invalid ${name}`);
-  }
+  if (outcomes === undefined) return config;
+  if (!outcomes || typeof outcomes !== 'object' || Array.isArray(outcomes)) throw new Error('Invalid outcomes configuration');
+  const allowed = new Set(['enabled', 'responseWindowSeconds']);
+  if (Object.keys(outcomes).some(name => !allowed.has(name))) throw new Error('Unknown outcomes configuration field');
+  // The switch is boolean, not merely truthy. A string 'false' would disagree with every
+  // `=== true` check, so reject it before the service starts.
+  if (typeof outcomes.enabled !== 'boolean') throw new Error('Invalid enabled');
+  if ('responseWindowSeconds' in outcomes && !Number.isInteger(outcomes.responseWindowSeconds))
+    throw new Error('Invalid responseWindowSeconds');
   if (outcomes.enabled !== true) return config;
   for (const [name, min, max] of [['responseWindowSeconds', 3600, 31536000]]) {
     const value = outcomes[name];

@@ -894,10 +894,13 @@ test('v3 bundle from a clean database imports into the current schema with empty
   t.after(() => { cleanStore.close(); fs.rmSync(directory, { recursive: true, force: true }); });
   const bundle = exportPartner(cleanStore);
   const v3 = structuredClone(bundle);
-  delete v3.tables.discovery_situations;
-  delete v3.tables.discovery_evidence;
-  for (const table of ['partner_threads', 'partner_watches', 'partner_observations', 'partner_turns']) delete v3.tables[table];
-  for (const table of ['research_intents', 'research_attempts', 'action_proposals', 'action_grants', 'action_attempts']) delete v3.tables[table];
+  const { DISCOVERY_TABLES } = await import('../business/discovery-tables.mjs');
+  const { CONTINUITY_TABLES } = await import('../business/continuity-tables.mjs');
+  const { EXECUTIVE_TABLES } = await import('../business/executive-tables.mjs');
+  const { ACTION_TABLES } = await import('../business/action-tables.mjs');
+  const { OUTCOME_TABLES } = await import('../business/outcome-tables.mjs');
+  for (const table of [...DISCOVERY_TABLES, ...CONTINUITY_TABLES, ...EXECUTIVE_TABLES, ...ACTION_TABLES, ...OUTCOME_TABLES]) delete v3.tables[table];
+  for (const row of v3.tables.messages) { delete row.occurred_at; delete row.time_basis; }
   v3.migrations = v3.migrations.slice(0, 3);
   v3.tables_sha256 = hash(JSON.stringify(v3.tables));
   const file = path.join(directory, 'v3.json'); fs.writeFileSync(file, JSON.stringify(v3));

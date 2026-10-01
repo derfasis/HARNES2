@@ -18,6 +18,7 @@ import { spawnSync } from 'node:child_process';
 import { exportPartner } from '../business/export.mjs';
 import { hash } from '../business/store.mjs';
 import { EXECUTIVE_TABLES } from '../business/executive-tables.mjs';
+import { OUTCOME_TABLES } from '../business/outcome-tables.mjs';
 import { start } from '../business/server.mjs';
 
 const SOURCE = 'public:executive', BROWSER = 'browser:executive';
@@ -243,7 +244,8 @@ test('research and attempts export/restore; legacy schema-5 bundle has empty res
   for (const legacy of [false, true]) {
     const data = structuredClone(bundle);
     if (legacy) {
-      for (const table of [...EXECUTIVE_TABLES, ...ACTION_TABLES]) delete data.tables[table];
+      for (const table of [...EXECUTIVE_TABLES, ...ACTION_TABLES, ...OUTCOME_TABLES]) delete data.tables[table];
+      for (const row of data.tables.messages) { delete row.occurred_at; delete row.time_basis; }
       // A real schema-5 export cannot contain research packets or their audit events.
       data.tables.partner_turns = [];
       data.tables.events = data.tables.events.filter(e => !e.kind.startsWith('executive.') && !['continuity.captured','continuity.attention'].includes(e.kind));
@@ -380,7 +382,7 @@ test('real schema-5 database upgrades in place without changing existing source 
   const before = db.prepare('SELECT * FROM events').all(); db.close();
   const migrated = new Store(directory);
   try {
-    assert.equal(migrated.all('SELECT * FROM schema_migrations').length, 8);
+    assert.equal(migrated.all('SELECT * FROM schema_migrations').length, 9);
     assert.deepEqual(migrated.all('SELECT * FROM events'), before);
     assert.equal(migrated.get('SELECT mission FROM partners').mission, 'Keep this mission');
     assert.equal(migrated.get('SELECT COUNT(*) n FROM research_intents').n, 0);

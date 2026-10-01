@@ -10,7 +10,7 @@ export const OUTCOME_KINDS = Object.freeze(['qualified','call_proposed','call_ac
 export const OUTCOME_TABLES = ['outcome_candidates', 'outcome_observation_windows'];
 
 export const OUTCOME_COMMANDS = new Set(['outcome.candidate_confirm', 'outcome.candidate_reject',
-  'outcome.candidate_list']);
+  'outcome.candidate_list', 'outcome.coverage_attest', 'outcome.coverage_revoke']);
 
 // A candidate is an observation, and none of these is an outcome kind. Keeping the two lists
 // disjoint is what makes "promote" a decision an operator makes rather than a string match that

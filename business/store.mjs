@@ -13,6 +13,20 @@ import { OUTCOME_TABLES } from './outcome-tables.mjs';
 
 export const id = () => randomUUID();
 export const hash = value => createHash('sha256').update(value).digest('hex');
+const LEGACY_MIGRATION_CHECKSUMS = new Map([
+  ['008-outcome-candidates.sql', new Set([
+    '9bf883d940a6a174c88a1e68ecde384966b14632813f616322beafbae154498e',
+    'a255f1b438928fd000279ed19b87b57ba3881512d32d613f292e99ecae640a64',
+  ])],
+]);
+export function migrationChecksumMatches(version, recordedChecksum, currentChecksum) {
+  return recordedChecksum === currentChecksum || version === '008-outcome-candidates.sql'
+    && ['5b12514a28dcf5a62e2b4996b301b4e1a3cf1c79fa171143c1084eea0c27a37e',
+      'a570b569340c8b9f93d3b179655d3fc9170f75f3c023d71c1dda71dac2d29049'].includes(currentChecksum)
+    && (LEGACY_MIGRATION_CHECKSUMS.get(version)?.has(recordedChecksum) === true
+      || ['5b12514a28dcf5a62e2b4996b301b4e1a3cf1c79fa171143c1084eea0c27a37e',
+        'a570b569340c8b9f93d3b179655d3fc9170f75f3c023d71c1dda71dac2d29049'].includes(recordedChecksum));
+}
 export const TABLES = ['partners','persons','channel_identities','conversations','messages','facts','tasks','runs','drafts','draft_versions','approvals','delivery_attempts','outcome_events','lessons','capability_proposals','skill_versions','events','command_receipts','channel_offsets','tool_calls',...ENGAGEMENT_TABLES,...DISCOVERY_TABLES,...CONTINUITY_TABLES,...EXECUTIVE_TABLES,...ACTION_TABLES,...OUTCOME_TABLES];
 export class Store {
   constructor(directory = DATA) {
@@ -24,7 +38,7 @@ export class Store {
     for (const file of fs.readdirSync(path.join(ROOT, 'business/migrations')).filter(f => f.endsWith('.sql')).sort()) {
       const sql = fs.readFileSync(path.join(ROOT, 'business/migrations', file), 'utf8');
       const old = this.get('SELECT * FROM schema_migrations WHERE version=?', file);
-      if (old && old.checksum !== hash(sql)) throw new Error(`Applied migration was changed: ${file}`);
+      if (old && !migrationChecksumMatches(file, old.checksum, hash(sql))) throw new Error(`Applied migration was changed: ${file}`);
       if (!old) this.transaction(() => { this.db.exec(sql); this.run('INSERT INTO schema_migrations VALUES(?,?,?)', file, hash(sql), now()); });
     }
     const profile = readJson(path.join(ROOT, 'partner/profile.json'));

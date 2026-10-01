@@ -10,6 +10,15 @@ const { TelegramClient } = require('telegram');
 const { StringSession } = require('telegram/sessions');
 const { NewMessage } = require('telegram/events');
 
+function telegramTimestamp(value) {
+  let date = null;
+  if (value instanceof Date) date = value;
+  else if (Number.isSafeInteger(value) && value > 0) {
+    date = new Date(value < 1_000_000_000_000 ? value * 1000 : value);
+  }
+  return date && Number.isFinite(date.getTime()) ? date.toISOString() : null;
+}
+
 // Why a reader did not start, in a form that may be shown and stored. `resolveInputChannel` can
 // fail with an SDK error, and those messages carry provider and peer detail, so only a code that
 // is already shaped like one of ours is allowed out; everything else is a single class.
@@ -148,6 +157,7 @@ export class MtprotoTelegramChannel {
     if (!cfg.allowedChatIds.map(String).includes(chatId)) return;
     const text = String(message.message ?? message.text ?? '').trim();
     if (!text) return;
+    const occurredAt = telegramTimestamp(message.date);
 
     this.polling = true;
     try {
@@ -176,8 +186,9 @@ export class MtprotoTelegramChannel {
         text,
         direction: 'in',
         external_id: String(message.id),
-        source: `telegram:mtproto:${account}:${chatId}:${message.id}`
-      }, `telegram-mtproto-update:${account}:${chatId}:${message.id}`, { kind: 'channel' });
+        source: `telegram:mtproto:${account}:${chatId}:${message.id}`,
+        ...(occurredAt ? { occurred_at: occurredAt, time_basis: 'source' } : {})
+      }, `telegram-mtproto-update:v2:${this.service.config.partnerId}:${account}:${chatId}:${message.id}`, { kind: 'channel' });
       this.lastEvent = now();
       this.lastError = null;
     } finally { this.polling = false; }
@@ -229,7 +240,9 @@ export class MtprotoTelegramChannel {
       try {
         this.service.store.transaction(() => {
           this.service.store.run("UPDATE delivery_attempts SET status='sent',external_id=?,finished_at=? WHERE id=?", String(message.id), now(), attempt);
-          this.service.recordDelivered(draft, String(message.id), autopilot ? 'telegram_autopilot' : 'telegram');
+          const occurredAt = telegramTimestamp(message?.date);
+          this.service.recordDelivered(draft, String(message.id), autopilot ? 'telegram_autopilot' : 'telegram',
+            occurredAt ? { occurred_at: occurredAt, time_basis: 'source' } : {});
           this.service.store.event(this.service.config.partnerId, conversation.id, 'delivery.sent', 'system', { draft_id: draft.id, draft_version: draft.current_version, external_id: String(message.id), autopilot, run_id: draft.run_id, model: this.service.config.runtime.model, conversation_revision: draft.context_revision, model_text: draft.text, sent_text: draft.text });
         });
       } catch {

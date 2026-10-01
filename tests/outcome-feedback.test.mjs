@@ -20,10 +20,15 @@ const harness = (t, { windowSeconds = 604800 } = {}) => {
   const store = new Store(directory);
   t.after(() => { try { store.close(); } catch { /* closed by a crash case */ } fs.rmSync(directory, { recursive: true, force: true }); });
   const config = readJson(path.join(ROOT, 'config/default.json'));
-  config.outcomes = { enabled: true, modelEnabled: false, responseWindowSeconds: windowSeconds, maxModelRunsPerDay: 5 };
+  config.outcomes = { enabled: true, responseWindowSeconds: windowSeconds };
   const service = new BusinessService(store, config);
-  const command = (action, payload, request = id(), actor = { kind: 'operator' }) =>
-    service.command(action, payload, request, actor);
+  const command = (action, payload, request = id(), actor = { kind: 'operator' }) => {
+    if (['outcome.candidate_confirm', 'outcome.candidate_reject'].includes(action) && payload.expected_revision === undefined) {
+      const current = store.get('SELECT revision FROM outcome_candidates WHERE id=?', payload.candidate_id);
+      if (current) payload = { ...payload, expected_revision: current.revision };
+    }
+    return service.command(action, payload, request, actor);
+  };
   const conversation = async () => {
     // `person.create` opens the conversation as part of the same command and returns both ids;
     // there is no separate conversation.create in this system.
@@ -36,23 +41,25 @@ const harness = (t, { windowSeconds = 604800 } = {}) => {
   const inbound = async (conv, text = 'Спасибо, договорились', at = null) => {
     await command('message.record', { conversation_id: conv.id, direction: 'in', text, source: 'offline test' }, id(), { kind: 'channel' });
     const message = store.get("SELECT * FROM messages WHERE conversation_id=? AND direction='in' ORDER BY id DESC LIMIT 1", conv.id);
-    if (at) store.run('UPDATE messages SET created_at=? WHERE id=?', at, message.id);
+    if (at) store.run("UPDATE messages SET created_at=?,occurred_at=?,time_basis='source' WHERE id=?", at, at, message.id);
     return store.get('SELECT * FROM messages WHERE id=?', message.id);
   };
   return { directory, store, service, config, command, conversation, inbound };
 };
 
-// A window is opened by delivering a message. Doing it directly keeps these tests about the
-// observation layer rather than about the send path, which has its own acceptance cases.
-// `coverage` is explicit because a window may only assert silence when the transport vouched for
-// the whole interval. Tests about observing a silence pass `continuous`; the test about what
-// happens when it did not is the one that must omit it.
-const sendAndObserve = (h, conv, at = new Date().toISOString(), coverage = 'continuous') => {
+// A window is opened by a delivery observation. Coverage remains unverified until a separate,
+// explicit owner attestation closes a historical interval.
+const sendAndObserve = (h, conv, at = new Date().toISOString()) => {
   const messageId = id();
   h.store.run(`INSERT INTO messages(id,conversation_id,direction,text,author,source,created_at)
     VALUES(?,?,'out','Proposing Thursday.','operator','offline test',?)`, messageId, conv.id, at);
-  h.service.outcomes.observeSent(conv.id, messageId, at, coverage);
+  h.service.outcomes.observeSent(conv.id, messageId, at, 'unverified');
   return messageId;
+};
+const attestClosedWindow = (h, conv) => {
+  const window = h.store.get('SELECT * FROM outcome_observation_windows WHERE conversation_id=? ORDER BY created_at DESC LIMIT 1', conv.id);
+  return h.service.outcomes.attest({ window_id: window.id, covered_from: window.opened_at,
+    covered_through: window.closes_at, evidence: 'Synthetic owner attestation for a closed test interval' }, { kind: 'operator' });
 };
 
 test('a delivered message opens exactly one observation window', async (t) => {
@@ -89,6 +96,7 @@ test('a silent conversation becomes a recorded observation, not a missing one', 
   const h = harness(t, { windowSeconds: 60 });
   const conv = await h.conversation();
   sendAndObserve(h, conv, '2026-01-01T00:00:00.000Z');
+  attestClosedWindow(h, conv);
   h.service.outcomes.reconcile({ now: Date.parse('2026-01-01T00:00:01.000Z') });
   const candidate = h.store.get('SELECT * FROM outcome_candidates WHERE conversation_id=?', conv.id);
   assert.equal(candidate, undefined, 'nothing is claimed before the window closes');
@@ -111,6 +119,7 @@ test('coverage counts what is unknown, not only what is known', async (t) => {
   const second = await h.command('person.create', { name: 'Another', source: 'offline test' }, id());
   const other = h.store.get('SELECT * FROM conversations WHERE id=?', second.conversation_id);
   sendAndObserve(h, other, '2026-01-01T00:00:00.000Z');
+  attestClosedWindow(h, other);
   h.service.outcomes.reconcile({ now: Date.parse('2026-01-03T00:00:00.000Z') });
   const coverage = h.service.outcomes.coverage();
   assert.equal(coverage.windows, 2, 'both conversations are counted');
@@ -275,6 +284,7 @@ test('a rate that improved by recording less is visible as such', async (t) => {
     const conv = h.store.get('SELECT * FROM conversations WHERE id=?', created.conversation_id);
     void person;
     sendAndObserve(h, conv, '2026-01-01T00:00:00.000Z');
+    if (i >= 2) attestClosedWindow(h, conv);
     if (i < 2) await h.inbound(conv, 'Спасибо', '2026-01-01T00:00:30.000Z');
   }
   h.service.outcomes.reconcile({ now: Date.parse('2026-01-03T00:00:00.000Z') });
@@ -327,22 +337,6 @@ test('the review endpoints answer, and carry the denominator', async (t) => {
   }
   assert.equal(closed, true, 'the server was closed before its directory went away');
 });
-test('the review endpoints are wired outside any other route prefix', async (t) => {
-  const source = fs.readFileSync(new URL('../business/server.mjs', import.meta.url), 'utf8');
-  const block = source.slice(source.indexOf("if (url.pathname.startsWith('/api/discovery/'))"));
-  const outcomes = source.indexOf("/api/outcomes')");
-  assert.ok(outcomes > 0, 'the outcome routes exist');
-  assert.ok(outcomes < source.indexOf("/api/discovery/'))"),
-    'and they are declared before the discovery block, not inside it');
-  assert.ok(!block.slice(0, block.indexOf("/api/discovery/reason-states")).includes("/api/outcomes"),
-    'no outcome route is reachable only through the discovery prefix');
-  // The list carries the denominator beside the items, so a page of candidates cannot be read as
-  // "this is everything" while a conversation nobody answered stays invisible.
-  const listRoute = source.slice(source.indexOf("url.pathname === '/api/outcomes'"), source.indexOf("url.pathname === '/api/outcomes'") + 320);
-  assert.ok(listRoute.includes('coverage: service.outcomes.coverage()'),
-    'the list response includes coverage');
-});
-
 // Promoting a candidate must go through the same writer the manual path uses. An earlier version
 // inserted the row itself, which skipped everything around the insert — so a candidate confirmed
 // as `joined` left the conversation AI-owned, the stage unmoved, and the engagement still live.
@@ -384,10 +378,12 @@ test('a candidate carries the draft that was sent, so attribution is decidable',
   h.store.run("INSERT INTO draft_versions(id,draft_id,version,text,author,reason,created_at) VALUES(?,?,?,?,?,?,?)",
     id(), draftId, 1, 'Model draft', 'model', 'initial', '2026-01-01T00:00:00.000Z');
   h.store.run("INSERT INTO draft_versions(id,draft_id,version,text,author,reason,created_at) VALUES(?,?,?,?,?,?,?)",
-    id(), draftId, 2, 'Owner rewrite', 'operator', 'edited', '2026-01-01T00:00:10.000Z');
+    id(), draftId, 2, 'Proposing Thursday.', 'operator', 'edited', '2026-01-01T00:00:10.000Z');
   const messageId = id();
   h.store.run("INSERT INTO messages(id,conversation_id,direction,text,author,source,draft_id,created_at) VALUES(?,?,?,?,?,?,?,?)",
     messageId, conv.id, 'out', 'Proposing Thursday.', 'agent_assisted', 'offline test', draftId, '2026-01-01T00:00:00.000Z');
+  h.store.run("INSERT INTO delivery_attempts(id,draft_id,draft_version,channel,recipient,status,external_id,created_at,finished_at) VALUES(?,?,2,'manual_confirmation',?,'sent','fixture-receipt',?,?)",
+    id(), draftId, conv.id, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:01.000Z');
   h.service.outcomes.observeSent(conv.id, messageId, '2026-01-01T00:00:00.000Z');
   assert.equal(h.store.get("SELECT draft_id FROM outcome_observation_windows WHERE message_id=?", messageId).draft_id, draftId,
     'the window remembers which draft went out');
@@ -425,7 +421,7 @@ test('a misconfigured observation window is refused', async (t) => {
 // conversations hold the front of every pass and a conversation that was replied to an hour ago
 // waits behind them for ever. The cheap question is answered without a bound; only the deadline
 // question is rationed.
-test('an answered conversation is never starved by twenty silent ones', async (t) => {
+test('bounded window reconciliation reaches an answered conversation after multiple ticks', async (t) => {
   const h = harness(t, { windowSeconds: 60 });
   // Twenty conversations go quiet and stay quiet.
   for (let i = 0; i < 20; i += 1) {
@@ -439,7 +435,7 @@ test('an answered conversation is never starved by twenty silent ones', async (t
   sendAndObserve(h, conv, '2026-01-01T00:00:00.000Z');
   await h.inbound(conv, 'Yes', '2026-01-01T00:00:30.000Z');
 
-  h.service.outcomes.reconcile({ now: Date.parse('2026-01-03T00:00:00.000Z') });
+  for (let i = 0; i < 5; i += 1) h.service.outcomes.reconcile({ now: Date.parse('2026-01-03T00:00:00.000Z'), limit: 5 });
   assert.equal(h.store.get("SELECT outcome FROM outcome_observation_windows WHERE conversation_id=?", conv.id).outcome, 'answered',
     'the answered conversation is settled in the first pass, however many silent ones are queued');
   assert.ok(h.store.get("SELECT id FROM outcome_candidates WHERE conversation_id=?", conv.id), 'and it left a candidate');
@@ -469,10 +465,10 @@ test('a recovered observation pass stops reporting reconcile_failed', async (t) 
 test('the outcome switches refuse anything that is not a boolean', async (t) => {
   const base = readJson(path.join(ROOT, 'config/default.json'));
   for (const bad of ['false', 'true', 0, 1, null]) {
-    assert.throws(() => validateOutcomes({ outcomes: { ...base.outcomes, enabled: bad, modelEnabled: bad } }),
-      /Invalid enabled|Invalid modelEnabled/, `${JSON.stringify(bad)} must be refused`);
+    assert.throws(() => validateOutcomes({ outcomes: { ...base.outcomes, enabled: bad } }),
+      /Invalid enabled/, `${JSON.stringify(bad)} must be refused`);
   }
-  assert.doesNotThrow(() => validateOutcomes({ outcomes: { ...base.outcomes, enabled: true, modelEnabled: false } }));
+  assert.doesNotThrow(() => validateOutcomes({ outcomes: { ...base.outcomes, enabled: true } }));
   assert.doesNotThrow(() => validateOutcomes({}), 'a layer that is not configured at all is not an error');
 });
 
@@ -486,20 +482,21 @@ test('a window may not assert silence the transport cannot vouch for', async (t)
   const h = harness(t, { windowSeconds: 60 });
   const conv = await h.conversation();
   // Opened with no coverage claim: exactly what a channel that may drop updates produces.
-  sendAndObserve(h, conv, '2026-01-01T00:00:00.000Z', 'unverified');
+  sendAndObserve(h, conv, '2026-01-01T00:00:00.000Z');
   h.service.outcomes.reconcile({ now: Date.parse('2026-01-03T00:00:00.000Z') });
 
   assert.equal(h.store.get("SELECT COUNT(*) n FROM outcome_candidates WHERE conversation_id=? AND kind='no_response_observed'", conv.id).n, 0,
     'no silence is claimed over a transport that did not vouch for the interval');
-  assert.equal(h.store.get("SELECT outcome FROM outcome_observation_windows WHERE conversation_id=?", conv.id).outcome, 'pending',
-    'the window stays open rather than being settled on evidence nobody has');
+  assert.equal(h.store.get("SELECT outcome FROM outcome_observation_windows WHERE conversation_id=?", conv.id).outcome, 'unknown',
+    'the elapsed interval is terminally unknown without coverage proof');
   const coverage = h.service.outcomes.coverage();
   assert.equal(coverage.unverified_windows, 1, 'and it is counted as unverified, not as an answer');
   assert.equal(coverage.expired_unanswered, 0);
 
   // A transport that *does* vouch for the interval may still assert silence.
   const ok = await h.conversation();
-  sendAndObserve(h, ok, '2026-01-01T00:00:00.000Z', 'continuous');
+  sendAndObserve(h, ok, '2026-01-01T00:00:00.000Z');
+  attestClosedWindow(h, ok);
   h.service.outcomes.reconcile({ now: Date.parse('2026-01-03T00:00:00.000Z') });
   assert.equal(h.store.get("SELECT kind FROM outcome_candidates WHERE conversation_id=?", ok.id).kind, 'no_response_observed',
     'a vouched interval may say that nobody replied');

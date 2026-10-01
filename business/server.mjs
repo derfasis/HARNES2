@@ -18,7 +18,7 @@ import { exportPartner } from './export.mjs';
 import { listCandidates } from './executive-donors.mjs';
 import { AppError, ensure, requiredText } from './errors.mjs';
 
-const publicFiles = new Map([['/', ['index.html','text/html; charset=utf-8']], ['/app.js',['app.js','text/javascript; charset=utf-8']], ['/research.js',['research.js','text/javascript; charset=utf-8']], ['/actions.js',['actions.js','text/javascript; charset=utf-8']], ['/styles.css',['styles.css','text/css; charset=utf-8']], ['/favicon.svg',['favicon.svg','image/svg+xml']]]);
+const publicFiles = new Map([['/', ['index.html','text/html; charset=utf-8']], ['/app.js',['app.js','text/javascript; charset=utf-8']], ['/research.js',['research.js','text/javascript; charset=utf-8']], ['/actions.js',['actions.js','text/javascript; charset=utf-8']], ['/outcomes.js',['outcomes.js','text/javascript; charset=utf-8']], ['/styles.css',['styles.css','text/css; charset=utf-8']], ['/favicon.svg',['favicon.svg','image/svg+xml']]]);
 const validateCommand = new Ajv().compile(readJson(path.join(ROOT,'contracts/command.schema.json')));
 const tokenEquals = (a,b) => typeof a === 'string' && Buffer.byteLength(a) === Buffer.byteLength(b) && timingSafeEqual(Buffer.from(a),Buffer.from(b));
 async function readBody(req) {
@@ -30,6 +30,27 @@ async function readBody(req) {
 }
 const REASON_STATES_QUERY = new Set(['limit','cursor']);
 const CURSOR_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const OUTCOME_STATUSES = new Set(['pending', 'confirmed', 'rejected', 'superseded', 'unknown', 'all']);
+function outcomeListOptions(url) {
+  const options = {};
+  for (const name of new Set(url.searchParams.keys())) {
+    const values = url.searchParams.getAll(name);
+    ensure(['status', 'limit', 'cursor'].includes(name) && values.length === 1, 'Invalid outcomes query', 400);
+    const value = values[0];
+    if (name === 'status') {
+      ensure(OUTCOME_STATUSES.has(value), 'Invalid outcomes status', 400);
+      options.status = value;
+    } else if (name === 'limit') {
+      ensure(/^[0-9]{1,2}$/.test(value), 'Invalid outcomes limit', 400);
+      options.limit = Number(value);
+      ensure(options.limit >= 1 && options.limit <= 50, 'Invalid outcomes limit', 400);
+    } else {
+      ensure(CURSOR_ID.test(value), 'Invalid outcomes cursor', 400);
+      options.cursor = value;
+    }
+  }
+  return options;
+}
 // Only the two agreed query options exist. An unknown or repeated option is refused rather than
 // ignored, so a dashboard can never believe it filtered something the server simply dropped.
 function discoveryReasonStatesQuery(url, service) {
@@ -181,10 +202,17 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
         release:{version:'0.1.0-engagement-v1',tests:'see_docs_PERSISTENT_ENGAGEMENT_VALIDATION',model_validation:'controlled_disposable_smoke_pass'} });
       // Outside the discovery block on purpose: a route nested inside another route's prefix
       // is unreachable, and these two paths are not discovery routes at all.
-      if (req.method === 'GET' && url.pathname.startsWith('/api/outcomes/'))
-        return send(200, service.outcomes.detail(decodeURIComponent(url.pathname.split('/').at(-1))));
-      if (req.method === 'GET' && url.pathname === '/api/outcomes')
-        return send(200, { ...service.outcomes.list({ status: url.searchParams.get('status') ?? 'pending', limit: Number(url.searchParams.get('limit') ?? 20), cursor: url.searchParams.get('cursor') ?? '' }), coverage: service.outcomes.coverage() });
+      if (url.pathname === '/api/outcomes') {
+        ensure(req.method === 'GET', 'Outcome endpoint is read-only', 405);
+        return send(200, { ...service.outcomes.list(outcomeListOptions(url)), coverage: service.outcomes.coverage() });
+      }
+      if (url.pathname.startsWith('/api/outcomes/')) {
+        ensure(req.method === 'GET', 'Outcome endpoint is read-only', 405);
+        const match = /^\/api\/outcomes\/([^/]+)$/.exec(url.pathname);
+        ensure(match && CURSOR_ID.test(match[1]), 'Invalid outcome ID', 400);
+        ensure([...url.searchParams].length === 0, 'Invalid outcome query', 400);
+        return send(200, service.outcomes.detail(match[1]));
+      }
       if (url.pathname.startsWith('/api/discovery/')) {
         // Drain the body before refusing, so the client sees 405 instead of a reset connection.
         if (req.method !== 'GET') { for await (const _ of req) { /* discard */ } return send(405,{error:'Метод не поддерживается',code:'method_not_allowed'}); }
