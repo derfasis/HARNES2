@@ -17,18 +17,24 @@ const legacyCandidateColumns = ['basis','conversation_id','created_at','decision
   'engagement_id','evidence_json','id','kind','observed_at','outcome_id','partner_id','resolution_note','revision','source_message_id','status','updated_at'];
 const legacyWindowColumns = ['answered_at','candidate_id','closes_at','conversation_id','created_at','coverage','draft_id','id','message_id','opened_at','outcome','partner_id'];
 const noCoverage008Checksum = '9bf883d940a6a174c88a1e68ecde384966b14632813f616322beafbae154498e';
+const noCoverage008CRLFChecksum = 'a255f1b438928fd000279ed19b87b57ba3881512d32d613f292e99ecae640a64';
 
-function createPreRelease008(directory, checksum = noCoverage008Checksum) {
-  // The pre-release migration is a file in this repository, not something read out of git
-  // history. `git show` made the test depend on a full clone, so it passed locally and failed on a
-  // runner with the default shallow checkout — and would fail again behind any other clone,
-  // archive or squashed history. The bytes are pinned by checksum either way, and the checksum is
-  // what makes this the actual migration rather than an invented schema.
-  // Normalised for the same reason as the fixture test: the checkout is CRLF on a Windows runner
-  // and LF elsewhere, and the checksum must not depend on which.
-  const old008 = fs.readFileSync(new URL('./fixtures/pre-release-008-outcome-candidates.sql', import.meta.url), 'utf8')
-    .replace(/\r\n/g, '\n');
-  assert.equal(hash(old008), noCoverage008Checksum, 'the fixture is the actual pre-release migration, not an invented schema');
+function readPreRelease008(bytes = fs.readFileSync(new URL('./fixtures/pre-release-008-outcome-candidates.sql', import.meta.url))) {
+  // Accept exactly the two historical byte sequences: Git may check out the pinned LF blob
+  // as CRLF on Windows. Normalization must not conceal a changed or mixed-ending fixture.
+  assert.ok([noCoverage008Checksum, noCoverage008CRLFChecksum].includes(hash(bytes)),
+    'the fixture must be the exact historical LF or CRLF bytes');
+  const canonical = Buffer.from(bytes.toString('utf8').replace(/\r\n/g, '\n'), 'utf8');
+  assert.equal(hash(canonical), noCoverage008Checksum, 'the canonical fixture is the exact pre-release migration');
+  return canonical;
+}
+
+function createPreRelease008(directory, { crlf = false, receiptChecksum = crlf ? noCoverage008CRLFChecksum : noCoverage008Checksum } = {}) {
+  // Both databases derive from the same pinned fixture, without Git history or production 008.
+  const canonical = readPreRelease008();
+  const sql = crlf ? Buffer.from(canonical.toString('utf8').replace(/\n/g, '\r\n'), 'utf8') : canonical;
+  assert.equal(hash(sql), crlf ? noCoverage008CRLFChecksum : noCoverage008Checksum,
+    'the SQL actually executed has the historical checksum, including line endings');
   fs.mkdirSync(directory, { recursive: true });
   const db = new DatabaseSync(path.join(directory, 'partner.sqlite'));
   try {
@@ -39,11 +45,30 @@ function createPreRelease008(directory, checksum = noCoverage008Checksum) {
       db.exec(sql);
       db.prepare('INSERT INTO schema_migrations VALUES(?,?,?)').run(file, hash(sql), '2026-09-01T00:00:00.000Z');
     }
-    db.exec(checksum === 'a255f1b438928fd000279ed19b87b57ba3881512d32d613f292e99ecae640a64'
-      ? old008.replace(/\r?\n/g, '\r\n') : old008);
-    db.prepare('INSERT INTO schema_migrations VALUES(?,?,?)').run('008-outcome-candidates.sql', checksum, '2026-09-01T00:00:00.000Z');
+    db.exec(sql.toString('utf8'));
+    db.prepare('INSERT INTO schema_migrations VALUES(?,?,?)').run('008-outcome-candidates.sql', receiptChecksum, '2026-09-01T00:00:00.000Z');
   } finally { db.close(); }
 }
+
+test('legacy LF and CRLF fixtures resolve to the same exact pinned bytes', () => {
+  const canonical = readPreRelease008();
+  assert.equal(hash(canonical), noCoverage008Checksum);
+  const crlf = Buffer.from(canonical.toString('utf8').replace(/\n/g, '\r\n'), 'utf8');
+  assert.equal(hash(crlf), noCoverage008CRLFChecksum);
+  assert.deepEqual(readPreRelease008(crlf), canonical);
+  assert.deepEqual(readPreRelease008(canonical), canonical);
+});
+
+test('line-ending normalization cannot hide a damaged historical fixture', () => {
+  const canonical = readPreRelease008();
+  const mixed = Buffer.from(canonical.toString('utf8').replace('\n', '\r\n'), 'utf8');
+  // The formerly unchecked normalization produces the right LF hash even for these wrong bytes.
+  assert.equal(hash(mixed.toString('utf8').replace(/\r\n/g, '\n')), noCoverage008Checksum);
+  for (const bytes of [mixed, Buffer.concat([canonical, Buffer.from('\n')]),
+    Buffer.from(canonical.toString('utf8').replace('CREATE TABLE', 'CREATE  TABLE'), 'utf8')]) {
+    assert.throws(() => readPreRelease008(bytes), /exact historical LF or CRLF bytes/);
+  }
+});
 
 function fixture(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harnes2-outcome-transfer-'));
@@ -218,7 +243,7 @@ test('actual pre-release 008 database upgrades without rewriting its migration r
   const badDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'harnes2-bad-008-'));
   t.after(() => { fs.rmSync(directory, { recursive: true, force: true }); fs.rmSync(badDirectory, { recursive: true, force: true }); });
   createPreRelease008(directory);
-  createPreRelease008(badDirectory, 'unknown-checksum');
+  createPreRelease008(badDirectory, { receiptChecksum: 'unknown-checksum' });
 
   const store = new Store(directory);
   try {
@@ -238,10 +263,16 @@ test('actual pre-release 008 database upgrades without rewriting its migration r
 test('the exact pre-release CRLF receipt upgrades but cannot authorize changed current migration SQL', t => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harnes2-old-crlf-'));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
-  const checksum = 'a255f1b438928fd000279ed19b87b57ba3881512d32d613f292e99ecae640a64';
-  createPreRelease008(directory, checksum);
+  const checksum = noCoverage008CRLFChecksum;
+  createPreRelease008(directory, { crlf: true });
   const store = new Store(directory);
-  try { assert.equal(store.get("SELECT checksum FROM schema_migrations WHERE version='008-outcome-candidates.sql'").checksum, checksum); }
+  try {
+    assert.equal(store.get("SELECT checksum FROM schema_migrations WHERE version='008-outcome-candidates.sql'").checksum, checksum);
+    assert.ok(store.all('PRAGMA table_info(messages)').some(column => column.name === 'occurred_at'));
+    assert.ok(store.all('PRAGMA table_info(outcome_observation_windows)').some(column => column.name === 'coverage_event_id'));
+    assert.equal(store.get("SELECT COUNT(*) n FROM schema_migrations WHERE version='009-outcome-observation-integrity.sql'").n, 1);
+    assert.deepEqual(store.all('PRAGMA foreign_key_check'), []);
+  }
   finally { store.close(); }
   const changed = hash(fs.readFileSync(path.join(ROOT, 'business/migrations/008-outcome-candidates.sql'), 'utf8') + '\n-- changed');
   assert.equal(migrationChecksumMatches('008-outcome-candidates.sql', checksum, changed), false);
