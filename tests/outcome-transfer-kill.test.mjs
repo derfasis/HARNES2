@@ -24,7 +24,10 @@ function createPreRelease008(directory, checksum = noCoverage008Checksum) {
   // runner with the default shallow checkout — and would fail again behind any other clone,
   // archive or squashed history. The bytes are pinned by checksum either way, and the checksum is
   // what makes this the actual migration rather than an invented schema.
-  const old008 = fs.readFileSync(new URL('./fixtures/pre-release-008-outcome-candidates.sql', import.meta.url), 'utf8');
+  // Normalised for the same reason as the fixture test: the checkout is CRLF on a Windows runner
+  // and LF elsewhere, and the checksum must not depend on which.
+  const old008 = fs.readFileSync(new URL('./fixtures/pre-release-008-outcome-candidates.sql', import.meta.url), 'utf8')
+    .replace(/\r\n/g, '\n');
   assert.equal(hash(old008), noCoverage008Checksum, 'the fixture is the actual pre-release migration, not an invented schema');
   fs.mkdirSync(directory, { recursive: true });
   const db = new DatabaseSync(path.join(directory, 'partner.sqlite'));

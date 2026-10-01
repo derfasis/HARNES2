@@ -97,7 +97,11 @@ test('a settled window keeps its single answer under rescanning', async t => {
 // history made this suite pass locally and fail on a runner with the default shallow checkout — and
 // would fail again behind any archive or squashed history. The bytes are the contract.
 test('the legacy migration fixture is the real pre-release migration', async () => {
-  const sql = fs.readFileSync(new URL('./fixtures/pre-release-008-outcome-candidates.sql', import.meta.url), 'utf8');
+  // Read as text and normalise the line endings before hashing. Git checks this file out as LF on
+  // Linux and CRLF on a Windows runner, and a byte checksum that changes with the platform would
+  // fail in CI while passing here — the same false green the fixture replaced.
+  const sql = fs.readFileSync(new URL('./fixtures/pre-release-008-outcome-candidates.sql', import.meta.url), 'utf8')
+    .replace(/\r\n/g, '\n');
   assert.equal(createHash('sha256').update(Buffer.from(sql, 'utf8')).digest('hex'),
     '9bf883d940a6a174c88a1e68ecde384966b14632813f616322beafbae154498e',
     'the fixture is byte-for-byte the published pre-release migration, not a reconstruction of it');
