@@ -1,6 +1,12 @@
 import { id } from '../store.mjs';
 import { ensure, AppError, now } from '../errors.mjs';
 
+function botTimestamp(seconds) {
+  if (!Number.isSafeInteger(seconds) || seconds <= 0) return null;
+  const date = new Date(seconds * 1000);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : null;
+}
+
 export class TelegramChannel {
   constructor(service) { this.service = service; this.polling = false; this.stopped = false; this.lastError = null; this.lastPoll = null; }
   readiness() {
@@ -31,6 +37,7 @@ export class TelegramChannel {
       for (const update of updates) {
         const message = update.message, chatId = String(message?.chat?.id ?? '');
         if (message?.chat?.type === 'private' && typeof message.text === 'string' && cfg.allowedChatIds.map(String).includes(chatId)) {
+          const occurredAt = botTimestamp(message.date);
           let identity = this.service.store.get('SELECT * FROM channel_identities WHERE channel=? AND account_id=? AND external_id=?', 'telegram', account, chatId);
           if (!identity) {
             await this.service.command('person.create', { name: [message.from?.first_name,message.from?.last_name].filter(Boolean).join(' ') || chatId, source: `Входящее сообщение Telegram, chat ${chatId}`, channel: 'telegram', external_id: chatId, account_id: account,
@@ -38,7 +45,14 @@ export class TelegramChannel {
             identity = this.service.store.get('SELECT * FROM channel_identities WHERE channel=? AND account_id=? AND external_id=?', 'telegram', account, chatId);
           }
           const conv = this.service.store.get('SELECT id FROM conversations WHERE channel_identity_id=?', identity.id);
-          await this.service.command('message.record', { conversation_id: conv.id, text: message.text, direction: 'in', external_id: String(message.message_id), source: `telegram:${account}:${chatId}:${message.message_id}` }, `telegram-update:${account}:${update.update_id}`, {kind:'channel'});
+          await this.service.command('message.record', {
+            conversation_id: conv.id,
+            text: message.text,
+            direction: 'in',
+            external_id: String(message.message_id),
+            source: `telegram:${account}:${chatId}:${message.message_id}`,
+            ...(occurredAt ? { occurred_at: occurredAt, time_basis: 'source' } : {})
+          }, `telegram-update:v2:${this.service.config.partnerId}:${account}:${update.update_id}`, {kind:'channel'});
         }
         // Advance only after the event is durably processed; replay is idempotent.
         this.service.store.run('INSERT INTO channel_offsets VALUES(?,?,?) ON CONFLICT(channel,account_id) DO UPDATE SET cursor=excluded.cursor', 'telegram', account, String(update.update_id + 1));
@@ -74,7 +88,9 @@ export class TelegramChannel {
       try {
         this.service.store.transaction(() => {
           this.service.store.run("UPDATE delivery_attempts SET status='sent',external_id=?,finished_at=? WHERE id=?", String(message.message_id), now(), attempt);
-          this.service.recordDelivered(draft, String(message.message_id), autopilot ? 'telegram_autopilot' : 'telegram');
+          const occurredAt = botTimestamp(message?.date);
+          this.service.recordDelivered(draft, String(message.message_id), autopilot ? 'telegram_autopilot' : 'telegram',
+            occurredAt ? { occurred_at: occurredAt, time_basis: 'source' } : {});
           this.service.store.event(this.service.config.partnerId, conversation.id, 'delivery.sent', 'system', { draft_id: draft.id, draft_version: draft.current_version, external_id: String(message.message_id), autopilot, run_id: draft.run_id, model: this.service.config.runtime.model, conversation_revision: draft.context_revision, model_text: draft.text, sent_text: draft.text });
         });
       } catch {

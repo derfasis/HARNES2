@@ -148,15 +148,22 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // Executive extends export with intent/attempt tables and interrupts in-flight research.
     // Its crash and restore acceptance cases live in executive.test.mjs.
     // Bounded Action adds export tables and recovers dispatching as unknown.
-    // Acceptance cases: actions.test.mjs (not run under the current no-tests instruction).
-    "business/store.mjs": "c01118884bd97b30eb04e21d3a31b24230421f65",
+    // Acceptance cases: actions.test.mjs.
+    // Outcome completion explicitly accepts the two known byte encodings of the
+    // pre-release 008 receipt, only against the unchanged published 008 SQL.
+    // All other applied-migration checks remain strict; 009 is additive.
+    // Actual old database upgrade/import: outcome-transfer-kill.test.mjs.
+    "business/store.mjs": "d8ae9892e7d796fe1c3da13391824a641d743d25",
     "adapters/hermes/credentials.py": "2797bd89081eaf4a950178cec3d637015ee8f45f",
     "adapters/hermes/runner.py": "e631237829d9b7a4521799b4a19c4c500b33f5aa",
     // Deliberate v0 extension: existing worker, no-tool envelope tested in opportunity-runtime.test.mjs.
     // Retry-budget extension: decision envelope raises maxIterations 1->2 so the pinned
     // Hermes empty-response ladder can actually re-enter the loop after an empty response.
     "business/runtime.mjs": "4ec5cbf6c587e1bae0382785a90d240c9fb1718e",
-    "business/channels/telegram.mjs": "1b4de6dc8c8465bed237375bd6295ab4dbfa2eda",
+    // Outcome completion projects provider time and versions message-record
+    // identities by partner. Delivery gates remain unchanged; real stub adapter
+    // races and crash/receipt replay are in outcome-timing/redteam-kill tests.
+    "business/channels/telegram.mjs": "cec1264c2c5d1b08e1cf0099fbf09460623ac80a",
     // Reviewed R8 extension: the channel now bootstraps read-only public sources over the client
     // it already owns, and releases them without disconnecting that client. No send path changed;
     // sendApproved still requires liveSending and is untouched.
@@ -167,7 +174,7 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // propagates: this publishes state, it does not swallow the fault. The only message that
     // leaves the channel is a code already shaped like one of ours. Behaviour is exercised by
     // tests/absent-source-readers.test.mjs.
-    "business/channels/telegram-mtproto.mjs": "b850cbae6030080695a668e22927bc7a0a075e69",
+    "business/channels/telegram-mtproto.mjs": "e8127606f0d35e60a201a907dd94836fe9627c9c",
     "benchmarks/situation-router/README.md": "0da57bf3fcb53bbec5713f6a44c48654b16270b8",
     "benchmarks/situation-router/control-v1.json": "2c6265460c6ae6cc1de9b25fa978ba25d0e66236",
     "benchmarks/situation-router/synthetic/case-01-ignore.json": "f9fe79537ac036e32bbb547961901190b3f08007",

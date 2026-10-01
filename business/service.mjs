@@ -14,11 +14,16 @@ import { ActionLoop, ACTION_STALE_ERRORS } from './actions.mjs';
 import { ACTION_COMMANDS, HUMAN_ACTION_TASK } from './action-tables.mjs';
 import { ExecutiveLoop } from './executive.mjs';
 import { EXECUTIVE_ACTIONS } from './executive-tables.mjs';
+import { OutcomeLoop } from './outcome-feedback.mjs';
+import { OUTCOME_KINDS, OUTCOME_COMMANDS } from './outcome-tables.mjs';
+import { outcomeCommand } from './outcome-feedback.mjs';
 import { discoveryCommand, discoveryDecisionQueue, discoveryDetail, discoveryPresentationDetail, discoveryReasonStates, ensureDiscoveryApplied, hasDiscoveryPending, invalidateDiscoveryOffers, markDiscoveryPending, reconcileDiscoveryPending, recordDiscoveryFailure, staleMaterialEvidence, DISCOVERY_ACTIONS, DISCOVERY_REVIEW_TASK } from './discovery.mjs';
 
-const OUTCOMES = new Set(['qualified','call_proposed','call_accepted','call_booked','call_attended','no_show','joined','declined','business_value']);
+// One list, shared with the feedback loop: a candidate may only ever be promoted to a kind the
+// manual path would also have accepted, or promotion becomes a way around that refusal.
+const OUTCOMES = new Set(OUTCOME_KINDS);
 export class BusinessService {
-  constructor(store, config) { this.store = store; this.config = config; this.tail = Promise.resolve(); this.telegramAccountId = null; this.engagement = new EngagementLoop(this); this.continuity = new ContinuityLoop(this); this.executive = new ExecutiveLoop(this); this.actions = new ActionLoop(this); this.discoveryApply = ensureDiscoveryApplied; this.reconcileDiscovery = () => reconcileDiscoveryPending(this, 50); }
+  constructor(store, config) { this.store = store; this.config = config; this.tail = Promise.resolve(); this.telegramAccountId = null; this.engagement = new EngagementLoop(this); this.continuity = new ContinuityLoop(this); this.executive = new ExecutiveLoop(this); this.actions = new ActionLoop(this); this.outcomes = new OutcomeLoop(this); this.discoveryApply = ensureDiscoveryApplied; this.reconcileDiscovery = () => reconcileDiscoveryPending(this, 50); }
   exclusive(fn) { const job = this.tail.then(fn); this.tail = job.catch(() => {}); return job; }
   partner() { return this.store.get('SELECT * FROM partners WHERE id=?', this.config.partnerId); }
   person(personId) {
@@ -98,7 +103,7 @@ export class BusinessService {
   execute(action, p, requestId, actor) {
     requiredText(requestId, 'request_id', 150);
     ensure(p && typeof p === 'object' && !Array.isArray(p), 'payload должен быть объектом');
-    const fingerprint = hash(JSON.stringify({ action, p, actor: actor.kind, run: actor.runId ?? null, scope: actor.conversationId ?? null }));
+    const fingerprint = hash(JSON.stringify({ partner: this.config.partnerId, action, p, actor: actor.kind, run: actor.runId ?? null, scope: actor.conversationId ?? null }));
     if (action === 'source.ingest') {
       ensure(actor.kind === 'operator' || actor.kind === 'channel' && actor.sourceId === p.source_id, 'Источник вне области adapter', 403);
       // Transport-owned sources must commit messages, native receipts and cursor together.
@@ -121,7 +126,13 @@ export class BusinessService {
       ensure(!['fact.propose','task.propose','lesson.propose','capability.propose'].includes(action),'Use engagement-scoped proposals',403);
     }
     let result;
-    if (ACTION_COMMANDS.has(action)) {
+    if (OUTCOME_COMMANDS.has(action)) {
+      // Every outcome command is operator-only, checked here as well as inside the loop: this is
+      // the branch that decides who may turn an observation into a business claim, and it should
+      // not depend on the callee remembering.
+      ensure(actor?.kind === 'operator', 'Операция доступна только владельцу', 403);
+      result = outcomeCommand(this, action, p, actor);
+    } else if (ACTION_COMMANDS.has(action)) {
       result = this.actions.command(action, p, actor);
     } else if (EXECUTIVE_ACTIONS.has(action)) {
       result = this.executive.command(action, p, actor);
@@ -215,8 +226,21 @@ export class BusinessService {
         const direction = p.direction ?? 'in'; ensure(['in','out'].includes(direction), 'Некорректное направление');
         const messageId = id(), externalId = String(p.external_id ?? id());
         const duplicate = this.store.get('SELECT * FROM messages WHERE conversation_id=? AND direction=? AND external_id=?', conversationId, direction, externalId);
-        if (duplicate) { ensure(duplicate.text === text, 'Событие с этим ID содержит другой текст', 409); result = { message_id: duplicate.id, duplicate: true }; break; }
-        this.store.run('INSERT INTO messages(id,conversation_id,direction,author,text,external_id,source,created_at) VALUES(?,?,?,?,?,?,?,?)', messageId, conversationId, direction, direction === 'in' ? 'person' : 'operator', text, externalId, source, now());
+        const occurredAt = p.occurred_at == null ? null : dateTime(p.occurred_at);
+        if (duplicate) {
+          ensure(duplicate.text === text && duplicate.source === source
+            && (occurredAt === null || duplicate.occurred_at === occurredAt || actor.kind === 'channel' && duplicate.occurred_at === null),
+          'Событие с этим ID содержит другой текст, источник или время', 409);
+          // A replay of the newer provider projection can fill an old missing timestamp.
+          // It changes evidence freshness, never delivery/contact authority or inbound work.
+          if (occurredAt !== null && duplicate.occurred_at === null && actor.kind === 'channel') {
+            this.store.run("UPDATE messages SET occurred_at=?,time_basis='source' WHERE id=? AND occurred_at IS NULL", occurredAt, duplicate.id);
+            this.invalidate(conversationId, 'source_time_recovered');
+            this.store.event(this.config.partnerId, conversationId, 'message.source_time_recovered', 'channel', { message_id: duplicate.id, occurred_at: occurredAt });
+          }
+          result = { message_id: duplicate.id, duplicate: true }; break;
+        }
+        this.store.run('INSERT INTO messages(id,conversation_id,direction,author,text,external_id,source,created_at,occurred_at,time_basis) VALUES(?,?,?,?,?,?,?,?,?,?)', messageId, conversationId, direction, direction === 'in' ? 'person' : 'operator', text, externalId, source, now(), occurredAt, occurredAt === null ? 'recorded' : actor.kind === 'channel' ? 'source' : 'owner_attested');
         this.invalidate(conversationId, 'message_recorded');
         const conv = this.conversation(conversationId), person = this.person(conv.person_id);
         if (direction === 'in' && /(?:^\/stop\b|не\s+пишите|не\s+пишіть|не\s+писати|больше\s+не\s+писать|do\s+not\s+contact|stop\s+messaging|unsubscribe)/iu.test(text)) {
@@ -228,6 +252,7 @@ export class BusinessService {
         } else if (direction === 'in' && !person.suppressed && conv.ownership === 'AI_OWNED') {
           if (!this.engagement.inbound(conversationId,messageId)) this.addTask({ conversation_id: conversationId, kind: 'reply', title: `Ответить: ${person.name}`, instructions: 'Разбери новое сообщение, сохрани нужные предложения и выбери следующий шаг.', due_at: now(), evidence: messageId, dedupe_key: `inbound:${messageId}` }, 'system', 'pending');
         }
+        if (direction === 'out') this.outcomes.deliveryIntent(conversationId, messageId);
         result = { message_id: messageId }; break;
       }
       case 'draft.create': {
@@ -273,7 +298,7 @@ export class BusinessService {
         const draft = this.validApproved(p.draft_id); conversationId = draft.conversation_id;
         const receipt = requiredText(p.evidence, 'Подтверждение фактической ручной отправки', 4000), attempt = id();
         this.store.run('INSERT INTO delivery_attempts(id,draft_id,draft_version,channel,recipient,status,external_id,created_at,finished_at) VALUES(?,?,?,?,?,?,?,?,?)', attempt, draft.id, draft.current_version, 'manual_confirmation', conversationId, 'sent', String(p.external_id ?? receipt).slice(0,1000), now(), now());
-        this.recordDelivered(draft, String(p.external_id ?? attempt), 'operator_manual');
+        this.recordDelivered(draft, String(p.external_id ?? attempt), 'operator_manual', { occurred_at: p.occurred_at, time_basis: 'owner_attested' });
         result = { status: 'sent', delivery_attempt_id: attempt }; break;
       }
       case 'delivery.reconcile': {
@@ -282,7 +307,7 @@ export class BusinessService {
         ensure(['sent','failed'].includes(p.status), 'Нужен результат sent или failed');
         const evidence = requiredText(p.evidence, 'Подтверждение сверки', 4000);
         this.store.run('UPDATE delivery_attempts SET status=?,error=?,finished_at=? WHERE draft_id=? AND status=?', p.status, evidence, now(), draft.id, 'delivery_unknown');
-        if (p.status === 'sent') this.recordDelivered(draft, String(p.external_id ?? id()), 'operator_reconciled');
+        if (p.status === 'sent') this.recordDelivered(draft, String(p.external_id ?? id()), 'operator_reconciled', { occurred_at: p.occurred_at, time_basis: 'owner_attested' });
         else this.store.run("UPDATE drafts SET status='failed' WHERE id=?", draft.id);
         result = { status: p.status }; break;
       }
@@ -344,24 +369,7 @@ export class BusinessService {
         const lesson = this.store.get('SELECT * FROM lessons WHERE id=? AND partner_id=?', p.lesson_id, this.config.partnerId); ensure(lesson, 'Урок не найден', 404);
         this.store.run('UPDATE lessons SET status=?,reviewed_at=? WHERE id=?', p.status, now(), lesson.id); result = { status: p.status }; break;
       }
-      case 'outcome.record': {
-        const conv = this.conversation(conversationId), outcomeId = id();
-        ensure(OUTCOMES.has(p.kind), 'Неизвестный результат');
-        if (p.source_message_id) ensure(this.store.get('SELECT id FROM messages WHERE id=? AND conversation_id=?', p.source_message_id, conversationId), 'Неверный источник сообщения');
-        if (p.draft_id) ensure(this.draft(p.draft_id).conversation_id === conversationId, 'Черновик из другого разговора');
-        if (p.value !== undefined && p.value !== null) ensure(typeof p.value === 'number' && Number.isFinite(p.value) && p.value >= 0, 'Некорректная величина результата');
-        this.store.run('INSERT INTO outcome_events VALUES(?,?,?,?,?,?,?,?,?,?)', outcomeId, conv.person_id, conversationId, p.kind, requiredText(p.evidence, 'Подтверждение результата', 4000), p.source_message_id ?? null, p.draft_id ?? null, p.value ?? null, 'operator', now());
-        this.store.run('UPDATE conversations SET stage=? WHERE id=?', p.kind, conversationId);
-        if (['joined','declined'].includes(p.kind)) {
-          this.store.run("UPDATE conversations SET ownership='HUMAN_OWNED' WHERE id=?", conversationId);
-          this.invalidate(conversationId, p.kind);
-          this.store.run("UPDATE tasks SET status='cancelled' WHERE conversation_id=? AND status IN ('pending','proposed','running')", conversationId);
-        }
-        result = { outcome_id: outcomeId }; this.engagement.outcome(p,result);
-        const e=this.engagement.current(conversationId);
-        if(e){this.invalidate(conversationId,'outcome_recorded');this.engagement.signal(this.engagement.get(e.id),'outcome',{outcome_id:outcomeId});}
-        break;
-      }
+      case 'outcome.record': result = this.recordOutcome(conversationId, p); break;
       case 'capability.propose': {
         const proposalId = id();
         const permissions = p.permissions ?? []; ensure(Array.isArray(permissions) && permissions.length <= 20 && permissions.every(x => typeof x === 'string' && x.length <= 200), 'Нужен список прав');
@@ -431,10 +439,15 @@ export class BusinessService {
     ensure(this.store.get('SELECT id FROM approvals WHERE draft_id=? AND draft_version=? AND conversation_revision=?', draft.id, draft.current_version, conversation.revision), 'Одобрение не соответствует версии', 409);
     return draft;
   }
-  recordDelivered(draft, externalId, source) {
+  recordDelivered(draft, externalId, source, metadata = {}) {
     this.store.run("UPDATE drafts SET status='sent' WHERE id=?", draft.id);
     const messageId = id();
-    this.store.run('INSERT INTO messages(id,conversation_id,direction,author,text,external_id,source,draft_id,created_at) VALUES(?,?,?,?,?,?,?,?,?)', messageId, draft.conversation_id, 'out', source.startsWith('operator') ? 'operator' : 'agent_assisted', draft.text, externalId, source, draft.id, now());
+    const occurredAt = metadata.occurred_at == null ? null : dateTime(metadata.occurred_at);
+    ensure(occurredAt === null || ['source','owner_attested'].includes(metadata.time_basis), 'Некорректное основание времени');
+    this.store.run('INSERT INTO messages(id,conversation_id,direction,author,text,external_id,source,draft_id,created_at,occurred_at,time_basis) VALUES(?,?,?,?,?,?,?,?,?,?,?)', messageId, draft.conversation_id, 'out', source.startsWith('operator') ? 'operator' : 'agent_assisted', draft.text, externalId, source, draft.id, now(), occurredAt, occurredAt === null ? 'recorded' : metadata.time_basis);
+    // Same transaction as delivery truth. Optional observation failures can be recovered
+    // without replaying the external effect or inventing a new delivery timestamp.
+    this.outcomes.deliveryIntent(draft.conversation_id, messageId);
     this.engagement.onDelivered(draft,messageId);
     this.invalidate(draft.conversation_id, 'outgoing_recorded');
     if (draft.action === 'handoff') {
@@ -513,14 +526,56 @@ export class BusinessService {
       skills: this.store.all('SELECT s.* FROM skill_versions s JOIN capability_proposals p ON p.id=s.proposal_id WHERE p.partner_id=? ORDER BY s.created_at DESC', partnerId),
       metrics: this.metrics(), events: this.store.all('SELECT id,kind,actor,created_at FROM events WHERE partner_id=? ORDER BY id DESC LIMIT 30', partnerId) };
   }
+  // The one place an outcome is written, whoever asked for it.
+  //
+  // The feedback loop used to insert the row itself. That skipped everything this does around
+  // the insert — advancing the conversation stage, taking ownership on a join or a decline,
+  // cancelling the work it just made pointless, invalidating the engagement, and signalling the
+  // engagement loop. So a candidate could be confirmed as `joined` and the partner would go on
+  // treating the conversation as live. Every side effect that makes a confirmed outcome mean
+  // anything lives here, and the manual path and the promoted-candidate path both call it, so the
+  // two can never disagree about what recording a result does.
+  recordOutcome(conversationId, p) {
+    if (!this.store.db.isTransaction) return this.store.transaction(() => this.recordOutcome(conversationId, p));
+    const conv = this.conversation(conversationId), outcomeId = id();
+    ensure(OUTCOMES.has(p.kind), 'Неизвестный результат');
+    if (p.source_message_id) ensure(this.store.get('SELECT id FROM messages WHERE id=? AND conversation_id=?', p.source_message_id, conversationId), 'Неверный источник сообщения');
+    if (p.draft_id) ensure(this.draft(p.draft_id).conversation_id === conversationId, 'Черновик из другого разговора');
+    if (p.value !== undefined && p.value !== null) ensure(typeof p.value === 'number' && Number.isFinite(p.value) && p.value >= 0, 'Некорректная величина результата');
+    this.store.run('INSERT INTO outcome_events VALUES(?,?,?,?,?,?,?,?,?,?)', outcomeId, conv.person_id, conversationId, p.kind, requiredText(p.evidence, 'Подтверждение результата', 4000), p.source_message_id ?? null, p.draft_id ?? null, p.value ?? null, 'operator', now());
+    // Stage is a conservative progress projection, not the last reviewed historical fact.
+    // Terminal joined/declined remain terminal; a result correction needs an explicit
+    // owner workflow rather than replaying an older qualification into live work.
+    const rank = ['new','qualified','call_proposed','call_accepted','call_booked','no_show','call_attended','joined'];
+    const terminal = ['joined','declined'].includes(conv.stage);
+    if (!terminal && (p.kind === 'declined' || rank.indexOf(p.kind) >= rank.indexOf(conv.stage) && rank.includes(p.kind)))
+      this.store.run('UPDATE conversations SET stage=? WHERE id=?', p.kind, conversationId);
+    if (['joined','declined'].includes(p.kind)) {
+      this.store.run("UPDATE conversations SET ownership='HUMAN_OWNED' WHERE id=?", conversationId);
+      this.invalidate(conversationId, p.kind);
+      this.store.run("UPDATE tasks SET status='cancelled' WHERE conversation_id=? AND status IN ('pending','proposed','running')", conversationId);
+    }
+    // `decision_id` travels with the outcome so `engagement.outcome` writes the association and
+    // its attribution. The feedback loop used to write `decision_outcomes` itself on top of this,
+    // which is a second insert against the same primary key.
+    const result = { outcome_id: outcomeId }; this.engagement.outcome({ ...p, conversation_id: conversationId, decision_id: p.decision_id ?? null }, result);
+    const e=this.engagement.current(conversationId);
+    if(e){this.invalidate(conversationId,'outcome_recorded');this.engagement.signal(this.engagement.get(e.id),'outcome',{outcome_id:outcomeId});}
+    return result;
+  }
   metrics() {
-    const counts = Object.fromEntries(this.store.all('SELECT kind,COUNT(DISTINCT person_id) AS n FROM outcome_events GROUP BY kind').map(x => [x.kind,x.n]));
-    const usage = this.store.get('SELECT COUNT(*) AS runs,COALESCE(SUM(estimated_cost_usd),0) AS known_cost_usd,SUM(CASE WHEN cost_status=\'unknown\' THEN 1 ELSE 0 END) AS unknown_cost_runs FROM runs');
-    const totalSent = this.store.get("SELECT COUNT(*) AS n FROM drafts WHERE status='sent'").n;
-    const editedSent = this.store.get("SELECT COUNT(*) AS n FROM drafts WHERE status='sent' AND current_version>1").n;
+    const partnerId = this.config.partnerId;
+    const counts = Object.fromEntries(this.store.all('SELECT o.kind,COUNT(DISTINCT o.person_id) AS n FROM outcome_events o JOIN persons p ON p.id=o.person_id WHERE p.partner_id=? GROUP BY o.kind', partnerId).map(x => [x.kind,x.n]));
+    const usage = this.store.get("SELECT COUNT(*) AS runs,COALESCE(SUM(estimated_cost_usd),0) AS known_cost_usd,SUM(CASE WHEN cost_status='unknown' THEN 1 ELSE 0 END) AS unknown_cost_runs FROM runs WHERE partner_id=?", partnerId);
+    const sent = this.store.get("SELECT COUNT(*) n,COALESCE(SUM(CASE WHEN d.current_version>1 THEN 1 ELSE 0 END),0) edited FROM drafts d JOIN conversations c ON c.id=d.conversation_id JOIN persons p ON p.id=c.person_id WHERE p.partner_id=? AND d.status='sent'", partnerId);
+    const totalSent = sent.n, editedSent = sent.edited;
     return { ...counts, ...usage, total_sent: totalSent, edited_sent: editedSent, edit_rate: totalSent ? editedSent / totalSent : null,
       cost_per_qualified: !usage.unknown_cost_runs && counts.qualified ? usage.known_cost_usd / counts.qualified : null,
       cost_per_joined: !usage.unknown_cost_runs && counts.joined ? usage.known_cost_usd / counts.joined : null,
-      cost_scope: 'Model costs only; operator time and infrastructure are not yet measured.' };
+      cost_scope: 'Model costs only; operator time and infrastructure are not yet measured.',
+      // Carried beside the rates, not in a footnote: a cost-per-qualified that improved because
+      // fewer outcomes were recorded is a worse number than no number at all, and the only way to
+      // see that is to report the unobserved share next to the observed one.
+      outcome_coverage: this.config.outcomes?.enabled === true ? this.outcomes.coverage() : { disabled: true } };
   }
 }

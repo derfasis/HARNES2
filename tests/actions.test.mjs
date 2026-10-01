@@ -15,6 +15,7 @@ import { contextFor } from '../business/context.mjs';
 import { exportPartner } from '../business/export.mjs';
 import { hash } from '../business/store.mjs';
 import { ACTION_TABLES } from '../business/action-tables.mjs';
+import { OUTCOME_TABLES } from '../business/outcome-tables.mjs';
 import { spawnSync } from 'node:child_process';
 import { start } from '../business/server.mjs';
 
@@ -263,7 +264,11 @@ test('execution cursor reaches a grant beyond unprobeable historical work', asyn
 for (const legacy of [false,true]) test(`${legacy ? 'v6' : 'v7'} transfer cannot carry live execution authority`, async t => {
   const h = harness(t), a = await h.propose(await h.accepted()); await h.grant(a);
   const bundle = exportPartner(h.store);
-  if (legacy) { for (const table of ACTION_TABLES) delete bundle.tables[table]; bundle.migrations = bundle.migrations.slice(0,6); bundle.tables_sha256 = hash(JSON.stringify(bundle.tables)); }
+  if (legacy) {
+    for (const table of [...ACTION_TABLES, ...OUTCOME_TABLES]) delete bundle.tables[table];
+    for (const row of bundle.tables.messages) { delete row.occurred_at; delete row.time_basis; }
+    bundle.migrations = bundle.migrations.slice(0,6); bundle.tables_sha256 = hash(JSON.stringify(bundle.tables));
+  }
   const source = path.join(h.directory, 'export.json'), destination = path.join(ROOT, 'exports', `actions-${id()}`);
   fs.writeFileSync(source, JSON.stringify(bundle));
   t.after(() => fs.rmSync(destination, { recursive: true, force: true }));

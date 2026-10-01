@@ -103,6 +103,27 @@ export function checkAutomaticPrerequisite(config) {
     throw new Error('Automatic opportunity prerequisite requires the runtime disabled and live sending off.');
   return config;
 }
+// The observation window is a claim about a conversation, so its patience is bounded like every
+// other interval here: a zero or a negative closes every window the instant it opens, and an
+// unbounded one never closes at all. Exported so the rule is testable without a config file.
+export function validateOutcomes(config) {
+  const outcomes = config?.outcomes;
+  if (outcomes === undefined) return config;
+  if (!outcomes || typeof outcomes !== 'object' || Array.isArray(outcomes)) throw new Error('Invalid outcomes configuration');
+  const allowed = new Set(['enabled', 'responseWindowSeconds']);
+  if (Object.keys(outcomes).some(name => !allowed.has(name))) throw new Error('Unknown outcomes configuration field');
+  // The switch is boolean, not merely truthy. A string 'false' would disagree with every
+  // `=== true` check, so reject it before the service starts.
+  if (typeof outcomes.enabled !== 'boolean') throw new Error('Invalid enabled');
+  if ('responseWindowSeconds' in outcomes && !Number.isInteger(outcomes.responseWindowSeconds))
+    throw new Error('Invalid responseWindowSeconds');
+  if (outcomes.enabled !== true) return config;
+  for (const [name, min, max] of [['responseWindowSeconds', 3600, 31536000]]) {
+    const value = outcomes[name];
+    if (!Number.isInteger(value) || value < min || value > max) throw new Error(`Invalid ${name}`);
+  }
+  return config;
+}
 export function loadConfig() {
   const file = path.join(ROOT, 'config/local.json');
   const cfg = merge(readJson(path.join(ROOT, 'config/default.json')), fs.existsSync(file) ? readJson(file) : {});
@@ -142,6 +163,7 @@ export function loadConfig() {
   if (typeof cfg.opportunity?.automatic !== 'boolean') throw new Error('Invalid opportunity.automatic');
   validateAllowedSourceRefs(cfg);
   validateTelegramSources(cfg);
+  validateOutcomes(cfg);
   validateBrowserSources(cfg);
   // This must agree with automaticBoundary, or the application refuses to start on a combination
   // the pipeline would have accepted. A read-only reader may run with automatic on: it is how

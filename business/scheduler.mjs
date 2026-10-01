@@ -65,7 +65,7 @@ export class Scheduler {
   // `reason_busy` is reported beside `busy` rather than inside it: the two loops are independent,
   // and an operator looking at one long-running tick must be able to tell whether the eyes or the
   // head is the thing that is working.
-  status() { return { enabled: this.service.config.scheduler.enabled, busy: this.busy, reason_busy: this.reasonBusy, action_busy: this.actionRuntime.busy, actions: this.actionState ?? { disposition: 'not_run' }, active_run: this.activeRun, reason: this.lastReason, model: runtimeReadiness(this.service.config), source_readers: this.sourceReadersState, continuity: this.continuityState ?? { disposition: 'not_run' }, executive: this.executiveState ?? { disposition: 'not_run' } }; }
+  status() { return { enabled: this.service.config.scheduler.enabled, busy: this.busy, reason_busy: this.reasonBusy, action_busy: this.actionRuntime.busy, actions: this.actionState ?? { disposition: 'not_run' }, active_run: this.activeRun, reason: this.lastReason, model: runtimeReadiness(this.service.config), source_readers: this.sourceReadersState, continuity: this.continuityState ?? { disposition: 'not_run' }, executive: this.executiveState ?? { disposition: 'not_run' }, outcomes: this.outcomesState ?? { disposition: 'not_run' } }; }
   // The source loop. Poll, checkpoint, retire, discover. No model call anywhere in it.
   async sourceTick() {
     if (this.busy || this.stopped || !this.service.config.scheduler.enabled) return;
@@ -95,18 +95,34 @@ export class Scheduler {
       // known, and it withholds reasoning exactly as `false` does — a check in progress is not a
       // check that passed. Written this way the flag is only ever a claim about a *completed*
       // attempt, which is the only kind of claim worth reading.
-      this.continuityHealthy = null;
-      try {
-        await this.service.exclusive(() => this.service.continuity.reconcile());
-        this.continuityHealthy = true;
-        // A reconciliation that recovers clears its own failure. The state used to be written
-        // only on the way down, so one transient fault pinned the partner to
-        // `reconciliation_failed` for the rest of the process even though every later pass
-        // succeeded — an operator reading status() was told the partner was broken when the only
-        // thing that had happened was that it had recovered.
-        if (this.continuityState?.disposition === 'reconciliation_failed') this.continuityState = { disposition: 'reconciled' };
-      }
-      catch { this.continuityHealthy = false; this.continuityState = { disposition: 'reconciliation_failed' }; }
+      // Outcome observation belongs to the source loop, not the reasoning one: what the loop
+        // owes is "did anything come back", and that is a transport question. It runs *outside*
+        // the continuity reconciliation rather than inside it, because a window that has already
+        // closed is settled regardless of whether the reasoning above it is healthy — and leaving
+        // it unsettled for want of an unrelated model-side pass is how a rate silently improves
+        // because nothing was counted.
+        if (cfg.outcomes?.enabled === true) {
+          try {
+            const result = await this.service.exclusive(() => this.service.outcomes.reconcile());
+            // A pass that recovers clears its own failure, for the same reason the others do. A
+            // status that only ever records failure tells an operator the layer is broken for the
+            // life of the process even though every later pass worked.
+            this.outcomesState = { disposition: 'reconciled', ...result };
+          }
+          catch { this.outcomesState = { disposition: 'reconcile_failed' }; }
+        }
+        this.continuityHealthy = null;
+        try {
+          await this.service.exclusive(() => this.service.continuity.reconcile());
+          this.continuityHealthy = true;
+          // A reconciliation that recovers clears its own failure. The state used to be written
+          // only on the way down, so one transient fault pinned the partner to
+          // `reconciliation_failed` for the rest of the process even though every later pass
+          // succeeded — an operator reading status() was told the partner was broken when the
+          // only thing that had happened was that it had recovered.
+          if (this.continuityState?.disposition === 'reconciliation_failed') this.continuityState = { disposition: 'reconciled' };
+        }
+        catch { this.continuityHealthy = false; this.continuityState = { disposition: 'reconciliation_failed' }; }
       this.executiveHealthy = null;
       try {
         await this.service.exclusive(() => this.service.executive.reconcile());

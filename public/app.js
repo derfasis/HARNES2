@@ -11,7 +11,7 @@ const panel = (title,content,action='') => `<section class="panel"><div class="p
 let token='',state=null,tab='overview',selected=null,detail=null;
 let reviewFilter='pending',reviewOffset=0,reviewDetail=null;
 const pending = new Map();
-let researchView = null, actionsView = null;
+let researchView = null, actionsView = null, outcomesView = null;
 async function api(route,body) {
   const response = await fetch(route,{method:body === undefined?'GET':'POST',headers:{'x-partner-token':token,...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});
   const data = await response.json(); if(!response.ok) throw new Error(data.error ?? 'Операция не завершена'); return data;
@@ -33,13 +33,18 @@ async function refresh() {
     actionsView ??= (await import('./actions.js')).createActionsView({ api, command, esc, panel, button, empty, field, modal, refresh });
     await actionsView.load();
   }
+  if(tab==='outcomes'){
+    outcomesView ??= (await import('./outcomes.js')).createOutcomesView({ api, command, esc, panel, button, empty, field, modal, refresh,
+      isEnabled:()=>state?.metrics?.outcome_coverage?.disabled!==true });
+    await outcomesView.load();
+  }
   $('#model-status').textContent=state.runtime.ready?'Модель подключена':'Ожидает подключения ИИ';
   $('#model-status').className=`pill${state.runtime.ready?' ready':''}`;render();
 }
 function render(){
-  const titles={overview:'Обзор',people:'Люди и диалоги',tasks:'Задачи',discovery:'Discovery',research:'Исследования',actions:'Действия',experience:'Память и опыт',capabilities:'Способности',runs:'История работы',settings:'Подключения'};
+  const titles={overview:'Обзор',people:'Люди и диалоги',tasks:'Задачи',discovery:'Discovery',research:'Исследования',actions:'Действия',outcomes:'Результаты',experience:'Память и опыт',capabilities:'Способности',runs:'История работы',settings:'Подключения'};
   $('#page-title').textContent=titles[tab];document.querySelectorAll('[data-tab]').forEach(x=>x.classList.toggle('active',x.dataset.tab===tab));
-  $('#content').innerHTML=({overview:overview,people:people,tasks:tasks,discovery:discoveryTab,research:()=>researchView.render(),actions:()=>actionsView.render(),experience:experience,capabilities:capabilities,runs:runs,settings:settings}[tab])();
+  $('#content').innerHTML=({overview:overview,people:people,tasks:tasks,discovery:discoveryTab,research:()=>researchView.render(),actions:()=>actionsView.render(),outcomes:()=>outcomesView.render(),experience:experience,capabilities:capabilities,runs:runs,settings:settings}[tab])();
 }
 function overview(){
   const m=state.metrics,pendingTasks=state.tasks.filter(t=>['pending','proposed','running'].includes(t.status));
@@ -283,6 +288,7 @@ const convPayload=()=>({conversation_id:selected});
 async function act(action,itemId,extra){
   if(action.startsWith('action-')){await actionsView.act(action,itemId);return;}
   if(action.startsWith('research-')){await researchView.act(action,itemId);return;}
+  if(action.startsWith('outcome-')){await outcomesView.act(action,itemId);render();return;}
   if(action==='discovery-select'){await selectSituation(itemId);render();return;}
   if(action==='discovery-next'){await nextDiscoveryPage();render();return;}
   // Stage 4E: operator decisions call the existing commands with the exact current basis, and a
@@ -390,7 +396,7 @@ async function act(action,itemId,extra){
   await refresh();notify('Сохранено.');
 }
 document.addEventListener('click',async event=>{const nav=event.target.closest('[data-tab]');if(nav){tab=nav.dataset.tab;try{await refresh();}catch(error){notify(error.message,true);}return;}const btn=event.target.closest('[data-do]');if(!btn)return;btn.disabled=true;try{await act(btn.dataset.do,btn.dataset.id,btn.dataset.mode);}catch(error){notify(error.message,true);}finally{btn.disabled=false;}});
-document.addEventListener('change',async event=>{if(event.target.id==='review-filter'){reviewFilter=event.target.value;reviewOffset=0;try{await refresh();}catch(error){notify(error.message,true);}}});
+document.addEventListener('change',async event=>{if(event.target.id==='review-filter'){reviewFilter=event.target.value;reviewOffset=0;try{await refresh();}catch(error){notify(error.message,true);}}else if(event.target.id==='outcome-status'){try{await outcomesView.act('outcome-filter',event.target.value);render();}catch(error){notify(error.message,true);}}});
 $('#close-modal').onclick=()=>$('#modal').close();
 $('#export-button').onclick=async()=>{try{const data=await api('/api/export');const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const link=document.createElement('a');link.href=url;link.download=`digital-ai-partner-${new Date().toISOString().slice(0,10)}.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);notify('Экспорт подготовлен. В нём есть персональные данные; храните его как рабочую базу.');}catch(error){notify(error.message,true);}};
 try{token=(await api('/api/session')).token;await refresh();}catch(error){notify(error.message,true);}

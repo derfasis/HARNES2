@@ -75,5 +75,9 @@
     "enabled": false,
     "modelEnabled": false,
     "maxModelRunsPerDay": 5
+  },
+  "outcomes": {
+    "enabled": false,
+    "responseWindowSeconds": 604800
   }
 }

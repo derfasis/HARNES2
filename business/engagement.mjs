@@ -219,6 +219,25 @@ export class EngagementLoop {
     return result;
   }
   onDelivered(draft,messageId) {
+    // The moment a message actually goes out is when we stop knowing what will happen to it.
+    // Opening an observation window here — rather than at send-authorisation time — is what makes
+    // "nobody replied" a fact the partner can later record instead of an absence it cannot see.
+    // It opens for every delivered message, operator-authored ones included, because the partner
+    // is not the only author whose effect is worth measuring.
+    //
+    // The delivery time is read back from the row that was just written rather than taken from a
+    // caller argument. An earlier version referenced a `message` binding that does not exist in
+    // this scope, and the catch below swallowed the ReferenceError — so no window was ever opened,
+    // and the layer looked alive precisely where it was dead.
+    const sent = this.db.get('SELECT created_at,occurred_at FROM messages WHERE id=?', messageId);
+    this.db.db.exec('SAVEPOINT outcome_observer');
+    try {
+      this.s.outcomes?.observeSent(draft.conversation_id, messageId, sent?.occurred_at ?? sent?.created_at ?? null);
+      this.db.db.exec('RELEASE outcome_observer');
+    } catch {
+      this.db.db.exec('ROLLBACK TO outcome_observer'); this.db.db.exec('RELEASE outcome_observer');
+      // Delivery intent remains durable; the scheduler retries observation only.
+    }
     const a=this.db.get('SELECT * FROM engagement_actions WHERE draft_id=?',draft.id);if(!a)return;
     const d=this.decision(a.decision_id);
     // Never attribute model promises/explanations to an operator rewrite.
