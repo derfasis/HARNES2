@@ -257,3 +257,50 @@ test('fake assessment runtime accepts only actual sampled evidence and persists 
   assert.equal(h.store.get("SELECT COUNT(*) n FROM scout_assessments WHERE campaign_id=?", secondCampaign.id).n, 0);
   assert.ok(refs.every(ref => ref !== '999999'));
 });
+
+test('audit grant expiry during a held history RPC withholds and discards the returned page', async t => {
+  let enterHistory, releaseHistory;
+  const entered = new Promise(resolve => { enterHistory = resolve; });
+  const held = new Promise(resolve => { releaseHistory = resolve; });
+  const h = scoutHarness(t, { history: async input => {
+    enterHistory();
+    await held;
+    return { empty: false, requested_count: input.limit, received_count: 1, oldest_id: 1, messages: [message('1')] };
+  } });
+  const campaign = await h.campaign('Expiry while history is in flight'); await h.authorize(campaign);
+  const candidate = await h.seed(campaign);
+  await h.command('scout.audit', { campaign_id: campaign.id, revision: campaign.revision, candidate_id: candidate.id });
+  const job = h.store.get("SELECT * FROM scout_jobs WHERE campaign_id=? AND kind='history' AND status='queued'", campaign.id);
+  assert.ok(job);
+
+  const realNow = Date.now;
+  const realProcessCurrent = h.service.control.processCurrent.bind(h.service.control);
+  let fakeNow = realNow();
+  Date.now = () => fakeNow;
+  let tick;
+  try {
+    tick = h.runtime.tick();
+    await entered;
+    assert.equal(h.store.get('SELECT status FROM scout_jobs WHERE id=?', job.id).status, 'running',
+      'the job reached the held RPC before authority expired');
+    fakeNow += 2 * 86_400_000;
+    // Keep the process lease valid so this case isolates grant expiry rather than
+    // simulating a worker handoff at the same time.
+    h.service.control.processCurrent = () => true;
+    releaseHistory();
+    const result = await tick;
+    assert.equal(result.disposition, 'withheld');
+    assert.equal(result.reason, 'SCOUT_AUTHORITY_STALE');
+    assert.equal(h.store.get('SELECT status FROM scout_jobs WHERE id=?', job.id).status, 'stale');
+    const sample = h.store.get('SELECT * FROM scout_samples WHERE id=?', job.sample_id);
+    assert.equal(sample.status, 'collecting');
+    assert.deepEqual(JSON.parse(sample.messages_json), []);
+    assert.equal(JSON.parse(h.store.get('SELECT cursor_json FROM scout_jobs WHERE id=?', job.id).cursor_json).before_id, 0,
+      'the returned page did not advance the history cursor');
+  } finally {
+    Date.now = realNow;
+    h.service.control.processCurrent = realProcessCurrent;
+    releaseHistory();
+    if (tick) await tick;
+  }
+});

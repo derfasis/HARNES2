@@ -1,120 +1,151 @@
 # Source Scout + Auditor v1 — verification and integration handoff
 
-## Branch lineage
+## Provenance and authorization
 
-Canonical remote main inspected for this task: `4ab8be309d11c93b9df73161fc07c6c029f35aee`.
-The layer depends on PR #27 Partner Workspace, still unmerged at audit time:
-`b2cbfbef7a1a77cea595b5f82d19bf20ff1aeac9`.
+Canonical remote main rechecked during verification: `4ab8be309d11c93b9df73161fc07c6c029f35aee`.
+PR #27 Partner Workspace remains OPEN/DRAFT at `b2cbfbef7a1a77cea595b5f82d19bf20ff1aeac9`.
+It is an explicit dependency, not a merged baseline. Main and PR #27 were not modified.
 
-Separate prerequisite branch `codex/partner-workspace-ownership-fences-v1`:
+Separate prerequisite `codex/partner-workspace-ownership-fences-v1@22dc21a4803badd70bcac41b8a4c7fbd704ab073`
+contains process/PID and callback ownership fences, exact Control Plane tickets and
+the intentional MTProto blob pin update. The Scout branch descends from it.
+Implementation `0e06cc6` and provenance correction `2499347` were initially published
+with syntax-only verification. The owner subsequently explicitly authorized tests,
+Gemini/API, CLIProxy and bounded live verification. This report supersedes the
+earlier unexecuted-test status. Outbound/contact/join authority was not expanded.
 
-- `8b4025dd32ce09719c070853094469284bc0aa97`: live/unknown PID cannot be replaced
-  merely because its lease expired; process ownership fences public/private
-  callback commits, post-await private intake and late public/browser failures,
-  with matching authored test fixtures.
-- `0761c943802116ffd01ca6ac6c9115c6cc35034b`: direct agent commands require the
-  exact control ticket; matching scoped fixture calls and a focused kill case.
-- `22dc21a4803badd70bcac41b8a4c7fbd704ab073`: intentional blob pin update for the
-  ownership-fenced MTProto channel; no runtime or test execution.
+Work uses `D:/HARNES2-worktrees/source-scout-auditor-v1`; unrelated original-workspace
+changes were preserved. Smoke runs used isolated temporary business state.
 
-`codex/source-scout-auditor-v1` fast-forwards these prerequisites as ancestors.
-They are not silently represented as canonical main. The old workspace and its
-unrelated changes were preserved; implementation uses a separate worktree.
-No main merge, live configuration change, provider call or Telegram run occurred.
+## Executed gates
 
-## Verification actually performed
+- Full `npm test`: **1137/1137 Node PASS**, zero skipped/cancelled.
+- `npm run test:credentials`: **15/15 Python PASS**.
+- `npm run build`: **169 JavaScript/JSON + 9 Python syntax compilations PASS**.
+- `git diff --check`: PASS.
+- Focused Scout acceptance/SDK/integrity/UI/authority/budget/cadence checks: PASS.
 
-Only static verification is authorized by the latest owner-pasted AGENTS guidance.
-The later local repository file has broader historical permission; it does not
-override that owner restriction. Dev ChatGPT discussion was explicitly requested.
+These are local Windows results for the completion tree. Hosted CI is reported
+separately for its exact head; local PASS does not imply hosted PASS.
 
-- `npm run build`: PASS — 165 JavaScript/JSON files and 9 Python files;
-  syntax and compilation only.
-- `node --check` on changed implementation/test modules.
-- `git diff --check` before commit.
-- Static architecture/red-team review by root, delegated code reviewers and dev.
+The first executable pass exposed three fixture issues, fixed without weakening
+production semantics: a recovered history page is made explicitly due instead of
+depending on one-second wall time; two lean service fakes declare Scout disabled;
+an older Browser blocked test remains serialized without nesting a second SQLite
+transaction around the fenced helper's own transaction.
 
-**Acceptance/kill tests were authored, not executed. No regression PASS, live
-validation, model-quality verdict or merge-ready claim is made.** Previously
-reported Workspace gates belong to their old exact head, not this implementation.
+New operator tests exercise escaping and permalink allowlisting, read-only load,
+model-off requests, unchecked historical-gap approval, exact PTS/fingerprint,
+manual rationale, approved assessment admission, revision binding and a real
+authenticated server on an ephemeral port with Telegram/models disabled.
 
-## Authored verification cases
+## Independent review and fixes
 
-- `scout-acceptance.test.mjs`: explicit search/audit authority, bounded catalogue,
-  no source/checkpoint/CRM effects from history, topic isolation/sample reuse,
-  revoke during await, read cursor/restart/backoff, inaccessible != empty,
-  invalid page cursor, edit/delete freshness and model-off boundary.
-- `scout-integrity-kill.test.mjs`: shared account FLOOD_WAIT across restart,
-  monitor reservation/global/per-source caps with positive reads, fair durable
-  monitor rotation, source-ID mapping/equal-timestamp edit/delete fence,
-  transitive opaque ancestry, whole-checkpoint catch-up CAS and immutable gap
-  acknowledgement across restart, retired reconciliation and integrity latch,
-  fake-only valid model evidence versus fabricated references.
-- `scout-sdk.test.mjs`: pinned SDK bridge and real existing reader wiring, using
-  fake transport responses only, including revoke between native page validation
-  and durable difference commit. No credentials or external IO are needed.
-- `workspace-transfer.test.mjs`: schema-11 grant/job/receipt sanitation and
-  historical schema-9/10 catalogue compatibility.
-- Historical export fixture constructors exclude later Scout tables. Frozen
-  Router/Projection/worker/old migration assets remain unchanged. Store and
-  MTProto channel blob pins change intentionally for additive tables/recovery
-  and gated read integration; semantic assertions remain present.
+Dev ChatGPT reviewed published `2499347` without changing the branch. Root
+confirmed and resolved its three concrete findings:
 
-## Static findings closed before handoff
+1. **Audit spending all source capacity:** durable `audit_sources` reserves
+   monitor capacity within the existing total per-source hard cap. Global
+   `requests`/`audit_requests` remain independent. Interleaving/restart preserve
+   both caps; legacy attribution is conservative and malformed state fails closed.
+   A source cap of one explicitly leaves zero audit capacity.
+2. **Fixed cadence incompatible with 60s freshness tolerance:** polling now
+   targets `min(120s, effective maxLagSeconds / 2)`. This is a nominal attempt
+   cadence, not an SLA; budget waits never advance source confirmation.
+3. **Topic grants shadowing one another:** a second campaign's monitor grant for
+   the same account/channel is refused before grant/network effects.
+   Legacy duplicate authority is withheld after restart, without a first winner
+   or silent rewrite. Candidate account/campaign must match the grant. Operator
+   currentness compares the exact grant policy. Static authority is not overridden.
 
-1. Expired-but-alive owner split-brain and stale public/private callbacks: separate
-   prerequisite commits, without weakening single-owner resource boundaries.
-2. Bare runId piggyback without exact ticket: prerequisite command guard.
-3. Audit-as-ingestion/coverage confusion: separate immutable historical samples,
-   native reader establishes its own baseline and difference proofs.
-4. Topic/username grant leakage: campaign revisions plus account/channel identity;
-   native locator mismatch is refused before history/monitor publication.
-5. Edit during history await hidden by finished_at, and raw/namespaced message ID
-   mismatch: source event fence captured before first RPC and explicit ID mapping.
-6. Opaque grandparent leaking via an otherwise normal reply: transitive ancestry
-   checks without poisoning unrelated messages by the same author.
-7. Empty/invalid RPC payload becoming “empty chat,” and all-opaque history taking
-   unlimited pages: structural page proof, monotonic cursor and native-row bound.
-8. Scout-only FLOOD_WAIT/independent budgets starving existing sources: shared
-   durable account gate, monitor reservation and bounded fair rotations.
-9. StringSession restart losing access hashes: re-resolve observed public locator
-   against admitted native identity; no invented hash/dialog enumeration.
-10. Re-admission hash changes leaving an old reader captured against old authority:
-    versioned reader identity, exact acknowledged catch-up and no CURRENT reuse.
-11. Corrupt checkpoint preventing revocation/poisoning healthy starts: revocation
-    commits independently of repair, registry quarantines per-source failures.
-12. Late model result/receipt failure and accidental inference retry: grant/process/
-    packet revalidation, persistence latch and explicit new model request.
-13. Same-PTS checkpoint change after an owner saw it: whole-checkpoint CAS and
-    immutable historical-gap acknowledgement; stale confirmation cannot grant.
-14. Revocation after native read validation but before queued durable commit:
-    the reader checks its exact captured policy without waiting for registry
-    retirement; retired Scout reconciliation cannot persist state either.
-15. Monitoring consuming the audit allowance before topic changes: an independent
-    durable audit/search counter preserves its allocation while the shared total
-    still enforces the global ceiling; an interleaving/restart case is authored.
+History reuse between campaigns remains supported. To transfer monitoring, revoke
+the earlier grant and explicitly acknowledge the existing checkpoint for the new
+one. PTS and the integrity latch survive. No aggregation or fake fresh cutover
+was added. Healthy neighboring sources survive conflicting/cross-campaign records.
 
-These are static findings and authored failure cases, not executed mutation proof.
+## Executable semantic red-team
 
-## Remaining risks / release gate
+Seven original mutants were killed in a detached worktree with a passing baseline.
+Each failed the intended semantic assertion; production bytes were restored:
 
-Execute the authored tests and full `npm test`, `npm run test:credentials`, build
-and diff gate only after owner lifts the restriction. Then independently red-team
-the layer, including delayed callbacks, import/restart, corrupt records, source
-revoke/regrant and account-level throttling. Test real SDK username resolution,
-joined membership, rate limits and reader wiring in an explicitly authorized
-bounded read-only pilot before enabling long-running monitoring.
+| Weakened invariant | Observed kill |
+| --- | --- |
+| Public reader captured policy | Retired reader remained owner after successor grant |
+| Whole-checkpoint CAS at unchanged PTS | Stale acknowledgement accepted |
+| SQLite immutable grant trigger | Historical catch-up PTS could change |
+| Independent global audit accounting | Extra audit reached adapter |
+| Source event ID fence | Equal-timestamp revision failed to stale sample |
+| Transitive opaque ancestry | Descendant re-entered semantic evidence |
+| Post-await audit authority | Expired held RPC returned sample_page instead of withheld |
 
-Search recall is unknown. Native community titles/users are not people-quality
-signals. History is non-atomic and unmonitored edits/deletes can escape the local
-event fence. Numeric peers without a native cache/public locator may be unavailable.
-No fresh-cutover replacement of an existing checkpoint is provided; explicit
-historical catch-up is required. A hanging RPC cannot be remotely cancelled by a
-JavaScript deadline; late results are withheld, not magically undone. Private SDK
-reads/authentication and SDK internals are not a hard wire-wide request quota.
-Schema 011 execution/migration upgrade, operator UI behavior and functional tests
-remain unverified until their authorized runtime gate.
+The held-history expiry case is permanent. It expires authority only after the
+RPC starts, keeps process ownership valid and proves no content/cursor advance;
+a revoke command staling the job cannot produce a false positive.
 
-Durable history capacities are hard stops, not a retention redesign. Availability,
-model quality and useful opportunity density need pilot evidence. No contact,
-causal-credit or sending authority is inferred from an assessment.
+Four additional detached mutants were also killed: weakening the per-source
+audit reserve, restoring fixed 120s cadence, disabling duplicate-source admission
+rejection and disabling legacy conflict withholding. Restored authority tests
+passed 5/5 with healthy-neighbor and static-reload controls. In total: **11/11
+targeted mutants killed**. These prove particular guards are exercised, not that
+all possible failure paths have been exhausted.
+
+## Authorized live smoke, 2026-10-02
+
+**Telegram:** existing current-workspace protected StringSession/API configuration,
+temporary partner/database and an explicit audit grant. One `contacts.Search`
+query `фитнес` (limit 5), one native public candidate and one `GetHistory` page
+capped at 20 rows. Account identity was verified. No joins, dialogs, private
+handlers, admission/monitor grant, model or sender was installed.
+
+- 1 search + 1 history request; no other Scout RPCs.
+- 20 observed messages: 1 supported text, 19 opaque/unsupported; three observed
+  days, zero visible author IDs/replies. These are bounded sample counts only.
+- `sample_page`, collecting, coverage unverified, continuous coverage false.
+- Zero persons/messages/drafts/contact permissions/delivery attempts and zero
+  source.message events. Audit history did not become business ingestion.
+- Client disconnected, process ownership released and temporary sample DB removed.
+
+This proves bounded SDK search/history acquisition, not useful community quality
+or monitoring CURRENT. The older configured numeric source has no recoverable
+public locator in current metadata; StringSession stores no entity/hash cache.
+No locator/hash was guessed and dialogs were not enumerated.
+
+**Gemini, separate synthetic-data smoke:** one explicitly queued Scout assessment
+through the installed HermesAdapter and Control Plane using an isolated sealed
+synthetic source sample and the owner's existing loopback CLIProxy. Advertised
+model `gemini-3.7-flash-high`:
+
+- Durable assessment_proposed; exact evaluator/sample digest and valid cited ref.
+- Completed public source_assessment ticket and run; no tools.
+- 2148 input / 129 output tokens; cost **unknown**, not zero.
+- No change to person/draft/delivery/contact/grant/Scout-read counts.
+- Recommendation unsuitable. Envelope validation did not approve the assessment
+  or create monitoring permission.
+
+These are two separate smoke runs. Live Telegram message content was not sent to
+Gemini; no real-source selection-quality proof is claimed. Hermes permits one
+empty-response retry, so a no-tool run has at most two provider iterations, not
+a promised one-wire-call ceiling. CLIProxy was started for the smoke and stopped.
+Persistent configuration and credentials were unchanged. Ignored local receipts
+contain aggregate/synthetic data only; this document tracks no keys or live content.
+
+## Remaining limits and integration
+
+- Search recall and useful community/opportunity density remain unknown. No
+  claim that this smoke found the best sources or validated a 5–10-source pilot.
+- History is non-atomic. Unobserved edits/deletes may escape the local event fence;
+  finished_at does not mean fresh-through or continuous coverage.
+- Numeric peers without cache/public locator may be unavailable. Ongoing monitoring
+  requires an already joined native source and separate explicit owner grant.
+- Budgets, fair scheduler turns and RPC delays can cause honest stale state.
+  Deadlines do not remotely cancel Telegram calls. SDK/private authentication is
+  outside a hard wire-wide quota. Hard history caps are not retention redesign.
+- Model smoke proves contract/runtime/authority plumbing, not decision quality.
+  Unknown provider cost remains conservatively recorded.
+- PR #27 and the ownership prerequisite must be integrated deliberately. Scout
+  test results do not verify an unmerged canonical main. No main merge or
+  outbound/contact authority is included in this handoff.
+
+The next product gate is an explicitly admitted read-only portfolio pilot with
+owner-visible evidence and lag. Keep search/audit, monitor, model requests, contact
+and send as separate authorities.

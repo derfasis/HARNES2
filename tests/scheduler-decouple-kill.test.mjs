@@ -649,7 +649,9 @@ test('blocked is not retrying: a blocked source still refuses to be read', async
   const sourceId = 'browser:example';
   const ok = () => workingReader(service, sourceId);
   await pollBrowserSource(service, sourceId, ok());
-  await service.exclusive(() => service.store.transaction(() => markBrowserSourceBlocked(service, sourceId, 'BROWSER_POLICY_INVALID')));
+  // The ownership-fenced helper owns its failure transaction; keep the caller
+  // serialized without nesting a second SQLite BEGIN inside that transaction.
+  await service.exclusive(() => markBrowserSourceBlocked(service, sourceId, 'BROWSER_POLICY_INVALID'));
   assert.equal(browserCheckpoint(service, sourceId).phase, 'blocked');
   await assert.rejects(() => pollBrowserSource(service, sourceId, ok()),
     (e) => e.code === 'BROWSER_SOURCE_BLOCKED', 'blocked forbids the next attempt, retrying does not');

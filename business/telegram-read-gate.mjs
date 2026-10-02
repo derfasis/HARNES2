@@ -3,10 +3,14 @@ const CHANNEL='telegram-account-read-v1';
 const key=(service,account)=>`${service.config.partnerId}:${account}`;
 function record(service,account){
  const raw=service.store.get('SELECT cursor FROM channel_offsets WHERE channel=? AND account_id=?',CHANNEL,key(service,account));
- if(!raw)return {day:now().slice(0,10),requests:0,audit_requests:0,sources:{},retry_at:null};
+ if(!raw)return {day:now().slice(0,10),requests:0,audit_requests:0,sources:{},audit_sources:{},retry_at:null};
  let state;try{state=JSON.parse(raw.cursor);}catch{throw new AppError('Telegram read budget is corrupt',409,'SCOUT_READ_GATE_INVALID');}
  if(!state||typeof state!=='object'||Array.isArray(state)||!/^\d{4}-\d{2}-\d{2}$/.test(state.day)||!Number.isInteger(state.requests)||state.requests<0||!Number.isInteger(state.audit_requests)||state.audit_requests<0||state.audit_requests>state.requests||!state.sources||typeof state.sources!=='object'||Array.isArray(state.sources)||Object.keys(state.sources).length>1000||Object.values(state.sources).some(n=>!Number.isInteger(n)||n<0)||(state.retry_at!==null&&(!Number.isFinite(Date.parse(state.retry_at))||typeof state.retry_at!=='string')))throw new AppError('Telegram read budget is corrupt',409,'SCOUT_READ_GATE_INVALID');
- if(state.day!==now().slice(0,10))state={day:now().slice(0,10),requests:0,audit_requests:0,sources:{},retry_at:state.retry_at};
+ if(Object.hasOwn(state,'audit_sources')&&(!state.audit_sources||typeof state.audit_sources!=='object'||Array.isArray(state.audit_sources)||Object.keys(state.audit_sources).length>1000||Object.entries(state.audit_sources).some(([source,n])=>!Number.isInteger(n)||n<0||n>(state.sources[source]??0))))throw new AppError('Telegram read budget is corrupt',409,'SCOUT_READ_GATE_INVALID');
+ // Old envelopes cannot distinguish monitor from audit use. Conservatively charge
+ // every old per-source read against the new audit allowance until day rollover.
+ if(!Object.hasOwn(state,'audit_sources'))state={...state,audit_sources:{...state.sources}};
+ if(state.day!==now().slice(0,10))state={day:now().slice(0,10),requests:0,audit_requests:0,sources:{},audit_sources:{},retry_at:state.retry_at};
  return state;
 }
 function save(service,account,state){service.store.run('INSERT INTO channel_offsets(channel,account_id,cursor) VALUES(?,?,?) ON CONFLICT(channel,account_id) DO UPDATE SET cursor=excluded.cursor',CHANNEL,key(service,account),JSON.stringify(state));}
@@ -18,7 +22,8 @@ export function telegramReadState(service,account,{sourceId=null,priority='monit
  if(state.retry_at&&Date.parse(state.retry_at)>Date.now())return {...state,ready:false,reason:'SCOUT_ACCOUNT_BACKOFF'};
  // Search/audit can use 20%; monitoring retains the remaining account capacity.
  const reserve=Math.max(1,Math.ceil(cfg.maxRequestsPerDay*.8)),auditLimit=Math.max(0,cfg.maxRequestsPerDay-reserve);
- if(state.requests>=cfg.maxRequestsPerDay||priority!=='monitor'&&state.audit_requests>=auditLimit||sourceId&&(state.sources[sourceId]??0)>=cfg.maxRequestsPerSourceDay)return {...state,ready:false,reason:'SCOUT_READ_BUDGET',retry_at:new Date(Date.parse(`${state.day}T00:00:00.000Z`)+86400000).toISOString()};
+ const sourceReserve=Math.max(1,Math.ceil(cfg.maxRequestsPerSourceDay*.8)),auditSourceLimit=Math.max(0,cfg.maxRequestsPerSourceDay-sourceReserve);
+ if(state.requests>=cfg.maxRequestsPerDay||priority!=='monitor'&&state.audit_requests>=auditLimit||sourceId&&((state.sources[sourceId]??0)>=cfg.maxRequestsPerSourceDay||priority!=='monitor'&&(state.audit_sources[sourceId]??0)>=auditSourceLimit))return {...state,ready:false,reason:'SCOUT_READ_BUDGET',retry_at:new Date(Date.parse(`${state.day}T00:00:00.000Z`)+86400000).toISOString()};
  return {...state,ready:true};
 }
 // Small authority/resource gate, not a second protocol/queue engine. One shared account
@@ -42,7 +47,7 @@ export function telegramRead(service,{accountId,sourceId=null,priority='monitor'
          await service.exclusive(()=>service.store.transaction(()=>{
            if(service.telegramAccountId!==accountId)throw new AppError('Telegram account changed',409,'SCOUT_ACCOUNT_MISMATCH');
            const state=telegramReadState(service,accountId,job);if(!state.ready)throw new AppError(state.reason,429,state.reason);
-           state.requests++;if(job.priority!=='monitor')state.audit_requests++;if(job.sourceId)state.sources[job.sourceId]=(state.sources[job.sourceId]??0)+1;
+           state.requests++;if(job.priority!=='monitor')state.audit_requests++;if(job.sourceId){state.sources[job.sourceId]=(state.sources[job.sourceId]??0)+1;if(job.priority!=='monitor')state.audit_sources[job.sourceId]=(state.audit_sources[job.sourceId]??0)+1;}
            delete state.ready;save(service,accountId,state);
          }));
          if(service.telegramAccountId!==accountId||!service.control.processCurrent()||service.control.stopped)throw new AppError('Read owner retired',409,'SCOUT_OWNERSHIP_UNAVAILABLE');

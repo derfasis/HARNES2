@@ -153,7 +153,7 @@ test('the scheduler is told what came up even when a reader does not', async () 
   // list it was constructed with, so a failed reader and a healthy source looked the same.
   const { MtprotoTelegramChannel } = await import('../business/channels/telegram-mtproto.mjs');
   const published = [];
-  const service = { config: { opportunity: { telegramSources: [policy(sourceId)] } } };
+  const service = { config: { opportunity: { telegramSources: [policy(sourceId)] } }, scout: { enabled: false } };
   const channel = new MtprotoTelegramChannel(service);
   channel.accountId = '999';
   channel.client = { connected: true, invoke: async () => ({}), addEventHandler: () => {}, removeEventHandler: () => {}, getEntity: async () => {
@@ -213,7 +213,7 @@ test('one dead source does not cost the live ones their chance to start', async 
 test('a source belonging to another account is named, and does not throw', async () => {
   const { MtprotoTelegramChannel } = await import('../business/channels/telegram-mtproto.mjs');
   const published = [];
-  const service = { config: { opportunity: { telegramSources: [policy(sourceId, '999')] } } };
+  const service = { config: { opportunity: { telegramSources: [policy(sourceId, '999')] } }, scout: { enabled: false } };
   const channel = new MtprotoTelegramChannel(service);
   channel.accountId = '111';
   channel.client = { connected: true, invoke: async () => ({}), addEventHandler: () => {}, removeEventHandler: () => {}, getEntity: async () => { throw new Error('must not be reached'); } };

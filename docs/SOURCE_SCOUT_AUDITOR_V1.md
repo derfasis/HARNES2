@@ -34,6 +34,11 @@ Changing a campaign's topic increments its revision and retires its audit/monito
 grants, pending work and old assessments. Creating another campaign keeps both
 topics independent. Raw sealed samples can be reused for the same account/native
 channel under the new campaign's audit authority; semantic assessments cannot.
+There is one active monitor authority per account/channel in v1. A second topic
+cannot silently override or be shadowed by that source's existing grant
+(`SCOUT_SOURCE_ALREADY_MONITORED`). Revoke the earlier grant before transferring
+monitoring; an existing checkpoint still requires exact historical acknowledgement.
+Conflicting legacy grants are withheld, not combined or silently repaired.
 
 ## Reused components
 
@@ -96,8 +101,11 @@ follows on the bounded reconciliation pass. Missing reader != successful monitor
 These are distinct resources:
 
 - Account-wide logical SDK read admissions: default 10,000/day UTC; at most
-  1,000 per source. Search/audit may use the first 20% of global capacity, retaining
-  80% for monitor work. Pending reads prioritize monitor, audit, then search.
+  1,000 per source. Search/audit may use at most 20% of both account and per-source
+  capacity, retaining 80% for monitor work. Total admissions remain a hard cap.
+  Independent audit counters mean monitor reads do not consume audit allocation.
+  Pending reads prioritize monitor, audit, then search. Very small configured caps
+  can leave zero audit capacity because the monitor reservation rounds upward.
 - Audit content bound: default 500 native rows, including rows the semantic mapper
   omits. MessageEmpty cannot cause an unlimited backfill. Candidate capacity is 30
   by default. Campaign/job/grant history also has explicit hard limits.
@@ -112,9 +120,16 @@ private SDK reads are not a wire-wide quota meter. SDK convenience resolution ma
 perform more than one wire call; audit reservations are conservative. This is not
 a financial/provider billing guarantee.
 
+Old durable read counters without per-source audit attribution are conservatively
+charged to audit use until the next UTC day; their total use and backoff remain.
+An upgrade creates no additional read capacity and does not charge those reads twice.
+
 With Scout enabled, the existing monitor loop selects at most two Telegram
-sources per pass with a persisted 120-second cadence; bootstrap starts at most
-two readers per pass and also persists its fair cursor. Browser cadence is kept.
+sources per pass. Its persisted nominal cadence is `min(120s, maxLagSeconds / 2)`
+from the effective policy. Bootstrap starts at most two readers per pass and also
+persists its fair cursor. Browser cadence is kept. `maxLagSeconds` is the existing
+freshness tolerance, not a promise of delivery or monitoring availability. Queue,
+RPC, scheduler and budget delays can exceed the target; no confirmation is invented.
 The UI reports account request usage, retry deadline and queued work. Existing
 source checkpoints expose confirmed time/currentness; lag exceeding freshness
 withholds downstream reasoning. Exhausting a budget never means “nothing happened.”
@@ -182,7 +197,10 @@ required. Historical schema 2–10 catalogues exclude Scout tables explicitly.
 
 ## Operator setup and API
 
-No live configuration or credentials were changed by this implementation.
+No persistent live configuration or credentials were changed by this implementation.
+Authorized verification used temporary isolated state for one bounded Telegram
+search/history read and one synthetic-data Gemini assessment. These smoke runs do
+not enable ongoing monitoring or model billing; see the verification handoff.
 Defaults: Scout, its model, runtime, Telegram and Control Plane remain disabled;
 liveSending remains false. Use the project's existing protected MTProto account
 setup; do not put a session/API key into tracked files.

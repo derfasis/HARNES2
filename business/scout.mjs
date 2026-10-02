@@ -88,6 +88,9 @@ export class SourceScout {
      const candidate=this.candidate(p.candidate_id,c.id),sample=this.sample(p.sample_id,candidate);
      check(candidate.joined===1,'SCOUT_MEMBERSHIP_REQUIRED');check(candidate.account_id===this.account(),'SCOUT_ACCOUNT_MISMATCH');
      check(!(this.service.config.opportunity?.telegramSources??[]).some(x=>x.sourceId===sample.source_ref),'SCOUT_SOURCE_STATIC_AUTHORITY');
+     // One native source has one monitor authority epoch. A second topic cannot
+     // silently override (or be shadowed by) another topic's freshness policy.
+     check(!this.db.get("SELECT g.id FROM scout_grants g JOIN scout_candidates s ON s.id=g.candidate_id JOIN scout_campaigns p ON p.id=g.campaign_id WHERE p.partner_id=? AND g.kind='monitor' AND g.status='active' AND g.expires_at>? AND g.account_id=? AND s.channel_id=? AND NOT (g.campaign_id=? AND g.candidate_id=?) LIMIT 1",this.partnerId,now(),candidate.account_id,candidate.channel_id,c.id,candidate.id),'SCOUT_SOURCE_ALREADY_MONITORED');
      check(sample.status==='sealed'&&JSON.parse(sample.messages_json).some(m=>!m.unsupported&&typeof m.text==='string'&&m.text.trim()),'SCOUT_SAMPLE_NOT_USABLE');
      this.sampleFresh(sample);
      if(p.assessment_id){const a=this.assessment(p.assessment_id,c);check(a.status==='approved'&&a.sample_id===sample.id&&a.candidate_id===candidate.id,'SCOUT_ASSESSMENT_REVIEW_REQUIRED');}
@@ -170,10 +173,11 @@ export class SourceScout {
  monitorPolicies(){
    if(!this.enabled||!this.service.control.processOwned||this.service.control.stopped||!this.service.control.processCurrent())return [];
    const account=this.service.telegramAccountId;if(!account)return [];
-   const rows=this.db.all("SELECT g.*,c.channel_id,c.joined,p.status campaign_status,p.revision current_revision FROM scout_grants g JOIN scout_candidates c ON c.id=g.candidate_id JOIN scout_campaigns p ON p.id=g.campaign_id WHERE p.partner_id=? AND g.kind='monitor' AND g.status='active' AND g.account_id=? AND g.expires_at>? ORDER BY g.created_at,g.id LIMIT 100",this.partnerId,account,now());
+   const rows=this.db.all("SELECT g.*,c.channel_id,COUNT(*) OVER (PARTITION BY g.account_id,c.channel_id) authority_count FROM scout_grants g JOIN scout_candidates c ON c.id=g.candidate_id AND c.campaign_id=g.campaign_id AND c.account_id=g.account_id JOIN scout_campaigns p ON p.id=g.campaign_id WHERE p.partner_id=? AND g.kind='monitor' AND g.status='active' AND g.account_id=? AND g.expires_at>? AND p.status='active' AND p.revision=g.campaign_revision AND c.joined=1 ORDER BY g.created_at,g.id LIMIT 100",this.partnerId,account,now());
    const policies=new Map();
-   for(const g of rows){if(g.campaign_status!=='active'||g.campaign_revision!==g.current_revision||g.joined!==1)continue;
+   for(const g of rows){if(g.authority_count!==1)continue;
      const sourceId=`telegram:channel:${g.channel_id}`;if(policies.has(sourceId))continue;
+     if((this.service.config.opportunity?.telegramSources??[]).some(p=>p.sourceId===sourceId))continue;
      policies.set(sourceId,this.monitorPolicy(g));}
    return [...policies.values()];
  }
@@ -221,7 +225,7 @@ export class SourceScout {
      catch(e){if(!(e instanceof AppError)&&!(e instanceof SyntaxError))throw e;reason=e.code??'SCOUT_RECORD_INVALID';}
      const monitor=this.db.get("SELECT * FROM scout_grants WHERE campaign_id=? AND candidate_id=? AND kind='monitor' ORDER BY created_at DESC,rowid DESC LIMIT 1",c.id,candidate.id);
      const checkpoint=sourceCheckpoint(this.service,`telegram:channel:${candidate.channel_id}`);
-     return {...candidate,origin:JSON.parse(candidate.origin_json),sample,assessment,reason,checkpoint,checkpoint_fingerprint:checkpoint?digest(checkpoint):null,monitor_grant:monitor?{...monitor,current:this.grantCurrent(monitor,c,'monitor')&&this.monitorPolicies().some(p=>p.sourceId===`telegram:channel:${candidate.channel_id}`),checkpoint}:null};
+     return {...candidate,origin:JSON.parse(candidate.origin_json),sample,assessment,reason,checkpoint,checkpoint_fingerprint:checkpoint?digest(checkpoint):null,monitor_grant:monitor?{...monitor,current:this.grantCurrent(monitor,c,'monitor')&&this.monitorPolicies().some(p=>digest(p)===digest(this.monitorPolicy({...monitor,channel_id:candidate.channel_id}))),checkpoint}:null};
    });
    const grant=this.db.get("SELECT * FROM scout_grants WHERE campaign_id=? AND kind='audit' ORDER BY created_at DESC,rowid DESC LIMIT 1",c.id);
    return {...c,config:JSON.parse(c.config_json),authority:{scout:grant?{...grant,current:this.grantCurrent(grant,c,'audit')}:null},candidates,

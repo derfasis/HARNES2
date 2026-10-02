@@ -122,6 +122,9 @@ test('partial history survives restart with its exact grant, cursor, request bud
   const recovered=h.store.get('SELECT * FROM scout_jobs WHERE id=?',job.id);
   assert.equal(recovered.status,'queued');assert.equal(recovered.grant_id,grantId);assert.equal(recovered.sample_id,sampleBefore.id);
   assert.equal(JSON.parse(recovered.cursor_json).before_id,50);
+  // Make the recovered page due; its original one-second pagination cadence
+  // must not turn this backoff assertion into a wall-clock timing dependency.
+  h.store.run('UPDATE scout_jobs SET next_at=? WHERE id=?',new Date(Date.now()-1000).toISOString(),job.id);
   await h.runtime.tick();
   const backedOff=h.store.get('SELECT * FROM scout_jobs WHERE id=?',job.id);
   assert.equal(backedOff.status,'queued');assert.equal(backedOff.reason,'SCOUT_ACCOUNT_BACKOFF');
