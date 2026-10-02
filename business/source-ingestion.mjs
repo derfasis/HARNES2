@@ -199,9 +199,9 @@ export function automaticBoundary(service) {
   // Two different promises used to be checked as one. Reading a permitted chat is not sending, and
   // the read-only reader is the only way real material ever reaches this pipeline, so requiring
   // telegram.enabled === false made ingestion unreachable from the reader that feeds it. What must
-  // stay off is unchanged and is checked independently below: interactive agent runs, and any
-  // live sending. A reader may run; it still cannot write to Telegram.
-  check(service.config.runtime.enabled === false, 'READ_ONLY_BOUNDARY_REQUIRED');
+  // stay off is any live sending. Private reasoning can coexist only behind Control Plane
+  // admission. A reader may run; it still cannot write to Telegram.
+  check(service.config.runtime.enabled === false || service.config.controlPlane?.enabled === true, 'READ_ONLY_BOUNDARY_REQUIRED');
   check(service.config.telegram.liveSending === false, 'READ_ONLY_BOUNDARY_REQUIRED');
 }
 function allowed(service, sourceId) {

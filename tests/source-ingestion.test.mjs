@@ -282,5 +282,5 @@ test('the shipped config loader agrees with the boundary about a read-only reade
   assert.doesNotThrow(() => automaticBoundary(legal));
   assert.doesNotThrow(() => checkAutomaticPrerequisite(legal.config));
   assert.throws(() => checkAutomaticPrerequisite(withTelegram(true, true)), /live sending off/);
-  assert.throws(() => checkAutomaticPrerequisite({ ...withTelegram(true, false), runtime: { ...base.runtime, enabled: true } }), /runtime disabled/);
+  assert.throws(() => checkAutomaticPrerequisite({ ...withTelegram(true, false), runtime: { ...base.runtime, enabled: true } }), /Control Plane admission/);
 });

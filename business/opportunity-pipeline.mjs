@@ -28,6 +28,7 @@ function complete(service, run) {
   if (captured.freshness.reasons.includes('SOURCE_TRANSPORT_NOT_CURRENT'))
     return { disposition: 'waiting_source', reasons: captured.freshness.reasons };
   if (!captured.freshness.fresh) return disposition(service, run, 'stale', { reasons: captured.freshness.reasons });
+  if (service.control && !service.control.canApply(run.id)) return disposition(service, run, 'control_withheld');
   let output;
   try { output = parseOpportunityOutput(result.final_response, captured.context); }
   catch { return disposition(service, run, 'invalid_model_output'); }
@@ -71,7 +72,9 @@ function prepare(service) {
       if (!ready.ready) return { result: { disposition: 'waiting_model', missing: ready.missing } };
       const cfg = service.config.runtime;
       const usage = service.store.get(`SELECT COUNT(*) AS n,COALESCE(SUM(estimated_cost_usd),0) AS cost,
-        SUM(CASE WHEN cost_status='unknown' THEN 1 ELSE 0 END) AS unknown FROM runs WHERE created_at>=?`, now().slice(0,10));
+        SUM(CASE WHEN cost_status='unknown' AND (status NOT IN ('running','analyzed') OR NOT EXISTS
+          (SELECT 1 FROM control_tickets t WHERE t.run_id=runs.id AND t.status IN ('reserved','running'))) THEN 1 ELSE 0 END) AS unknown
+        FROM runs WHERE created_at>=?`, now().slice(0,10));
       if (usage.n >= cfg.maxRunsPerDay || cfg.dailyBudgetUsd !== null && (usage.unknown > 0 || usage.cost >= cfg.dailyBudgetUsd))
         return { result: { disposition: 'budget_blocked' } };
       capture = captureOpportunity(service, { snapshot: state.snapshot, ...(state.conversation_id ? { conversation_id: state.conversation_id } : {}) }, state.source_state);
@@ -86,18 +89,21 @@ function prepare(service) {
     service.store.run(`INSERT INTO runs(id,partner_id,conversation_id,status,runtime,model,context_json,created_at)
       VALUES(?,?,?,?,?,?,?,?)`, runId, service.config.partnerId, null, 'running', RUNTIME, service.config.runtime.model,
     JSON.stringify({ source_event_id: eventId, capture_id: capture.capture_id, model_config: service.config.runtime }), now());
+    if (service.control) service.control.bindRun(runId);
     service.store.event(service.config.partnerId, null, 'opportunity.inference.started', 'system', { source_event_id: eventId, run_id: runId });
     return { run: service.store.get('SELECT * FROM runs WHERE id=?', runId), context: capture.context };
   }
   return { result: { disposition: waitingForSource ? 'waiting_source' : pending.length ? 'waiting_retry_or_running' : 'idle' } };
 }
-export async function processSourceOpportunity(service, runtime) {
+async function processSourceOpportunityInternal(service, runtime) {
   automaticBoundary(service);
   const prepared = await service.exclusive(() => service.store.transaction(() => prepare(service)));
   if (prepared.result) return prepared.result;
   let result;
+  let controlDenial = null;
   try { result = await runtime.decide(prepared.run, prepared.context); }
   catch (error) {
+    if (String(error?.code ?? '').startsWith('CONTROL_')) controlDenial = error.code;
     result = { completed: false, error: 'MODEL_FAILED',
       failure_cause: normalizeFailureCause(error?.failure_cause) };
   }
@@ -116,7 +122,7 @@ export async function processSourceOpportunity(service, runtime) {
       failure_cause: ok ? null : normalizeFailureCause(result?.failure_cause),
     };
     service.store.run(`UPDATE runs SET status=?,result_json=?,error=?,input_tokens=?,output_tokens=?,estimated_cost_usd=?,cost_status=?,finished_at=?
-      WHERE id=? AND status='running'`, ok ? 'analyzed' : 'failed', JSON.stringify(clean), ok ? null : 'MODEL_FAILED', input, output, cost, costStatus, now(), prepared.run.id);
+      WHERE id=? AND status='running'`, ok ? 'analyzed' : 'failed', JSON.stringify(clean), ok ? null : controlDenial ? 'CONTROL_RESULT_WITHHELD' : 'MODEL_FAILED', input, output, cost, costStatus, now(), prepared.run.id);
   }));
   } catch (error) {
     // A one-off persistence failure must not leave this live process waiting
@@ -127,11 +133,24 @@ export async function processSourceOpportunity(service, runtime) {
     }));
     throw error;
   }
-  if (!ok) return { disposition: 'model_failed' };
+  if (!ok) {
+    if (controlDenial) return service.exclusive(() => service.store.transaction(() =>
+      disposition(service, service.store.get('SELECT * FROM runs WHERE id=?', prepared.run.id), 'control_withheld')));
+    return { disposition: 'model_failed' };
+  }
   return service.exclusive(() => service.store.transaction(() => {
     automaticBoundary(service);
     const run = service.store.get('SELECT * FROM runs WHERE id=?', prepared.run.id);
     if (run.status !== 'analyzed') return { disposition: 'result_already_handled' };
     return complete(service, run);
   }));
+}
+
+export async function processSourceOpportunity(service, runtime) {
+  if (service.config.controlPlane?.enabled !== true) return processSourceOpportunityInternal(service, runtime);
+  try { return await service.control.run('public', 'opportunity', () => processSourceOpportunityInternal(service, runtime)); }
+  catch (error) {
+    if (String(error?.code ?? '').startsWith('CONTROL_')) return { disposition: 'control_withheld' };
+    throw error;
+  }
 }

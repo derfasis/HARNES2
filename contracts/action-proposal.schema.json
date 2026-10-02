@@ -3,10 +3,14 @@
   "type":"object","additionalProperties":false,
   "required":["capability_id","title","instructions","expected_result","due_at"],
   "properties":{
-    "capability_id":{"enum":["brief.publish_local.v1","owner_handoff.create.v1"]},
+    "capability_id":{"enum":["brief.publish_local.v1","owner_handoff.create.v1","material.export_local.v1"]},
     "title":{"type":"string","minLength":1,"maxLength":200,"pattern":"\\S"},
     "instructions":{"type":"string","minLength":1,"maxLength":2000,"pattern":"\\S"},
     "expected_result":{"type":"string","minLength":1,"maxLength":2000,"pattern":"\\S"},
-    "due_at":{"type":["string","null"],"maxLength":40}
+    "due_at":{"type":["string","null"],"maxLength":40},
+    "material":{"type":"object","additionalProperties":false,"required":["id","sha256"],"properties":{
+      "id":{"type":"string","minLength":1,"maxLength":100,"pattern":"\\S"},
+      "sha256":{"type":"string","pattern":"^[a-f0-9]{64}$"}
+    }}
   }
 }

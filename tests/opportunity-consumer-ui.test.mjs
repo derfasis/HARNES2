@@ -122,6 +122,10 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
   // discovery and runner system guidance are deliberately extended. Their new hashes
   // are pinned below; source/router/transport/identity/old migration pins stay unchanged.
   // Semantic engagement guards are exercised in engagement.test.mjs.
+  // Workspace v1 deliberately extends these three pins: additive durable tables/recovery,
+  // operation-scoped no-tool/private tickets, and loss-visible serial private intake.
+  // Semantic proofs: workspace-acceptance/control-kill/telegram-kill/transfer tests.
+  // All source/router/transport contracts, Hermes worker and old SQL pins stay frozen.
   const pinned = {
     "business/situation-router.mjs": "ef2a2b53f0cec4560920453c4ff5c1e3fd88df61",
     "contracts/situation-router.schema.json": "ee18ffd684545585c8868ebe424578774bd771a0",
@@ -153,13 +157,13 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // pre-release 008 receipt, only against the unchanged published 008 SQL.
     // All other applied-migration checks remain strict; 009 is additive.
     // Actual old database upgrade/import: outcome-transfer-kill.test.mjs.
-    "business/store.mjs": "d8ae9892e7d796fe1c3da13391824a641d743d25",
+    "business/store.mjs": "780ccb031937660492d906b0464c5e7aff17497b",
     "adapters/hermes/credentials.py": "2797bd89081eaf4a950178cec3d637015ee8f45f",
     "adapters/hermes/runner.py": "e631237829d9b7a4521799b4a19c4c500b33f5aa",
     // Deliberate v0 extension: existing worker, no-tool envelope tested in opportunity-runtime.test.mjs.
     // Retry-budget extension: decision envelope raises maxIterations 1->2 so the pinned
     // Hermes empty-response ladder can actually re-enter the loop after an empty response.
-    "business/runtime.mjs": "4ec5cbf6c587e1bae0382785a90d240c9fb1718e",
+    "business/runtime.mjs": "147e4e9e9ab29534e4e1e38e47eb4dff752b6b2c",
     // Outcome completion projects provider time and versions message-record
     // identities by partner. Delivery gates remain unchanged; real stub adapter
     // races and crash/receipt replay are in outcome-timing/redteam-kill tests.
@@ -174,7 +178,7 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // propagates: this publishes state, it does not swallow the fault. The only message that
     // leaves the channel is a code already shaped like one of ours. Behaviour is exercised by
     // tests/absent-source-readers.test.mjs.
-    "business/channels/telegram-mtproto.mjs": "e8127606f0d35e60a201a907dd94836fe9627c9c",
+    "business/channels/telegram-mtproto.mjs": "222a329d6efa26f21a19949c62bf2bb8bbcc0e35",
     "benchmarks/situation-router/README.md": "0da57bf3fcb53bbec5713f6a44c48654b16270b8",
     "benchmarks/situation-router/control-v1.json": "2c6265460c6ae6cc1de9b25fa978ba25d0e66236",
     "benchmarks/situation-router/synthetic/case-01-ignore.json": "f9fe79537ac036e32bbb547961901190b3f08007",
@@ -185,7 +189,9 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     "business/migrations/001-core.sql": "afe865d539a943df3fb576e87e454d90b81fad5e",
     "business/migrations/002-conversation-mode.sql": "69654df023b22db75269582b131a30f72ae885cc",
     "partner/behavioral_examples.md": "467282e6705e951f0376ae9cb712a6ebb57bab38",
-    "partner/capabilities.json": "54c7f7fd7c34862d0f418631e34cb6983d9ff580",
+    // Metadata correction: Browser v0 already implements an allowlisted read-only web reader.
+    // Its catalog entry grants no runtime, contact or write authority.
+    "partner/capabilities.json": "8815b597ecf9d0e14fbaa95a6520c89c4d5bfd31",
     "partner/identity.md": "d62383e15fde5fbb78dcff171d58aa6905f97dcb",
     "partner/knowledge/pm-international.json": "a9fe030d2ed9602149e82062eb904fea4c542a1b",
     "partner/profile.json": "4a66a8207b4227be2f688701d0f0b67cbd9b544b",

@@ -21,10 +21,18 @@ export class HermesAdapter {
   constructor(service, tokens) { this.service = service; this.tokens = tokens; this.children = new Map(); }
   decide(run, context) { automaticBoundary(this.service); return this.run(run, context, true); }
   async run(run, context, decision = false) {
-    if (decision) automaticBoundary(this.service);
-    else if (this.service.config.opportunity?.automatic) throw new Error('Agent runs are disabled in automatic review-only mode');
-    const config = this.service.config, token = decision ? null : randomBytes(32).toString('hex');
-    const scope = { kind: 'agent', runId: run.id, conversationId: run.conversation_id, engagementId: context.engagement?.id ?? null, expiresAt: Date.now() + (config.runtime.timeoutSeconds + 30) * 1000 };
+    const config = this.service.config, controlEnabled = config.controlPlane?.enabled === true || !!this.service.control?.ticket(run.id);
+    let ticket = null;
+    if (decision) {
+      automaticBoundary(this.service);
+      if (controlEnabled) ticket = this.service.control.require(run.id, { plane: ['public', 'work'] });
+    } else if (controlEnabled) {
+      if (config.runtime.enabled !== true) throw new Error('Ordinary agent runtime is disabled');
+      ticket = this.service.control.require(run.id, { plane: 'private' });
+    } else if (config.opportunity?.automatic) throw new Error('Agent runs are disabled in automatic review-only mode');
+    const token = decision ? null : randomBytes(32).toString('hex');
+    const scope = { kind: 'agent', runId: run.id, conversationId: run.conversation_id, engagementId: context.engagement?.id ?? null,
+      ...(ticket ? { controlTicketId: ticket.id } : {}), expiresAt: Date.now() + (config.runtime.timeoutSeconds + 30) * 1000 };
     const tools = decision ? [] : (await import('./tools.mjs')).toolDefinitions(scope);
     if (token) this.tokens.set(token, scope);
     const python = path.join(ROOT, '.venv', process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python');

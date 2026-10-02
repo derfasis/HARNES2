@@ -39,6 +39,13 @@ export class MtprotoTelegramChannel {
     this.peerEntities = new Map();
     this.sourceReaders = [];
     this.lastSourceError = null;
+    this.privateQueue = [];
+    this.privateQueueLimit = 256;
+    this.privatePending = 0;
+    this.privateDrain = null;
+    this.privateGap = null;
+    this.privateGapWrite = null;
+    this.privateHealth = null;
   }
 
   sessionString() {
@@ -68,7 +75,15 @@ export class MtprotoTelegramChannel {
       allowed_chats: cfg.allowedChatIds.length,
       account_id: this.service.telegramAccount(),
       last_event: this.lastEvent,
-      error: this.lastError
+      error: this.lastError,
+      private_intake: {
+        phase: this.privateGap ? 'gap' : this.privateHealth?.phase ?? 'catching_up',
+        coverage: 'unverified',
+        queued: this.privatePending,
+        processing: this.polling,
+        gap: this.privateGap ?? this.privateHealth?.gap ?? null,
+        last_message_at: this.privateHealth?.last_message_at ?? null
+      }
     };
   }
 
@@ -91,7 +106,8 @@ export class MtprotoTelegramChannel {
     const me = await this.client.getMe();
     this.accountId = String(me.id);
     this.service.setTelegramAccount(this.accountId);
-    this.client.addEventHandler(event => this.handleIncoming(event).catch(error => { this.lastError = error.message; }), new NewMessage({ incoming: true }));
+    this.initializePrivateIntake();
+    this.registerIncomingHandler();
     this.connected = true;
     this.lastError = null;
     // Read-only sources borrow this connection rather than opening their own: a second
@@ -148,8 +164,116 @@ export class MtprotoTelegramChannel {
     this.sourceReaders = [];
   }
 
+  privateAccountKey(account = this.accountId) {
+    return `${this.service.config.partnerId}:${account}`;
+  }
+
+  registerIncomingHandler(client = this.client) {
+    client.addEventHandler(event => {
+      try { this.enqueueIncoming(event); }
+      catch {
+        this.lastError = 'Не удалось принять входящее сообщение Telegram';
+        void this.latchPrivateGap('INBOUND_ADMISSION_FAILED');
+      }
+    }, new NewMessage({ incoming: true }));
+  }
+
+  privateHealthRow() {
+    if (!this.accountId) return null;
+    return this.service.store.get('SELECT cursor FROM channel_offsets WHERE channel=? AND account_id=?',
+      'telegram-private-intake-v1', this.privateAccountKey());
+  }
+
+  // Startup always re-enters an explicitly unverified state. We have no private-message history
+  // recovery protocol, so a persisted last message can never prove that the gap since it is closed.
+  initializePrivateIntake() {
+    if (!this.accountId) return;
+    const row = this.privateHealthRow();
+    let previous = {};
+    try { previous = row ? JSON.parse(row.cursor) : {}; } catch { /* Corrupt health is not coverage. */ }
+    this.privateGap = previous.gap ?? null;
+    this.privateHealth = {
+      version: 1,
+      partner_id: this.service.config.partnerId,
+      account_id: this.accountId,
+      phase: this.privateGap ? 'gap' : 'catching_up',
+      coverage: 'unverified',
+      gap: this.privateGap,
+      last_message_id: previous.last_message_id ?? null,
+      last_message_at: previous.last_message_at ?? null,
+      started_at: now()
+    };
+    this.service.store.run(`INSERT INTO channel_offsets(channel,account_id,cursor) VALUES(?,?,?)
+      ON CONFLICT(channel,account_id) DO UPDATE SET cursor=excluded.cursor`,
+      'telegram-private-intake-v1', this.privateAccountKey(), JSON.stringify(this.privateHealth));
+  }
+
+  enqueueIncoming(event) {
+    if (this.stopped || !this.connected) return;
+    // Fast filters do not await SDK methods and cannot race queue admission.
+    const message = event.message;
+    if (!message || message.out || !(event.isPrivate || message.isPrivate)) return;
+    const chatId = String(event.chatId ?? message.chatId ?? message.senderId ?? '');
+    const cfg = this.service.config.telegram;
+    if (!cfg.allowedChatIds.map(String).includes(chatId)) return;
+    const text = String(message.message ?? message.text ?? '').trim();
+    if (!text) return;
+    if (this.privatePending >= this.privateQueueLimit) {
+      this.lastError = 'Очередь входящих сообщений Telegram переполнена';
+      this.latchPrivateGap('QUEUE_OVERFLOW');
+      return;
+    }
+    this.privatePending++;
+    this.privateQueue.push(event);
+    this.kickPrivateQueue();
+  }
+
+  kickPrivateQueue() {
+    if (this.privateDrain) return;
+    this.privateDrain = this.processPrivateQueue().finally(() => {
+      this.privateDrain = null;
+      if (this.privateQueue.length && !this.stopped) this.kickPrivateQueue();
+    });
+  }
+
+  async processPrivateQueue() {
+    this.polling = true;
+    try {
+      while (this.privateQueue.length) {
+        const event = this.privateQueue.shift();
+        try { await this.handleIncoming(event); }
+        catch {
+          // Provider exceptions may contain message text or credentials. Persist only a fixed code.
+          await this.latchPrivateGap('INBOUND_PROCESSING_FAILED');
+          this.lastError = 'Не удалось сохранить входящее сообщение Telegram';
+        } finally { this.privatePending--; }
+      }
+    } finally { this.polling = false; }
+  }
+
+  async latchPrivateGap(code) {
+    const gap = this.privateGap ?? { code, at: now() };
+    this.privateGap = gap;
+    this.privateHealth = { ...(this.privateHealth ?? {}), version: 1,
+      partner_id: this.service.config.partnerId, account_id: this.accountId,
+      phase: 'gap', coverage: 'unverified', gap };
+    const write = this.service.exclusive(() => this.service.store.transaction(() => {
+        this.service.store.run(`INSERT INTO channel_offsets(channel,account_id,cursor) VALUES(?,?,?)
+          ON CONFLICT(channel,account_id) DO UPDATE SET cursor=excluded.cursor`,
+          'telegram-private-intake-v1', this.privateAccountKey(), JSON.stringify(this.privateHealth));
+      }));
+    this.privateGapWrite = write;
+    try {
+      await write;
+    } catch {
+      // The volatile latch remains visible even when the durable failure record cannot be written.
+      this.privateGap = gap;
+    } finally {
+      if (this.privateGapWrite === write) this.privateGapWrite = null;
+    }
+  }
+
   async handleIncoming(event) {
-    if (this.stopped || !this.connected || this.polling) return;
     const message = event.message;
     if (!message || message.out || !(event.isPrivate || message.isPrivate)) return;
     const chatId = String(event.chatId ?? message.chatId ?? message.senderId ?? '');
@@ -159,39 +283,61 @@ export class MtprotoTelegramChannel {
     if (!text) return;
     const occurredAt = telegramTimestamp(message.date);
 
-    this.polling = true;
     try {
-      try {
-        const peer = typeof message.getInputChat === 'function' ? await message.getInputChat() : null;
-        if (peer) this.peerEntities.set(chatId, peer);
-      } catch { /* The numeric ID remains available for the fallback lookup on send. */ }
-      const sender = typeof message.getSender === 'function' ? await message.getSender() : null;
-      const name = [sender?.firstName, sender?.lastName].filter(Boolean).join(' ') || chatId;
-      const account = this.service.telegramAccount();
-      let identity = this.service.store.get('SELECT * FROM channel_identities WHERE channel=? AND account_id=? AND external_id=?', 'telegram', account, chatId);
-      if (!identity) {
-        await this.service.command('person.create', {
-          name,
-          source: `Входящее MTProto-сообщение Telegram, chat ${chatId}`,
-          channel: 'telegram',
-          external_id: chatId,
-          account_id: account,
-          permission: `Ответ только на входящее сообщение Telegram ${message.id}; произвольная рассылка не разрешена`
-        }, `telegram-mtproto-person:${account}:${chatId}`, { kind: 'channel' });
-        identity = this.service.store.get('SELECT * FROM channel_identities WHERE channel=? AND account_id=? AND external_id=?', 'telegram', account, chatId);
-      }
-      const conversation = this.service.store.get('SELECT id FROM conversations WHERE channel_identity_id=?', identity.id);
-      await this.service.command('message.record', {
-        conversation_id: conversation.id,
-        text,
-        direction: 'in',
-        external_id: String(message.id),
-        source: `telegram:mtproto:${account}:${chatId}:${message.id}`,
-        ...(occurredAt ? { occurred_at: occurredAt, time_basis: 'source' } : {})
-      }, `telegram-mtproto-update:v2:${this.service.config.partnerId}:${account}:${chatId}:${message.id}`, { kind: 'channel' });
-      this.lastEvent = now();
-      this.lastError = null;
-    } finally { this.polling = false; }
+      const peer = typeof message.getInputChat === 'function' ? await message.getInputChat() : null;
+      if (peer) this.peerEntities.set(chatId, peer);
+    } catch { /* The numeric ID remains available for the fallback lookup on send. */ }
+    const sender = typeof message.getSender === 'function' ? await message.getSender() : null;
+    const name = [sender?.firstName, sender?.lastName].filter(Boolean).join(' ') || chatId;
+    const account = this.service.telegramAccount();
+    let identity = this.service.store.get('SELECT * FROM channel_identities WHERE channel=? AND account_id=? AND external_id=?', 'telegram', account, chatId);
+    if (!identity) {
+      await this.service.command('person.create', {
+        name,
+        source: `Входящее MTProto-сообщение Telegram, chat ${chatId}`,
+        channel: 'telegram',
+        external_id: chatId,
+        account_id: account,
+        permission: `Ответ только на входящее сообщение Telegram ${message.id}; произвольная рассылка не разрешена`
+      }, `telegram-mtproto-person:${account}:${chatId}`, { kind: 'channel' });
+      identity = this.service.store.get('SELECT * FROM channel_identities WHERE channel=? AND account_id=? AND external_id=?', 'telegram', account, chatId);
+    }
+    const conversation = this.service.store.get('SELECT id FROM conversations WHERE channel_identity_id=?', identity.id);
+    const payload = {
+      conversation_id: conversation.id,
+      text,
+      direction: 'in',
+      external_id: String(message.id),
+      source: `telegram:mtproto:${account}:${chatId}:${message.id}`,
+      ...(occurredAt ? { occurred_at: occurredAt, time_basis: 'source' } : {})
+    };
+    const requestId = `telegram-mtproto-update:v2:${this.service.config.partnerId}:${account}:${chatId}:${message.id}`;
+    const committedHealth = await this.service.exclusive(() => this.service.store.transaction(() => {
+      // `execute` is the synchronous command body. Running it inside the same exclusive SQLite
+      // transaction lets its message, audit and idempotency receipt commit with this intake cursor.
+      const result = this.service.execute('message.record', payload, requestId, { kind: 'channel' });
+      const previous = this.privateHealth ?? {};
+      const nextHealth = { ...previous, version: 1, partner_id: this.service.config.partnerId,
+        account_id: account, phase: this.privateGap ? 'gap' : 'catching_up', coverage: 'unverified',
+        gap: this.privateGap ?? previous.gap ?? null, last_message_id: String(message.id), last_message_at: now() };
+      this.service.store.run(`INSERT INTO channel_offsets(channel,account_id,cursor) VALUES(?,?,?)
+        ON CONFLICT(channel,account_id) DO UPDATE SET cursor=excluded.cursor`,
+        'telegram-private-intake-v1', this.privateAccountKey(account), JSON.stringify(nextHealth));
+      return { result, health: nextHealth };
+    }));
+    this.privateHealth = committedHealth.health;
+    this.lastEvent = now();
+    if (!this.privateGap) this.lastError = null;
+  }
+
+  async drain() {
+    while (this.privateDrain || this.privateQueue.length || this.privateGapWrite) {
+      const active = this.privateDrain;
+      if (active) await active;
+      else if (this.privateGapWrite) await this.privateGapWrite.catch(() => {});
+      else this.kickPrivateQueue();
+    }
+    return this.readiness().private_intake;
   }
 
   async resolvePeer(chatId) {
@@ -259,6 +405,7 @@ export class MtprotoTelegramChannel {
   async stop() {
     this.stopped = true;
     this.connected = false;
+    await this.drain();
     await this.stopSourceReaders().catch(() => {});
     try { await this.client?.disconnect(); } catch { /* A closing connection needs no report. */ }
   }

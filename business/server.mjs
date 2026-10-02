@@ -4,7 +4,7 @@ import path from 'node:path';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import Ajv from 'ajv';
-import { loadConfig, validateAllowedSourceRefs, validateTelegramSources, validateBrowserSources, validateOutcomes, ROOT, DATA, readJson, runtimeReadiness } from './config.mjs';
+import { loadConfig, checkAutomaticPrerequisite, validateAllowedSourceRefs, validateTelegramSources, validateBrowserSources, validateOutcomes, ROOT, DATA, readJson, runtimeReadiness } from './config.mjs';
 import { Store } from './store.mjs';
 import { BusinessService } from './service.mjs';
 import { invalidateRevokedDiscoverySources } from './discovery.mjs';
@@ -17,8 +17,9 @@ import { toolDefinitions, callTool } from './tools.mjs';
 import { exportPartner } from './export.mjs';
 import { listCandidates } from './executive-donors.mjs';
 import { AppError, ensure, requiredText } from './errors.mjs';
+import { validateControl } from './control-plane.mjs';
 
-const publicFiles = new Map([['/', ['index.html','text/html; charset=utf-8']], ['/app.js',['app.js','text/javascript; charset=utf-8']], ['/research.js',['research.js','text/javascript; charset=utf-8']], ['/actions.js',['actions.js','text/javascript; charset=utf-8']], ['/outcomes.js',['outcomes.js','text/javascript; charset=utf-8']], ['/styles.css',['styles.css','text/css; charset=utf-8']], ['/favicon.svg',['favicon.svg','image/svg+xml']]]);
+const publicFiles = new Map([['/', ['index.html','text/html; charset=utf-8']], ['/app.js',['app.js','text/javascript; charset=utf-8']], ['/research.js',['research.js','text/javascript; charset=utf-8']], ['/actions.js',['actions.js','text/javascript; charset=utf-8']], ['/outcomes.js',['outcomes.js','text/javascript; charset=utf-8']], ['/workspace.js',['workspace.js','text/javascript; charset=utf-8']], ['/styles.css',['styles.css','text/css; charset=utf-8']], ['/favicon.svg',['favicon.svg','image/svg+xml']]]);
 const validateCommand = new Ajv().compile(readJson(path.join(ROOT,'contracts/command.schema.json')));
 const tokenEquals = (a,b) => typeof a === 'string' && Buffer.byteLength(a) === Buffer.byteLength(b) && timingSafeEqual(Buffer.from(a),Buffer.from(b));
 async function readBody(req) {
@@ -86,6 +87,8 @@ const discoveryQueryOptions = url => {
 };
 export async function start({ config = loadConfig(), directory = DATA } = {}) {
   ensure(config.server.host === '127.0.0.1', 'Only loopback dashboard binding is supported', 409);
+  validateControl(config);
+  checkAutomaticPrerequisite(config);
   validateAllowedSourceRefs(config);
   validateTelegramSources(config);
   // Browser sources are validated here for the same reason the other two are: `start({ config })`
@@ -152,6 +155,15 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
         return send(404,{error:'not found'});
       }
       ensure(tokenEquals(req.headers['x-partner-token'],operatorToken), 'Перезагрузите страницу для обновления сессии', 403);
+      if (req.method === 'GET' && url.pathname === '/api/workspace') {
+        const options = discoveryQueryOptions(url);
+        return send(200, service.work.snapshot(options));
+      }
+      if (req.method === 'GET' && url.pathname.startsWith('/api/workspace/cases/')) {
+        const match = /^\/api\/workspace\/cases\/([0-9a-f-]{36})$/.exec(url.pathname);
+        ensure(match && [...url.searchParams].length === 0, 'Invalid Workspace query', 400);
+        return send(200, service.work.presentation(match[1]));
+      }
       if (req.method === 'GET' && url.pathname === '/api/actions') {
         ensure([...url.searchParams.keys()].every(k => ['limit','cursor'].includes(k))
           && [...url.searchParams.keys()].every(k => url.searchParams.getAll(k).length === 1), 'Invalid actions query', 400);
@@ -265,6 +277,8 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
   const listeningAddress = server.address();
   if (listeningAddress && typeof listeningAddress === 'object') servicePort = listeningAddress.port;
   // Recovery occurs only after acquiring this server port; a duplicate launch cannot interrupt the live instance.
+  try { service.control.acquireProcess(); }
+  catch (error) { await new Promise(resolve => server.close(resolve)); store.close(); throw error; }
   store.recover();
   invalidateRevokedDiscoverySources(service);
   try { service.continuity.reconcile(); }
@@ -291,8 +305,8 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
     // was still writing its receipt — the database disappearing from under a worker that is
     // committing to it, which is how a run ends as `interrupted` with the receipt half-written.
     // Both loops are drained here, and the store is closed after both are quiet.
-    while (scheduler.busy || scheduler.reasonBusy || scheduler.actionRuntime.busy || telegram.polling) await new Promise(resolve=>setTimeout(resolve,50));
-    await closed; await telegram.stop(); store.close();
+    while (scheduler.busy || scheduler.reasonBusy || scheduler.privateBusy || scheduler.workBusy || scheduler.actionRuntime.busy || telegram.polling) await new Promise(resolve=>setTimeout(resolve,50));
+    await closed; await telegram.stop(); service.control.releaseProcess(); store.close();
   };
   for (const signal of ['SIGINT','SIGTERM']) process.once(signal,()=>close().then(()=>process.exit(0)));
   // The scheduler and the channel are returned so the wiring itself can be tested: a test that

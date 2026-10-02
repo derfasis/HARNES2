@@ -22,8 +22,16 @@ export async function callTool(service, scope, name, args, requestId) {
   if (scope.runId) {
     const run = service.store.get('SELECT * FROM runs WHERE id=? AND partner_id=?', scope.runId, service.config.partnerId);
     ensure(run?.status === 'running', 'Запуск завершён', 409);
+    if (service.control) {
+      const ticket = service.control.require(scope.runId, { plane: 'private' });
+      if (service.config.controlPlane?.enabled === true)
+        ensure(ticket?.id === scope.controlTicketId, 'Control-plane ticket does not match this agent scope', 403, 'CONTROL_TICKET_SCOPE_MISMATCH');
+    }
     if (scope.conversationId) service.assertRunFresh(scope, scope.conversationId);
     if (run.task_id) ensure(service.store.get('SELECT status FROM tasks WHERE id=?', run.task_id)?.status === 'running', 'Задача отменена', 409);
+  } else if (service.config.controlPlane?.enabled === true
+    && !['partner_get_context','partner_list_work','partner_search_experience'].includes(name)) {
+    ensure(false, 'Control-plane ticket required for agent writes', 403, 'CONTROL_TICKET_REQUIRED');
   }
   let result;
   if (name === 'partner_get_context') result = compactPromptContext(contextFor(service, scope.conversationId ?? null));

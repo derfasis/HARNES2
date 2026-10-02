@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { validateControl } from './control-policy.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -99,8 +100,8 @@ export function validateBrowserSources(config) {
 // startup, before anything connects.
 export function checkAutomaticPrerequisite(config) {
   if (config.opportunity?.automatic === true
-    && (config.runtime.enabled !== false || config.telegram.liveSending !== false))
-    throw new Error('Automatic opportunity prerequisite requires the runtime disabled and live sending off.');
+    && (config.runtime.enabled !== false && config.controlPlane?.enabled !== true || config.telegram.liveSending !== false))
+    throw new Error('Automatic opportunity prerequisite requires scoped Control Plane admission for enabled runtime, and live sending off.');
   return config;
 }
 // The observation window is a claim about a conversation, so its patience is bounded like every
@@ -167,8 +168,9 @@ export function loadConfig() {
   validateBrowserSources(cfg);
   // This must agree with automaticBoundary, or the application refuses to start on a combination
   // the pipeline would have accepted. A read-only reader may run with automatic on: it is how
-  // permitted material reaches the pipeline and it cannot send. Agent runs and live sending are
-  // still refused here, at startup, before anything connects.
+  // permitted material reaches the pipeline and it cannot send. Concurrent private reasoning
+  // requires Control Plane admission; live sending remains refused before anything connects.
+  validateControl(cfg);
   checkAutomaticPrerequisite(cfg);
   return cfg;
 }

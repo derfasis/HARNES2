@@ -79,5 +79,14 @@
   "outcomes": {
     "enabled": false,
     "responseWindowSeconds": 604800
+  },
+  "workspace": {
+    "enabled": false,
+    "modelEnabled": false
+  },
+  "controlPlane": {
+    "enabled": false,
+    "maxConcurrent": 3,
+    "reservationUsd": 0.25
   }
 }

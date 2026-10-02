@@ -1,4 +1,4 @@
-// Domain authority over two fixed local effects. No provider tools or arbitrary targets.
+// Domain authority over fixed local effects. No provider tools or arbitrary targets.
 import path from 'node:path';
 import Ajv from 'ajv';
 import { ROOT, readJson } from './config.mjs';
@@ -15,7 +15,9 @@ const validate = new Ajv({ strict: true, allowUnionTypes: true }).compile(action
 export const ACTION_CAPABILITIES = Object.freeze([
   Object.freeze({ id: 'brief.publish_local.v1', version: 1, effect: 'owner_local_file', target: 'owner-local', label: 'Локальный brief', verification: 'exact_bytes_sha256' }),
   Object.freeze({ id: 'owner_handoff.create.v1', version: 1, effect: 'human_only_task', target: 'owner-local', label: 'Задача владельцу', verification: 'durable_task_identity_and_payload' }),
+  Object.freeze({ id: 'material.export_local.v1', version: 1, effect: 'owner_local_file', target: 'owner-local', label: 'Ready material', verification: 'exact_bytes_sha256' }),
 ]);
+const LEGACY_ACTION_CAPABILITIES = Object.freeze(ACTION_CAPABILITIES.filter(c => c.id !== 'material.export_local.v1'));
 const EFFECTS = { contact_permission: false, external_write: false };
 export const actionCheck = (ok, code, status = 409) => ensure(ok, code, status, code);
 const check = actionCheck;
@@ -29,6 +31,7 @@ export class ActionLoop {
   get partnerId() { return this.service.config.partnerId; }
   enabled() {
     check(this.service.config.actions?.enabled === true && this.service.config.continuity?.enabled === true, 'ACTION_DISABLED');
+    check(!this.service.control?.enabled || !this.service.control.stopped && this.service.control.processCurrent(), 'ACTION_RUNTIME_OWNER_REQUIRED');
     automaticBoundary(this.service);
   }
   get(actionId) {
@@ -40,7 +43,11 @@ export class ActionLoop {
       ...Object.values(patch), now(), row.id);
   }
   record(kind, payload, actor = 'system') { this.db.event(this.partnerId, null, `action.${kind}`, actor, payload); }
-  authority(threadId) { return digest({ authority: this.service.executive.authority(threadId), version: ACTION_VERSION, capabilities: ACTION_CAPABILITIES }); }
+  authority(threadId, capabilityId = null) {
+    // Preserve the exact authority fingerprint used by already-created v1 brief/handoff grants.
+    const capabilities = capabilityId === 'material.export_local.v1' ? ACTION_CAPABILITIES : LEGACY_ACTION_CAPABILITIES;
+    return digest({ authority: this.service.executive.authority(threadId), version: ACTION_VERSION, capabilities });
+  }
   basis(threadId) {
     const c = this.service.continuity, d = c.detail(threadId);
     check(d.ready && d.memory?.current === true && d.memory.content, 'ACTION_ACCEPTED_MEMORY_REQUIRED');
@@ -58,20 +65,31 @@ export class ActionLoop {
   }
   current(row, { enabled = false } = {}) {
     if (enabled) this.enabled();
-    check(this.authority(row.thread_id) === row.authority_hash, 'ACTION_AUTHORITY_CHANGED');
+    const capabilityId = JSON.parse(row.proposal_json ?? 'null')?.capability_id ?? null;
+    check(this.authority(row.thread_id, capabilityId) === row.authority_hash, 'ACTION_AUTHORITY_CHANGED');
     const d = this.basis(row.thread_id);
     check(d.basis_fingerprint === row.basis_fingerprint && d.memory.turn_id === row.turn_id, 'ACTION_STALE_BASIS');
-    const packet = JSON.parse(row.packet_json), c = this.service.continuity;
+    const packet = JSON.parse(row.packet_json), proposal = JSON.parse(row.proposal_json ?? 'null'), c = this.service.continuity;
     const states = c.evidenceStates(c.thread(row.thread_id), c.watches(row.thread_id), packet.evidence.map(e => e.source_event_id));
     check(packet.evidence.every(e => states.get(e.source_event_id)?.current), 'ACTION_STALE_EVIDENCE');
+    if (proposal?.capability_id === 'material.export_local.v1') {
+      check(packet.material && proposal.material?.id === packet.material.id && proposal.material?.sha256 === packet.material.sha256,
+        'ACTION_MATERIAL_MISMATCH');
+      check(this.service.work?.assertMaterial, 'ACTION_MATERIAL_UNAVAILABLE');
+      this.service.work.assertMaterial(packet.material, row.thread_id, row.basis_fingerprint);
+    } else check(packet.material === undefined, 'ACTION_MATERIAL_MISMATCH');
     return d;
   }
   checkedProposal(value) {
     check(Buffer.byteLength(JSON.stringify(value ?? null)) <= 16000 && validate(value), 'ACTION_PROPOSAL_INVALID', 400);
+    check((value.capability_id === 'material.export_local.v1') === (value.material !== undefined), 'ACTION_MATERIAL_REFERENCE_INVALID', 400);
     if (value.due_at !== null) dateTime(value.due_at);
     // Canonical property order; caller insertion order cannot change the grant identity.
-    return { capability_id: value.capability_id, title: value.title, instructions: value.instructions,
+    const proposal = { capability_id: value.capability_id, title: value.title, instructions: value.instructions,
       expected_result: value.expected_result, due_at: value.due_at === null ? null : dateTime(value.due_at) };
+    // Keep the legacy canonical object byte-for-byte identical when the optional pin is absent.
+    if (value.material !== undefined) proposal.material = { id: value.material.id, sha256: value.material.sha256 };
+    return proposal;
   }
   // The identity of "this exact action", and it has to be the identity of the action rather than
   // of the observations that were fresh when it was proposed.
@@ -106,6 +124,7 @@ export class ActionLoop {
     this.current(row, { enabled: true });
     if (output.kind === 'no_action') { this.update(row, { status: 'no_action', reason: output.reason }); return; }
     const proposal = this.checkedProposal(output.proposal), fingerprint = this.proposalHash(row, proposal);
+    check(proposal.capability_id !== 'material.export_local.v1', 'ACTION_MATERIAL_OWNER_PREPARATION_REQUIRED');
     check(!this.db.get('SELECT id FROM action_proposals WHERE proposal_hash=? AND id<>?', fingerprint, row.id), 'ACTION_DUPLICATE_PROPOSAL');
     this.update(row, { status: 'proposed', title: proposal.title, reason: output.reason, proposal_json: JSON.stringify(proposal), proposal_hash: fingerprint });
   }
@@ -113,9 +132,17 @@ export class ActionLoop {
     this.enabled(); fields(p, ['thread_id','expected_basis_fingerprint', ...(planning ? [] : ['proposal','reason'])]);
     if (planning) check(this.service.config.actions.modelEnabled === true, 'ACTION_MODEL_DISABLED');
     const d = this.basis(p.thread_id); check(d.basis_fingerprint === p.expected_basis_fingerprint, 'ACTION_STALE_BASIS');
-    const row = { id: id(), thread_id: d.id, turn_id: d.memory.turn_id, basis_fingerprint: d.basis_fingerprint,
-      authority_hash: this.authority(d.id), packet_json: JSON.stringify(this.packet(d)) };
     const proposal = planning ? null : this.checkedProposal(p.proposal);
+    const packet = this.packet(d);
+    if (proposal?.capability_id === 'material.export_local.v1') {
+      check(this.service.work?.materialPacket, 'ACTION_MATERIAL_UNAVAILABLE');
+      const material = this.service.work.materialPacket(proposal.material, d.id, d.basis_fingerprint);
+      check(material && material.id === proposal.material.id && material.sha256 === proposal.material.sha256,
+        'ACTION_MATERIAL_MISMATCH');
+      packet.material = material;
+    }
+    const row = { id: id(), thread_id: d.id, turn_id: d.memory.turn_id, basis_fingerprint: d.basis_fingerprint,
+      authority_hash: this.authority(d.id, proposal?.capability_id ?? null), packet_json: JSON.stringify(packet) };
     const reason = planning ? 'Owner requested one bounded proposal' : requiredText(p.reason, 'reason', 2000);
     const fingerprint = proposal ? this.proposalHash(row, proposal) : null;
     const existing = fingerprint && this.db.get('SELECT id FROM action_proposals WHERE partner_id=? AND proposal_hash=?', this.partnerId, fingerprint);
@@ -242,7 +269,8 @@ export class ActionLoop {
       human_task: row.task_id ? this.db.get('SELECT * FROM tasks WHERE id=? AND partner_id=?', row.task_id, this.partnerId) ?? null : null,
       can_grant: enabled && current && row.status === 'proposed' && !attempts.length,
       can_retry: enabled && current && !row.verify_requested && ['failed','unknown'].includes(row.status) && attempts.at(-1)?.verification_state === 'absent',
-      can_revoke: !TERMINAL.includes(row.status), artifact_available: !!proposal_json && JSON.parse(proposal_json).capability_id === 'brief.publish_local.v1' && attempts.length > 0, ...EFFECTS };
+      can_revoke: !TERMINAL.includes(row.status), artifact_available: !!proposal_json
+        && ['brief.publish_local.v1','material.export_local.v1'].includes(JSON.parse(proposal_json).capability_id) && attempts.length > 0, ...EFFECTS };
   }
   list({ limit = 20, cursor = '' } = {}) {
     check(Number.isInteger(limit) && limit > 0 && limit <= 50 && typeof cursor === 'string' && cursor.length <= 36, 'ACTION_PAGE_INVALID', 400);

@@ -9,6 +9,7 @@ import { CONTINUITY_TABLES } from '../business/continuity-tables.mjs';
 import { ACTION_TABLES } from '../business/action-tables.mjs';
 import { EXECUTIVE_TABLES } from '../business/executive-tables.mjs';
 import { OUTCOME_TABLES } from '../business/outcome-tables.mjs';
+import { WORK_TABLES, CONTROL_TABLES } from '../business/work-tables.mjs';
 import { BusinessService } from '../business/service.mjs';
 
 const [source,destinationArg] = process.argv.slice(2);
@@ -26,14 +27,15 @@ const without = (...groups) => {
 // These are historical export catalogues. Deriving them from the current list alone silently
 // injected tables added by later migrations into older bundles (outcomes into v2-v7).
 const inputCatalogues = new Map([
-  [2, without(ENGAGEMENT_TABLES, DISCOVERY_TABLES, CONTINUITY_TABLES, EXECUTIVE_TABLES, ACTION_TABLES, OUTCOME_TABLES)],
-  [3, without(DISCOVERY_TABLES, CONTINUITY_TABLES, EXECUTIVE_TABLES, ACTION_TABLES, OUTCOME_TABLES)],
-  [4, without(CONTINUITY_TABLES, EXECUTIVE_TABLES, ACTION_TABLES, OUTCOME_TABLES)],
-  [5, without(EXECUTIVE_TABLES, ACTION_TABLES, OUTCOME_TABLES)],
-  [6, without(ACTION_TABLES, OUTCOME_TABLES)],
-  [7, without(OUTCOME_TABLES)],
-  [8, TABLES],
-  [9, TABLES],
+  [2, without(ENGAGEMENT_TABLES, DISCOVERY_TABLES, CONTINUITY_TABLES, EXECUTIVE_TABLES, ACTION_TABLES, OUTCOME_TABLES, WORK_TABLES, CONTROL_TABLES)],
+  [3, without(DISCOVERY_TABLES, CONTINUITY_TABLES, EXECUTIVE_TABLES, ACTION_TABLES, OUTCOME_TABLES, WORK_TABLES, CONTROL_TABLES)],
+  [4, without(CONTINUITY_TABLES, EXECUTIVE_TABLES, ACTION_TABLES, OUTCOME_TABLES, WORK_TABLES, CONTROL_TABLES)],
+  [5, without(EXECUTIVE_TABLES, ACTION_TABLES, OUTCOME_TABLES, WORK_TABLES, CONTROL_TABLES)],
+  [6, without(ACTION_TABLES, OUTCOME_TABLES, WORK_TABLES, CONTROL_TABLES)],
+  [7, without(OUTCOME_TABLES, WORK_TABLES, CONTROL_TABLES)],
+  [8, without(WORK_TABLES, CONTROL_TABLES)],
+  [9, without(WORK_TABLES, CONTROL_TABLES)],
+  [10, TABLES],
 ]);
 const inputTables = inputCatalogues.get(migrationCount);
 if (!inputTables) throw new Error('Migration version differs');
@@ -131,6 +133,30 @@ function sanitizeTransferredOutcomes(store, partnerId) {
         window.id);
     }
   }
+}
+
+function sanitizeTransferredPrivateState(store) {
+  // Historical approvals are tied to a local conversation revision. Bump every revision
+  // and stale only drafts that could still be approved or sent; keep delivery truth intact.
+  store.run('UPDATE conversations SET revision=revision+1');
+  store.run("UPDATE drafts SET status='stale' WHERE status IN ('pending','approved')");
+}
+
+function sanitizeTransferredWorkspace(store, partnerId) {
+  const transferredAt = new Date().toISOString();
+  // Process ownership and leases are local to the source process. Retain ticket/run history,
+  // but ensure no imported row can reserve capacity or authorize result application.
+  store.run('DELETE FROM control_owners WHERE partner_id=?', partnerId);
+  store.run("UPDATE control_tickets SET status='interrupted',reason='TRANSFER_REQUIRES_NEW_OWNER',finished_at=? WHERE partner_id=? AND status IN ('reserved','running')",
+    transferredAt, partnerId);
+  store.run("UPDATE work_cases SET status='stale',reason='TRANSFER_REQUIRES_REVIEW',revision=revision+1,updated_at=? WHERE partner_id=? AND status='open'",
+    transferredAt, partnerId);
+  store.run("UPDATE work_materials SET status='stale' WHERE status IN ('proposed','approved') AND case_id IN (SELECT id FROM work_cases WHERE partner_id=?)",
+    partnerId);
+  store.run("UPDATE work_material_requests SET status='interrupted',reason='TRANSFER_REQUIRES_NEW_OWNER',finished_at=? WHERE status IN ('pending','running') AND case_id IN (SELECT id FROM work_cases WHERE partner_id=?)",
+    transferredAt, partnerId);
+  store.run("UPDATE work_expectations SET status='unknown',reason='TRANSFER_COVERAGE_UNVERIFIED',updated_at=? WHERE status='pending' AND case_id IN (SELECT id FROM work_cases WHERE partner_id=?)",
+    transferredAt, partnerId);
 }
 
 function assertOutcomeIntegrity(store, { strictEvidence = false } = {}) {
@@ -237,16 +263,23 @@ try {
           statement.run(...columns.map(c=>row[c]));
       }
     }
-    if (migrationCount === 9) {
+    if (migrationCount >= 9) {
       const profile = bundle.assets.find(asset => asset.path === 'partner/profile.json');
       const partnerId = JSON.parse(profile.content).id;
       if (!partnerId || store.get('SELECT id FROM partners WHERE id=?', partnerId) == null) throw new Error('Imported profile does not match partner data');
       sanitizeTransferredOutcomes(store, partnerId);
     }
+    sanitizeTransferredPrivateState(store);
+    if (migrationCount >= 10) {
+      const profile = bundle.assets.find(asset => asset.path === 'partner/profile.json');
+      const partnerId = JSON.parse(profile.content).id;
+      if (!partnerId || store.get('SELECT id FROM partners WHERE id=?', partnerId) == null) throw new Error('Imported profile does not match partner data');
+      sanitizeTransferredWorkspace(store, partnerId);
+    }
     // Observation cursors are local recovery progress, not transferable evidence.
     // Replaying committed intents is idempotent and never repeats a send.
     store.run("DELETE FROM channel_offsets WHERE channel='outcome-observation-v2'");
-    assertOutcomeIntegrity(store, { strictEvidence: migrationCount === 9 });
+    assertOutcomeIntegrity(store, { strictEvidence: migrationCount >= 9 });
     // Exported grants are history, never transferable execution authority. Artifact
     // bytes are deliberately excluded from a whole-partner export.
     for (const row of store.all('SELECT id,partner_id,status FROM action_proposals')) {

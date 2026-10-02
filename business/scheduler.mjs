@@ -11,6 +11,7 @@ import { processContinuity } from './continuity-reasoning.mjs';
 import { ActionRuntime } from './action-runtime.mjs';
 import { processActionPlan } from './action-reasoning.mjs';
 import { processExecutive } from './executive-reasoning.mjs';
+import { processWork } from './work-reasoning.mjs';
 
 export class Scheduler {
   constructor(service, runtime, telegram, sourceReaders = []) { this.sourceReaders = sourceReaders; this.service = service; this.runtime = runtime; this.telegram = telegram; this.busy = false; this.reasonBusy = false; this.stopped = false; this.lastReason = null; this.sourceReadReason = null; this.activeRun = null; this.readersAbsentReported = false; this.sourceReadersState = null; this.browserPolls = new Map(); this.sourceReadFailures = new Map();
@@ -21,27 +22,21 @@ export class Scheduler {
     // established is not healthy, and the model still does not run.
     this.continuityHealthy = null; this.executiveHealthy = null; this.actionHealthy = null;
     this.actionRuntime = new ActionRuntime(service, { ready: () => !this.stopped && !this.busy
+      && (!service.control.enabled || !service.control.stopped && service.control.processCurrent())
       && this.continuityHealthy === true && this.executiveHealthy === true && this.actionHealthy === true }); }
-  // Two loops, one clock, on purpose.
-  //
-  // The source loop is the partner's eyes: it polls readers, advances watch cursors and retires
-  // revoked scope. It calls no model. The reasoning loop is the partner's head: Continuity,
-  // Opportunity and Executive each make one bounded inference. They are separate timers because a
-  // head that thinks for three minutes must not cost the eyes three minutes of blindness — a source
-  // left unpolled goes stale against its own `maxLagSeconds`, and that staleness is the evidence
-  // the reasoning loop is about to be asked to judge. A model call and a watch cursor share a
-  // clock only if one of them is allowed to be wrong.
-  //
-  // What is NOT relaxed to get this: preparation stays durable, the answer is revalidated against
-  // the basis and evidence it was given, a stale answer is discarded rather than stored, and one
-  // reasoning pass at a time per scheduler. Only the *waiting* moved out of the source path.
+  // Independent clocks: durable source/reconciliation, public reasoning, private reasoning,
+  // material reasoning, local action verification and process ownership heartbeat.
+  // Awaiting inference never holds the source clock. Admission, usage and completion remain
+  // durable; each domain revalidates evidence and authority before accepting a result.
   start() {
     const seconds = this.service.config.scheduler.tickSeconds * 1000;
     const failed = () => { this.lastReason = 'Ошибка обработки очереди; подробности в журнале запуска'; };
-    // The two timers call the two halves, never `tick()`. A single timer that called the whole
-    // pass would put the head back on the eyes' clock, which is the whole defect.
+    // Scheduled planes never call the combined operator/test helper `tick()`.
     this.timer = setInterval(() => this.sourceTick().catch(failed), seconds);
     this.reasonTimer = setInterval(() => this.reasonTick().catch(failed), seconds);
+    this.privateTimer = setInterval(() => this.privateTick().catch(failed), seconds);
+    this.workTimer = setInterval(() => this.workTick().catch(failed), seconds);
+    this.controlTimer = setInterval(() => { try { this.service.control.heartbeat(); } catch { this.stop(); } }, Math.min(seconds, 10000));
     this.actionTimer = setInterval(() => this.actionTick().catch(failed), seconds);
   }
   // One full pass, eyes then head, in that order. This is what an operator or a test means by
@@ -50,7 +45,7 @@ export class Scheduler {
   // the timers drive the halves separately.
   async tick() {
     await this.sourceTick();
-    await this.reasonTick();
+    await Promise.all([this.reasonTick(), this.privateTick(), this.workTick()]);
     await this.actionTick();
   }
   async actionTick() {
@@ -65,13 +60,18 @@ export class Scheduler {
   // `reason_busy` is reported beside `busy` rather than inside it: the two loops are independent,
   // and an operator looking at one long-running tick must be able to tell whether the eyes or the
   // head is the thing that is working.
-  status() { return { enabled: this.service.config.scheduler.enabled, busy: this.busy, reason_busy: this.reasonBusy, action_busy: this.actionRuntime.busy, actions: this.actionState ?? { disposition: 'not_run' }, active_run: this.activeRun, reason: this.lastReason, model: runtimeReadiness(this.service.config), source_readers: this.sourceReadersState, continuity: this.continuityState ?? { disposition: 'not_run' }, executive: this.executiveState ?? { disposition: 'not_run' }, outcomes: this.outcomesState ?? { disposition: 'not_run' } }; }
+  status() { return { enabled: this.service.config.scheduler.enabled, control: this.service.control.status(), workspace: this.workState ?? { disposition: 'not_run' }, private: this.privateState ?? { disposition: 'not_run' }, busy: this.busy, reason_busy: this.reasonBusy, action_busy: this.actionRuntime.busy, actions: this.actionState ?? { disposition: 'not_run' }, active_run: this.activeRun, reason: this.lastReason, model: runtimeReadiness(this.service.config), source_readers: this.sourceReadersState, continuity: this.continuityState ?? { disposition: 'not_run' }, executive: this.executiveState ?? { disposition: 'not_run' }, outcomes: this.outcomesState ?? { disposition: 'not_run' } }; }
   // The source loop. Poll, checkpoint, retire, discover. No model call anywhere in it.
   async sourceTick() {
     if (this.busy || this.stopped || !this.service.config.scheduler.enabled) return;
     this.busy = true;
     try {
       const cfg = this.service.config;
+      if (this.service.control.enabled && !this.service.control.processCurrent()) return;
+      this.service.control.sweep();
+      try { await this.service.exclusive(() => this.service.work.reconcile()); this.workReconcileState = 'reconciled'; }
+      catch { this.workReconcileState = 'failed'; }
+      await this.service.exclusive(() => this.service.store.transaction(() => this.service.engagement.sweep()));
       // The first thing a source pass does, before any reconciliation and before anything is
       // begun. This is the only moment at which "a refresh attempt is still `running`" means "the
       // pass that owned it is gone" — it is true because `busy` admits one pass at a time, so
@@ -302,66 +302,7 @@ export class Scheduler {
         catch { this.lastReason = 'Discovery reconciliation failed; source truth remains durable'; }
       }
       await this.service.exclusive(() => this.service.store.transaction(() => this.service.engagement.sweep()));
-      if (!runtimeReadiness(cfg).ready) { this.lastReason = 'Задачи сохранены. Ожидается подключение модели.'; return; }
-      const day = now().slice(0,10), count = this.service.store.get('SELECT COUNT(*) AS n,COALESCE(SUM(estimated_cost_usd),0) AS cost,SUM(CASE WHEN cost_status=\'unknown\' THEN 1 ELSE 0 END) AS unknown FROM runs WHERE created_at>=?', day);
-      if (count.n >= cfg.runtime.maxRunsPerDay) { this.lastReason = 'Достигнут дневной лимит запусков (UTC)'; return; }
-      if (cfg.runtime.dailyBudgetUsd !== null && (count.cost >= cfg.runtime.dailyBudgetUsd || count.unknown > 0)) {
-        this.lastReason = count.unknown ? 'Стоимость предыдущего запуска неизвестна. Укажите тарифы и разберите расходы перед продолжением.' : 'Достигнут дневной порог учтённых расходов'; return;
-      }
-      await this.ensurePlanningTask();
-      const prepared = await this.service.exclusive(() => this.service.store.transaction(() => {
-        const task = this.service.store.get("SELECT * FROM tasks WHERE partner_id=? AND status='pending' AND kind NOT IN ('opportunity_review','discovery_review','owner_action') AND due_at<=? ORDER BY due_at,created_at LIMIT 1", cfg.partnerId, now());
-        if (!task) return null;
-        if (task.conversation_id && this.service.engagement.managed(task.conversation_id)) {
-          const e=this.service.engagement.current(task.conversation_id);
-          if (!e || task.kind!=='engagement_evaluate' || !this.service.store.get('SELECT task_id FROM engagement_tasks WHERE task_id=? AND engagement_id=?',task.id,e.id)) {
-            this.service.store.run("UPDATE tasks SET status='blocked' WHERE id=?",task.id); return null;
-          }
-        }
-        if (task.conversation_id) {
-          try { this.service.active(task.conversation_id); }
-          catch { this.service.store.run("UPDATE tasks SET status='blocked' WHERE id=?", task.id); return null; }
-        }
-        const runId = id(), context = contextFor(this.service, task.conversation_id, task);
-        this.service.store.run("UPDATE tasks SET status='running' WHERE id=?", task.id);
-        this.service.store.run('INSERT INTO runs(id,partner_id,task_id,conversation_id,status,runtime,model,context_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)', runId, cfg.partnerId, task.id, task.conversation_id, 'running', 'hermes', cfg.runtime.model, JSON.stringify({ ...context, model_config: cfg.runtime }), now());
-        this.service.store.event(cfg.partnerId, task.conversation_id, 'run.started', 'system', { run_id: runId, task_id: task.id });
-        return { run: this.service.store.get('SELECT * FROM runs WHERE id=?', runId), context };
-      }));
-      if (!prepared) { this.lastReason = 'Нет готовых к выполнению задач'; return; }
-      const { run, context } = prepared; this.activeRun = run.id; this.lastReason = null;
-      let result;
-      try { result = await this.runtime.run(run, context); }
-      catch (error) { result = { completed: false, error: error.message }; }
-      await this.service.exclusive(() => this.service.store.transaction(() => {
-        const task = this.service.store.get('SELECT * FROM tasks WHERE id=?', run.task_id);
-        const decision = task.kind==='engagement_evaluate' ? this.service.store.get('SELECT * FROM engagement_decisions WHERE run_id=?',run.id) : null;
-        if (task.kind==='engagement_evaluate' && result.completed && !result.error && !decision) {
-          result = {...result,completed:false,error:'ENGAGEMENT_DECISION_MISSING'};
-        }
-        // HANDOFF/STOP deliberately cancel AI-owned work, including their own
-        // running attention. A durable terminal decision from this exact run is
-        // completion; unrelated cancellation remains cancellation.
-        const terminal = result.completed && !result.error && ['HANDOFF','STOP'].includes(decision?.kind);
-        const cancelled = task.status === 'cancelled' && !terminal, status = cancelled ? 'cancelled' : result.completed && !result.error ? 'completed' : 'failed';
-        const { input, output, cost, costStatus } = usageAccounting(cfg.runtime, result.usage);
-        this.service.store.run('UPDATE runs SET status=?,result_json=?,error=?,input_tokens=?,output_tokens=?,estimated_cost_usd=?,cost_status=?,finished_at=? WHERE id=?', status, JSON.stringify(result), result.error ? String(result.error).slice(0,2000) : null, input, output, cost, costStatus, now(), run.id);
-        if (!cancelled) this.service.store.run('UPDATE tasks SET status=? WHERE id=?', status === 'completed' ? 'done' : 'failed', task.id);
-        this.service.store.event(cfg.partnerId, run.conversation_id, `run.${status}`, 'system', { run_id: run.id, task_id: task.id, cost_status: costStatus });
-      }));
-      if (run.conversation_id && result.completed && !result.error) {
-        await this.service.exclusive(() => this.service.store.transaction(() => this.service.autopilotHandoff(run.id)));
-        const readiness = this.telegram?.readiness();
-        const sendReady = readiness?.enabled && readiness.live_sending && (readiness.configured || readiness.connected);
-        if (sendReady) for (const draft of this.service.autopilotCandidates(run.id)) {
-          try {
-            await this.service.exclusive(() => this.service.store.transaction(() => this.service.approveAutopilot(draft.id, run.id)));
-            await this.telegram.sendApproved(draft.id, { autopilot: true });
-          } catch (error) {
-            await this.service.exclusive(() => this.service.store.transaction(() => this.service.store.event(cfg.partnerId, run.conversation_id, 'autopilot.blocked', 'system', { draft_id: draft.id, run_id: run.id, model: cfg.runtime.model, reason: error.message })));
-          }
-        }
-      }
+      // Conversation reasoning has its own plane and timer. Source polling never calls a model.
     } finally {
       this.busy = false; this.activeRun = null;
       // Timers begin together. Wake the independent action pass after observation
@@ -370,8 +311,8 @@ export class Scheduler {
       if (this.timer && !this.stopped) this.actionTick().catch(() => { this.actionState = { disposition: 'processing_failed' }; });
     }
   }
-  // The reasoning loop. Three bounded inferences, at most one at a time, and never on the source
-  // loop's clock.
+  // Public reasoning stages remain sequential within this plane; private and work reasoning
+  // have independent timers and Control Plane slots. None runs on the source clock.
   //
   // Each stage revalidates what it was given, and that revalidation is the reason this could be
   // moved at all rather than merely made faster. Continuity refuses a stale basis and marks the
@@ -420,6 +361,83 @@ export class Scheduler {
       this.lastReason = this.sourceReadReason ?? result.disposition;
     } finally { this.reasonBusy = false; }
   }
+  async privateTick() {
+    if (this.privateBusy || this.stopped || !this.service.config.scheduler.enabled) return;
+    this.privateBusy = true;
+    try { this.privateState = await this.service.control.run('private', 'conversation', () => this.privateRun()); return this.privateState; }
+    finally { this.privateBusy = false; this.activeRun = null; }
+  }
+  async privateRun() {
+    const cfg = this.service.config;
+      if (!runtimeReadiness(cfg).ready) { this.lastReason = 'Задачи сохранены. Ожидается подключение модели.'; return; }
+      const day = now().slice(0,10), count = this.service.store.get('SELECT COUNT(*) AS n,COALESCE(SUM(estimated_cost_usd),0) AS cost,SUM(CASE WHEN cost_status=\'unknown\' AND (status NOT IN (\'running\',\'analyzed\') OR NOT EXISTS(SELECT 1 FROM control_tickets t WHERE t.run_id=runs.id AND t.status IN (\'reserved\',\'running\'))) THEN 1 ELSE 0 END) AS unknown FROM runs WHERE created_at>=?', day);
+      if (count.n >= cfg.runtime.maxRunsPerDay) { this.lastReason = 'Достигнут дневной лимит запусков (UTC)'; return; }
+      if (cfg.runtime.dailyBudgetUsd !== null && (count.cost >= cfg.runtime.dailyBudgetUsd || count.unknown > 0)) {
+        this.lastReason = count.unknown ? 'Стоимость предыдущего запуска неизвестна. Укажите тарифы и разберите расходы перед продолжением.' : 'Достигнут дневной порог учтённых расходов'; return;
+      }
+      await this.ensurePlanningTask();
+      const prepared = await this.service.exclusive(() => this.service.store.transaction(() => {
+        const task = this.service.store.get("SELECT * FROM tasks WHERE partner_id=? AND status='pending' AND kind NOT IN ('opportunity_review','discovery_review','owner_action') AND due_at<=? ORDER BY due_at,created_at LIMIT 1", cfg.partnerId, now());
+        if (!task) return null;
+        if (task.conversation_id && this.service.engagement.managed(task.conversation_id)) {
+          const e=this.service.engagement.current(task.conversation_id);
+          if (!e || task.kind!=='engagement_evaluate' || !this.service.store.get('SELECT task_id FROM engagement_tasks WHERE task_id=? AND engagement_id=?',task.id,e.id)) {
+            this.service.store.run("UPDATE tasks SET status='blocked' WHERE id=?",task.id); return null;
+          }
+        }
+        if (task.conversation_id) {
+          try { this.service.active(task.conversation_id); }
+          catch { this.service.store.run("UPDATE tasks SET status='blocked' WHERE id=?", task.id); return null; }
+        }
+        const runId = id(), context = contextFor(this.service, task.conversation_id, task);
+        this.service.store.run("UPDATE tasks SET status='running' WHERE id=?", task.id);
+        this.service.store.run('INSERT INTO runs(id,partner_id,task_id,conversation_id,status,runtime,model,context_json,created_at) VALUES(?,?,?,?,?,?,?,?,?)', runId, cfg.partnerId, task.id, task.conversation_id, 'running', 'hermes', cfg.runtime.model, JSON.stringify({ ...context, model_config: cfg.runtime }), now());
+        this.service.control.bindRun(runId);
+        this.service.store.event(cfg.partnerId, task.conversation_id, 'run.started', 'system', { run_id: runId, task_id: task.id });
+        return { run: this.service.store.get('SELECT * FROM runs WHERE id=?', runId), context };
+      }));
+      if (!prepared) { this.lastReason = 'Нет готовых к выполнению задач'; return; }
+      const { run, context } = prepared; this.activeRun = run.id; this.lastReason = null;
+      let result;
+      try { result = await this.runtime.run(run, context); }
+      catch (error) { result = { completed: false, error: error.message }; }
+      await this.service.exclusive(() => this.service.store.transaction(() => {
+        const task = this.service.store.get('SELECT * FROM tasks WHERE id=?', run.task_id);
+        const decision = task.kind==='engagement_evaluate' ? this.service.store.get('SELECT * FROM engagement_decisions WHERE run_id=?',run.id) : null;
+        if (task.kind==='engagement_evaluate' && result.completed && !result.error && !decision) {
+          result = {...result,completed:false,error:'ENGAGEMENT_DECISION_MISSING'};
+        }
+        // HANDOFF/STOP deliberately cancel AI-owned work, including their own
+        // running attention. A durable terminal decision from this exact run is
+        // completion; unrelated cancellation remains cancellation.
+        const terminal = result.completed && !result.error && ['HANDOFF','STOP'].includes(decision?.kind);
+        const cancelled = (task.status === 'cancelled' && !terminal) || !this.service.control.canApply(run.id), status = cancelled ? 'cancelled' : result.completed && !result.error ? 'completed' : 'failed';
+        const { input, output, cost, costStatus } = usageAccounting(cfg.runtime, result.usage);
+        this.service.store.run('UPDATE runs SET status=?,result_json=?,error=?,input_tokens=?,output_tokens=?,estimated_cost_usd=?,cost_status=?,finished_at=? WHERE id=?', status, JSON.stringify(result), result.error ? String(result.error).slice(0,2000) : null, input, output, cost, costStatus, now(), run.id);
+        if (!cancelled) this.service.store.run('UPDATE tasks SET status=? WHERE id=?', status === 'completed' ? 'done' : 'failed', task.id);
+        this.service.store.event(cfg.partnerId, run.conversation_id, `run.${status}`, 'system', { run_id: run.id, task_id: task.id, cost_status: costStatus });
+      }));
+      // A run admitted under CP never inherits legacy autopilot when configuration changes.
+      if (cfg.controlPlane?.enabled !== true && !this.service.control.ticket(run.id) && run.conversation_id && result.completed && !result.error) {
+        await this.service.exclusive(() => this.service.store.transaction(() => this.service.autopilotHandoff(run.id)));
+        const readiness = this.telegram?.readiness();
+        const sendReady = readiness?.enabled && readiness.live_sending && (readiness.configured || readiness.connected);
+        if (sendReady) for (const draft of this.service.autopilotCandidates(run.id)) {
+          try {
+            await this.service.exclusive(() => this.service.store.transaction(() => this.service.approveAutopilot(draft.id, run.id)));
+            await this.telegram.sendApproved(draft.id, { autopilot: true });
+          } catch (error) {
+            await this.service.exclusive(() => this.service.store.transaction(() => this.service.store.event(cfg.partnerId, run.conversation_id, 'autopilot.blocked', 'system', { draft_id: draft.id, run_id: run.id, model: cfg.runtime.model, reason: error.message })));
+          }
+        }
+      }
+  }
+  async workTick() {
+    if (this.workBusy || this.stopped || !this.service.config.scheduler.enabled) return;
+    this.workBusy = true;
+    try { this.workState = await processWork(this.service, this.runtime); return this.workState; }
+    finally { this.workBusy = false; }
+  }
   async ensurePlanningTask() {
     const cfg = this.service.config.scheduler; if (!cfg.dailyPlanning) return;
     const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: cfg.timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' }).formatToParts().map(p => [p.type,p.value]));
@@ -428,9 +446,7 @@ export class Scheduler {
     await this.service.exclusive(() => this.service.store.transaction(() => this.service.addTask({ kind: 'planning', title: 'План партнёра на день', instructions: 'Просмотри цель, незавершённые дела и доступные сведения. Предложи несколько полезных следующих действий; не дублируй существующие задачи.', due_at: now(), dedupe_key: key }, 'system', 'pending')));
   }
   cancel(runId) { this.runtime.cancel(runId); }
-  // Both timers, and the reason the reasoning loop needs its own: `clearInterval` on the source
-  // timer alone left the head running, and `runtime.close()` then killed the worker out from
-  // under a completion transaction that was mid-write. The caller drains `reasonBusy` before the
-  // store is closed; this only stops the clock and says so.
-  stop() { this.stopped = true; clearInterval(this.timer); clearInterval(this.reasonTimer); clearInterval(this.actionTimer); this.actionRuntime.stop(); this.runtime.close(); }
+  // Retire ownership and stop every clock. The server drains all in-flight planes before
+  // releasing the process lease or closing SQLite; late model answers cannot regain admission.
+  stop() { this.stopped = true; clearInterval(this.timer); clearInterval(this.reasonTimer); clearInterval(this.actionTimer); clearInterval(this.privateTimer); clearInterval(this.workTimer); clearInterval(this.controlTimer); this.service.control.close(); this.actionRuntime.stop(); this.runtime.close(); }
 }

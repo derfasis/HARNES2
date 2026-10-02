@@ -19,7 +19,8 @@ function prepare(service) {
   ex.enabled();
   if (!runtimeReadiness(cfg, { decision: true }).ready) return { disposition: 'waiting_model' };
   const counts = db.get(`SELECT COUNT(*) n,COALESCE(SUM(estimated_cost_usd),0) cost,
-    COALESCE(SUM(CASE WHEN cost_status='unknown' THEN 1 ELSE 0 END),0) unknown,
+    COALESCE(SUM(CASE WHEN cost_status='unknown' AND (status NOT IN ('running','analyzed') OR NOT EXISTS
+      (SELECT 1 FROM control_tickets t WHERE t.run_id=runs.id AND t.status IN ('reserved','running'))) THEN 1 ELSE 0 END),0) unknown,
     COALESCE(SUM(CASE WHEN runtime=? THEN 1 ELSE 0 END),0) executive FROM runs WHERE created_at>=?`, RUNTIME, now().slice(0, 10));
   if (counts.n >= cfg.runtime.maxRunsPerDay || counts.executive >= cfg.executive.maxModelRunsPerDay
     || cfg.runtime.dailyBudgetUsd !== null && (counts.unknown > 0 || counts.cost >= cfg.runtime.dailyBudgetUsd)) return { disposition: 'budget_blocked' };
@@ -42,6 +43,7 @@ function prepare(service) {
     db.run(`INSERT INTO runs(id,partner_id,status,runtime,model,context_json,created_at) VALUES(?,?,'running',?,?,?,?)`,
       runId, cfg.partnerId, RUNTIME, cfg.runtime.model, JSON.stringify({ intent_id: row.id, attempt_id: attempt.id,
         mode: context.mode, packet, model_config: cfg.runtime, prompt_fingerprint: digest(instructions), contract_fingerprint: digest(contract) }), now());
+    if (service.control) service.control.bindRun(runId);
     db.run("UPDATE research_attempts SET status='running',run_id=? WHERE id=?", runId, attempt.id);
     ex.update(row, { status: planning ? 'planning' : 'reasoning' });
     if (!planning) db.run("UPDATE partner_turns SET status='running',producer='model',run_id=? WHERE id=?", runId, row.turn_id);
@@ -50,12 +52,16 @@ function prepare(service) {
   return { disposition: rows.length ? 'waiting_evidence' : 'idle' };
 }
 
-export async function processExecutive(service, runtime) {
+async function processExecutiveInternal(service, runtime) {
   const prepared = await service.exclusive(() => service.store.transaction(() => prepare(service)));
   if (!prepared.run) return prepared;
   let result;
+  let controlDenial = null;
   try { result = await runtime.decide(prepared.run, prepared.context); }
-  catch { result = { completed: false }; }
+  catch (error) {
+    if (String(error?.code ?? '').startsWith('CONTROL_')) controlDenial = error.code;
+    result = { completed: false };
+  }
   const db = service.store, ex = service.executive;
   try {
     return await service.exclusive(() => db.transaction(() => {
@@ -65,10 +71,12 @@ export async function processExecutive(service, runtime) {
         || result?.messages != null && (!Array.isArray(result.messages)
           || result.messages.some(m => !m || typeof m !== 'object' || ['tool','function'].includes(m.role)
             || m.tool_calls != null && (!Array.isArray(m.tool_calls) || m.tool_calls.length !== 0) || m.function_call));
-      let disposition = row.status !== expected ? 'cancelled' : 'model_failed';
+      let disposition = row.status !== expected ? 'cancelled' : controlDenial ? 'control_withheld' : 'model_failed';
       if (row.status === expected && result?.completed === true && !result.error && !hasTools
         && typeof result.final_response === 'string' && Buffer.byteLength(result.final_response) <= 60000) {
         try {
+          if (service.control && !service.control.canApply(prepared.run.id))
+            throw new AppError('Control-plane result is no longer applicable', 409, 'CONTROL_RESULT_WITHHELD');
           ex.current(row, { packet: !prepared.planning });
           if (service.config.executive?.modelEnabled !== true) throw new AppError('Model disabled', 409, 'EXECUTIVE_MODEL_DISABLED');
           if (prepared.planning) { ex.assertBasis(row); ex.applyPlan(row, JSON.parse(result.final_response)); }
@@ -76,7 +84,8 @@ export async function processExecutive(service, runtime) {
           disposition = prepared.planning ? 'plan_recorded' : 'brief_proposed';
         } catch (e) {
           if (!(e instanceof AppError) && !(e instanceof SyntaxError)) throw e;
-          disposition = e instanceof SyntaxError ? 'invalid_output' : e.code;
+          disposition = String(e.code ?? '').startsWith('CONTROL_') ? 'control_withheld'
+            : e instanceof SyntaxError ? 'invalid_output' : e.code;
         }
       }
       const succeeded = ['plan_recorded', 'brief_proposed'].includes(disposition);
@@ -104,6 +113,15 @@ export async function processExecutive(service, runtime) {
       if (prepared.row.turn_id) db.run("UPDATE partner_turns SET status='interrupted' WHERE id=? AND status='running'", prepared.row.turn_id);
       db.run("UPDATE runs SET status='interrupted',error='RESULT_PERSIST_FAILED',finished_at=? WHERE id=? AND status='running'", now(), prepared.run.id);
     }));
+    throw error;
+  }
+}
+
+export async function processExecutive(service, runtime) {
+  if (service.config.controlPlane?.enabled !== true) return processExecutiveInternal(service, runtime);
+  try { return await service.control.run('public', 'executive', () => processExecutiveInternal(service, runtime)); }
+  catch (error) {
+    if (String(error?.code ?? '').startsWith('CONTROL_')) return { disposition: 'control_withheld' };
     throw error;
   }
 }

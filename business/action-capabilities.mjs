@@ -8,9 +8,16 @@ import { actionCheck as check } from './actions.mjs';
 import { HUMAN_ACTION_TASK } from './action-tables.mjs';
 
 export function actionArtifact(row) {
+  const proposal = JSON.parse(row.proposal_json), packet = JSON.parse(row.packet_json);
+  if (proposal.capability_id === 'material.export_local.v1') {
+    check(packet.material && packet.material.id === proposal.material?.id && packet.material.sha256 === proposal.material?.sha256,
+      'ACTION_MATERIAL_MISMATCH');
+    return { format: 'harnes2-owner-material-v1', action_id: row.id, proposal_hash: row.proposal_hash,
+      proposal, packet, material: packet.material,
+      contact_permission: false, external_write: false, business_outcome: 'not_verified' };
+  }
   return { format: 'harnes2-owner-brief-v1', action_id: row.id, proposal_hash: row.proposal_hash,
-    proposal: JSON.parse(row.proposal_json), packet: JSON.parse(row.packet_json),
-    contact_permission: false, external_write: false, business_outcome: 'not_verified' };
+    proposal, packet, contact_permission: false, external_write: false, business_outcome: 'not_verified' };
 }
 export const artifactBytes = row => Buffer.from(JSON.stringify(actionArtifact(row), null, 2) + '\n');
 const taskValues = row => {
@@ -81,7 +88,7 @@ export class LocalActionCapabilities {
         return { outcome: 'local_task_created', task_id: taskId };
       }));
     }
-    check(p.capability_id === 'brief.publish_local.v1', 'ACTION_CAPABILITY_UNAVAILABLE');
+    check(['brief.publish_local.v1','material.export_local.v1'].includes(p.capability_id), 'ACTION_CAPABILITY_UNAVAILABLE');
     const vault = await this.vault(true), file = this.file(vault, row);
     const staged = path.join(vault, `.${row.id}.${id()}.tmp`);
     const data = artifactBytes(row); check(data.length <= 600000, 'ACTION_ARTIFACT_TOO_LARGE');
@@ -101,7 +108,8 @@ export class LocalActionCapabilities {
       stage = 'publish_link';
       await this.service.exclusive(() => { beforeEffect(); return fs.link(staged, file); });
       // No overwrite fallback: an existing name or unsupported hard links fail closed.
-      return { outcome: 'local_file_published', artifact_id: row.id, sha256: hash(data), bytes: data.length };
+      return { outcome: p.capability_id === 'material.export_local.v1' ? 'local_material_published' : 'local_file_published',
+        artifact_id: row.id, sha256: hash(data), bytes: data.length };
     } catch (error) { failure = error; if (!error.failure_stage) error.failure_stage = stage; throw error; }
     finally {
       if (opened) { try { await this.vault(); await fs.unlink(staged).catch(e => { if (e.code !== 'ENOENT') throw e; }); }
@@ -121,7 +129,7 @@ export class LocalActionCapabilities {
           && ['proposed','pending','done','cancelled'].includes(task.status);
         return { state: match ? 'present' : 'mismatch', method: 'durable_task_read', task_id: task.id, business_outcome: 'not_verified' };
       }
-      check(p.capability_id === 'brief.publish_local.v1', 'ACTION_CAPABILITY_UNAVAILABLE');
+      check(['brief.publish_local.v1','material.export_local.v1'].includes(p.capability_id), 'ACTION_CAPABILITY_UNAVAILABLE');
       const data = await this.read(row);
       if (data === null) return { state: 'absent', method: 'independent_file_read' };
       const expected = artifactBytes(row), match = data.equals(expected);
@@ -129,7 +137,7 @@ export class LocalActionCapabilities {
     } catch { return { state: 'unavailable', method: 'independent_read', reason: 'ACTION_VERIFICATION_UNAVAILABLE' }; }
   }
   async artifact(row) {
-    check(JSON.parse(row.proposal_json ?? 'null')?.capability_id === 'brief.publish_local.v1', 'ACTION_NO_ARTIFACT', 404);
+    check(['brief.publish_local.v1','material.export_local.v1'].includes(JSON.parse(row.proposal_json ?? 'null')?.capability_id), 'ACTION_NO_ARTIFACT', 404);
     const bytes = await this.read(row);
     check(bytes && bytes.equals(artifactBytes(row)), 'ACTION_ARTIFACT_NOT_VERIFIED');
     return JSON.parse(bytes.toString('utf8'));
