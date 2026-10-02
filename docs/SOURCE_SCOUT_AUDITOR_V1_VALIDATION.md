@@ -10,10 +10,10 @@ Separate prerequisite branch `codex/partner-workspace-ownership-fences-v1`:
 
 - `8b4025dd32ce09719c070853094469284bc0aa97`: live/unknown PID cannot be replaced
   merely because its lease expired; process ownership fences public/private
-  callback commits and direct agent commands require the exact control ticket.
-- `0761c943802116ffd01ca6ac6c9115c6cc35034b`: post-await private ownership checks,
-  late public/browser failure guards and matching scoped test fixtures.
-
+  callback commits, post-await private intake and late public/browser failures,
+  with matching authored test fixtures.
+- `0761c943802116ffd01ca6ac6c9115c6cc35034b`: direct agent commands require the
+  exact control ticket; matching scoped fixture calls and a focused kill case.
 - `22dc21a4803badd70bcac41b8a4c7fbd704ab073`: intentional blob pin update for the
   ownership-fenced MTProto channel; no runtime or test execution.
 
