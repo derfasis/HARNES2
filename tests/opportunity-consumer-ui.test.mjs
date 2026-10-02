@@ -178,7 +178,9 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // propagates: this publishes state, it does not swallow the fault. The only message that
     // leaves the channel is a code already shaped like one of ours. Behaviour is exercised by
     // tests/absent-source-readers.test.mjs.
-    "business/channels/telegram-mtproto.mjs": "222a329d6efa26f21a19949c62bf2bb8bbcc0e35",
+    // Ownership-fence prerequisite: stale callbacks cannot mutate successor state.
+    // Authored kill cases are in workspace-telegram-kill; execution awaits owner authorization.
+    "business/channels/telegram-mtproto.mjs": "3ab9fefee6e06a43e670034096ea532e5f613dc2",
     "benchmarks/situation-router/README.md": "0da57bf3fcb53bbec5713f6a44c48654b16270b8",
     "benchmarks/situation-router/control-v1.json": "2c6265460c6ae6cc1de9b25fa978ba25d0e66236",
     "benchmarks/situation-router/synthetic/case-01-ignore.json": "f9fe79537ac036e32bbb547961901190b3f08007",
