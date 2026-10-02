@@ -38,6 +38,27 @@ test('expired process lease does not allow a live or unknown PID takeover, and e
   assert.equal(h.store.get('SELECT owner_id FROM control_owners WHERE partner_id=?', h.config.partnerId).owner_id, successor.ownerId);
 });
 
+test('service agent writes require the exact current ticket id', async t => {
+  const h = workspaceHarness(t);
+  h.config.runtime.enabled = true;
+  await h.service.control.run('private', 'ticket-scope', async () => {
+    const runId = id();
+    h.store.run("INSERT INTO runs(id,partner_id,status,runtime,model,context_json,created_at) VALUES(?,?,'running','hermes-private-v1','offline-fixture','{}',?)",
+      runId, h.config.partnerId, new Date().toISOString());
+    h.service.control.bindRun(runId);
+    const ticketId = h.service.control.scope.getStore().id;
+    const actor = { kind: 'agent', runId, conversationId: null };
+    const payload = { kind: 'research', title: 'Record a scoped observation', instructions: 'Keep the recorded source uncertainty visible.' };
+
+    await assert.rejects(h.command('task.propose', payload, id(), actor), { code: 'CONTROL_TICKET_SCOPE_MISMATCH' });
+    await assert.rejects(h.command('task.propose', payload, id(), { ...actor, controlTicketId: 'wrong-ticket' }), { code: 'CONTROL_TICKET_SCOPE_MISMATCH' });
+    const result = await h.command('task.propose', payload, id(), { ...actor, controlTicketId: ticketId });
+    assert.equal(result.status, 'proposed');
+    assert.equal(h.store.get('SELECT COUNT(*) n FROM tasks WHERE title=?', payload.title).n, 1,
+      'the matching ticket still permits a valid scoped command');
+  });
+});
+
 test('resource admission is atomic, reserves a private slot, and expired worker cannot release its successor', async t => {
   const h = workspaceHarness(t); h.config.controlPlane.maxConcurrent = 2;
   const gate = deferred(); let oldRun;
@@ -114,7 +135,8 @@ test('a CP-admitted private run cannot inherit legacy autopilot after CP is disa
   const oldKey = process.env.PARTNER_MODEL_API_KEY; process.env.PARTNER_MODEL_API_KEY = 'offline-fake';
   t.after(() => { if (oldKey === undefined) delete process.env.PARTNER_MODEL_API_KEY; else process.env.PARTNER_MODEL_API_KEY = oldKey; });
   h.scheduler.runtime = { async run(run) {
-    await h.command('draft.create', { conversation_id, action: 'handoff', text: 'Owner review required.' }, undefined, { kind: 'agent', runId: run.id, conversationId: conversation_id });
+    await h.command('draft.create', { conversation_id, action: 'handoff', text: 'Owner review required.' }, undefined,
+      { kind: 'agent', runId: run.id, conversationId: conversation_id, controlTicketId: h.service.control.scope.getStore().id });
     // Keep the legacy AUTOPILOT conversation as a valid positive trigger; only admission changes.
     h.config.controlPlane.enabled = false;
     return { completed: true, usage: { estimated_cost_usd: 0, cost_status: 'runtime_estimate' } };
@@ -143,7 +165,8 @@ test('a held public inference does not stop inbound drafting, source reconciliat
   t.after(() => { if (oldKey === undefined) delete process.env.PARTNER_MODEL_API_KEY; else process.env.PARTNER_MODEL_API_KEY = oldKey; });
   const gate = deferred(); let publicCalls = 0, privateCalls = 0;
   h.scheduler.runtime = { async decide() { publicCalls++; if (publicCalls === 1) return gate.promise; return { completed: false, usage: { estimated_cost_usd: 0, cost_status: 'runtime_estimate' } }; },
-    async run(run) { privateCalls++; await h.command('draft.create', { conversation_id, purpose: 'reply', text: 'The source states two hours; the requirement remains unverified.', evidence: 'Reply only to the recorded inbound' }, undefined, { kind: 'agent', runId: run.id, conversationId: conversation_id });
+    async run(run) { privateCalls++; await h.command('draft.create', { conversation_id, purpose: 'reply', text: 'The source states two hours; the requirement remains unverified.', evidence: 'Reply only to the recorded inbound' }, undefined,
+      { kind: 'agent', runId: run.id, conversationId: conversation_id, controlTicketId: h.service.control.scope.getStore().id });
       return { completed: true, usage: { estimated_cost_usd: 0, cost_status: 'runtime_estimate' } }; }, close() {} };
   await h.scheduler.sourceTick(); const publicPending = h.scheduler.reasonTick(); await spin(() => publicCalls === 1);
   await h.scheduler.privateTick(); assert.equal(privateCalls, 1);

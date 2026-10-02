@@ -111,7 +111,7 @@ export class BusinessService {
       const ticket = this.control.require(actor.runId, { plane: 'private' });
       const run = this.store.get('SELECT * FROM runs WHERE id=? AND partner_id=?', actor.runId, this.config.partnerId);
       ensure(run?.status === 'running' && run.conversation_id === (actor.conversationId ?? null), 'Запуск вне области разговора', 403, 'CONTROL_AGENT_SCOPE');
-      if (actor.controlTicketId) ensure(actor.controlTicketId === ticket.id, 'Недействительная область запуска', 403, 'CONTROL_AGENT_SCOPE');
+      ensure(actor.controlTicketId === ticket.id, 'Control-plane ticket does not match this agent scope', 403, 'CONTROL_TICKET_SCOPE_MISMATCH');
       if (run.conversation_id) this.assertRunFresh(actor, run.conversation_id);
     }
     const fingerprint = hash(JSON.stringify({ partner: this.config.partnerId, action, p, actor: actor.kind, run: actor.runId ?? null, scope: actor.conversationId ?? null }));
