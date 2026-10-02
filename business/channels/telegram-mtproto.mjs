@@ -4,6 +4,7 @@ import { id } from '../store.mjs';
 import { AppError, ensure, now } from '../errors.mjs';
 import { TelegramPublicSourceReader } from '../sources/telegram-public-reader.mjs';
 import { GramjsSourceRpc } from '../sources/telegram-gramjs-rpc.mjs';
+import { reconcileTelegramReaders } from '../sources/telegram-source-registry.mjs';
 
 const require = createRequire(import.meta.url);
 const { TelegramClient } = require('telegram');
@@ -30,6 +31,7 @@ export class MtprotoTelegramChannel {
   constructor(service) {
     this.service = service;
     this.client = null;
+    this.clientGeneration = 0;
     this.accountId = null;
     this.connected = false;
     this.stopped = false;
@@ -93,15 +95,18 @@ export class MtprotoTelegramChannel {
   }
 
   async connect() {
+    this.requireProcessOwner();
     const credentials = this.credentials();
     ensure(credentials.apiId > 0, 'MTProto API ID не настроен', 409);
     ensure(credentials.apiHash, 'MTProto API hash не настроен', 409);
     ensure(credentials.session, 'MTProto session не настроена', 409);
     this.client = new TelegramClient(new StringSession(credentials.session), credentials.apiId, credentials.apiHash, {
+      ...(this.service.scout.enabled?{floodSleepThreshold:0,requestRetries:1}:{}),
       connectionRetries: 5,
       deviceModel: 'HARNES2 Hermes',
       systemVersion: 'Windows'
     });
+    this.clientGeneration++;
     await this.client.connect();
     const me = await this.client.getMe();
     this.accountId = String(me.id);
@@ -123,6 +128,7 @@ export class MtprotoTelegramChannel {
   // then handed to the scheduler. A source that cannot be started never blocks the connection,
   // and never blocks another source either: one dead reader must not cost the live ones.
   async startSourceReaders() {
+    if(this.service.scout.enabled)return reconcileTelegramReaders(this);
     const policies = this.service.config.opportunity?.telegramSources ?? [];
     this.sourceReaders = [];
     let firstError = null;

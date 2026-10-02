@@ -126,6 +126,9 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
   // operation-scoped no-tool/private tickets, and loss-visible serial private intake.
   // Semantic proofs: workspace-acceptance/control-kill/telegram-kill/transfer tests.
   // All source/router/transport contracts, Hermes worker and old SQL pins stay frozen.
+  // Source Scout deliberately extends Store recovery/catalogue, gated MTProto reads,
+  // and advisory capability metadata. No frozen Router/Projection/worker/SQL changes.
+  // Scout acceptance/SDK/transfer cases are authored; they were not run in this task.
   const pinned = {
     "business/situation-router.mjs": "ef2a2b53f0cec4560920453c4ff5c1e3fd88df61",
     "contracts/situation-router.schema.json": "ee18ffd684545585c8868ebe424578774bd771a0",
@@ -157,7 +160,7 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // pre-release 008 receipt, only against the unchanged published 008 SQL.
     // All other applied-migration checks remain strict; 009 is additive.
     // Actual old database upgrade/import: outcome-transfer-kill.test.mjs.
-    "business/store.mjs": "780ccb031937660492d906b0464c5e7aff17497b",
+    "business/store.mjs": "326539ec75326da62309dc6a8602d2539ddd118a",
     "adapters/hermes/credentials.py": "2797bd89081eaf4a950178cec3d637015ee8f45f",
     "adapters/hermes/runner.py": "e631237829d9b7a4521799b4a19c4c500b33f5aa",
     // Deliberate v0 extension: existing worker, no-tool envelope tested in opportunity-runtime.test.mjs.
@@ -180,7 +183,7 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // tests/absent-source-readers.test.mjs.
     // Ownership-fence prerequisite: stale callbacks cannot mutate successor state.
     // Authored kill cases are in workspace-telegram-kill; execution awaits owner authorization.
-    "business/channels/telegram-mtproto.mjs": "3ab9fefee6e06a43e670034096ea532e5f613dc2",
+    "business/channels/telegram-mtproto.mjs": "356a4ff6315b3b6d9a6347884aa668a7eee53341",
     "benchmarks/situation-router/README.md": "0da57bf3fcb53bbec5713f6a44c48654b16270b8",
     "benchmarks/situation-router/control-v1.json": "2c6265460c6ae6cc1de9b25fa978ba25d0e66236",
     "benchmarks/situation-router/synthetic/case-01-ignore.json": "f9fe79537ac036e32bbb547961901190b3f08007",
@@ -193,7 +196,7 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     "partner/behavioral_examples.md": "467282e6705e951f0376ae9cb712a6ebb57bab38",
     // Metadata correction: Browser v0 already implements an allowlisted read-only web reader.
     // Its catalog entry grants no runtime, contact or write authority.
-    "partner/capabilities.json": "8815b597ecf9d0e14fbaa95a6520c89c4d5bfd31",
+    "partner/capabilities.json": "3a8f1e9653331792db9e069027553ab5ae40a75d",
     "partner/identity.md": "d62383e15fde5fbb78dcff171d58aa6905f97dcb",
     "partner/knowledge/pm-international.json": "a9fe030d2ed9602149e82062eb904fea4c542a1b",
     "partner/profile.json": "4a66a8207b4227be2f688701d0f0b67cbd9b544b",

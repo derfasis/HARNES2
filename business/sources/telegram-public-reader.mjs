@@ -25,8 +25,16 @@ export class TelegramPublicSourceReader {
     this.#health=()=>this.confirmCurrent();service.sourceTransportHealth??=new Map();service.sourceTransportHealth.set(sourceId,this.#health);
     rpc.subscribe(update=>this.receive(update),()=>this.fault());
   }
-  #owns() {const control=this.#service.control;return this.#service.sourceTransportHealth.get(this.#p.sourceId)===this.#health
-    && !control?.stopped && (!control || control.processCurrent());}
+  #owns() {
+    const control=this.#service.control;
+    if(this.#service.sourceTransportHealth.get(this.#p.sourceId)!==this.#health
+        || control?.stopped || control && !control.processCurrent())return false;
+    // Revocation/replacement takes effect before the registry gets another tick.
+    // This exact captured authority also fences queued difference commits and
+    // late failure callbacks, which may run after readDifference has returned.
+    try{return digest(telegramSourcePolicy(this.#service,this.#p.sourceId))===digest(this.#p);}
+    catch{return false;}
+  }
   #allowedChannel(channel) {
     return channel && !channel.min && !channel.restricted && (channel.broadcast || channel.megagroup)
       && (this.#joinedPeer ? !channel.left && channel.accessHash?.toString()===this.#peer.accessHash?.toString()

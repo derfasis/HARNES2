@@ -18,8 +18,9 @@ import { exportPartner } from './export.mjs';
 import { listCandidates } from './executive-donors.mjs';
 import { AppError, ensure, requiredText } from './errors.mjs';
 import { validateControl } from './control-plane.mjs';
+import { validateScout } from './scout-policy.mjs';
 
-const publicFiles = new Map([['/', ['index.html','text/html; charset=utf-8']], ['/app.js',['app.js','text/javascript; charset=utf-8']], ['/research.js',['research.js','text/javascript; charset=utf-8']], ['/actions.js',['actions.js','text/javascript; charset=utf-8']], ['/outcomes.js',['outcomes.js','text/javascript; charset=utf-8']], ['/workspace.js',['workspace.js','text/javascript; charset=utf-8']], ['/styles.css',['styles.css','text/css; charset=utf-8']], ['/favicon.svg',['favicon.svg','image/svg+xml']]]);
+const publicFiles = new Map([['/', ['index.html','text/html; charset=utf-8']], ['/app.js',['app.js','text/javascript; charset=utf-8']], ['/research.js',['research.js','text/javascript; charset=utf-8']], ['/actions.js',['actions.js','text/javascript; charset=utf-8']], ['/outcomes.js',['outcomes.js','text/javascript; charset=utf-8']], ['/workspace.js',['workspace.js','text/javascript; charset=utf-8']], ['/scout.js',['scout.js','text/javascript; charset=utf-8']], ['/styles.css',['styles.css','text/css; charset=utf-8']], ['/favicon.svg',['favicon.svg','image/svg+xml']]]);
 const validateCommand = new Ajv().compile(readJson(path.join(ROOT,'contracts/command.schema.json')));
 const tokenEquals = (a,b) => typeof a === 'string' && Buffer.byteLength(a) === Buffer.byteLength(b) && timingSafeEqual(Buffer.from(a),Buffer.from(b));
 async function readBody(req) {
@@ -88,6 +89,7 @@ const discoveryQueryOptions = url => {
 export async function start({ config = loadConfig(), directory = DATA } = {}) {
   ensure(config.server.host === '127.0.0.1', 'Only loopback dashboard binding is supported', 409);
   validateControl(config);
+  validateScout(config);
   checkAutomaticPrerequisite(config);
   validateAllowedSourceRefs(config);
   validateTelegramSources(config);
@@ -155,6 +157,14 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
         return send(404,{error:'not found'});
       }
       ensure(tokenEquals(req.headers['x-partner-token'],operatorToken), 'Перезагрузите страницу для обновления сессии', 403);
+      if (req.method === 'GET' && url.pathname === '/api/scout') {
+        ensure([...url.searchParams].length===0,'Invalid scout query',400);
+        return send(200,service.scout.snapshot());
+      }
+      if (req.method === 'GET' && url.pathname.startsWith('/api/scout/campaigns/')) {
+        ensure(/^\/api\/scout\/campaigns\/[a-f0-9-]{36}$/.test(url.pathname)&&[...url.searchParams].length===0,'Invalid scout campaign',400);
+        return send(200,service.scout.presentation(service.scout.campaign(url.pathname.split('/').at(-1))));
+      }
       if (req.method === 'GET' && url.pathname === '/api/workspace') {
         const options = discoveryQueryOptions(url);
         return send(200, service.work.snapshot(options));
@@ -305,7 +315,7 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
     // was still writing its receipt — the database disappearing from under a worker that is
     // committing to it, which is how a run ends as `interrupted` with the receipt half-written.
     // Both loops are drained here, and the store is closed after both are quiet.
-    while (scheduler.busy || scheduler.reasonBusy || scheduler.privateBusy || scheduler.workBusy || scheduler.actionRuntime.busy || telegram.polling) await new Promise(resolve=>setTimeout(resolve,50));
+    while (scheduler.busy || scheduler.reasonBusy || scheduler.privateBusy || scheduler.workBusy || scheduler.scoutRuntime.busy || scheduler.scoutReasonBusy || scheduler.actionRuntime.busy || telegram.polling || telegram.sourceReconcile) await new Promise(resolve=>setTimeout(resolve,50));
     await closed; await telegram.stop(); service.control.releaseProcess(); store.close();
   };
   for (const signal of ['SIGINT','SIGTERM']) process.once(signal,()=>close().then(()=>process.exit(0)));

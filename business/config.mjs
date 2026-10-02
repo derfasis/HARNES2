@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import { validateControl } from './control-policy.mjs';
+import { validateScout } from './scout-policy.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -171,6 +172,7 @@ export function loadConfig() {
   // permitted material reaches the pipeline and it cannot send. Concurrent private reasoning
   // requires Control Plane admission; live sending remains refused before anything connects.
   validateControl(cfg);
+  validateScout(cfg);
   checkAutomaticPrerequisite(cfg);
   return cfg;
 }

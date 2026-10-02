@@ -3,6 +3,7 @@ import { id, hash } from './store.mjs';
 import { ensure, requiredText, dateTime, now, AppError } from './errors.mjs';
 import { digest, sourceRows, sourceAccessReadiness, sourceEvent } from './source-ingestion.mjs';
 import { ActionLoop } from './actions.mjs';
+import { effectiveSourceConfig } from './scout-policy.mjs';
 
 const check = (ok, code, status = 409) => ensure(ok, code, status, code);
 const fields = (p, keys) => check(p && typeof p === 'object' && !Array.isArray(p) && Object.keys(p).every(k => keys.includes(k)), 'WORK_FIELDS_INVALID', 400);
@@ -82,7 +83,7 @@ export class WorkCore {
     check(Number.isInteger(limit) && limit >= 1 && limit <= 50 && typeof cursor === 'string' && (cursor === '' || /^[0-9a-f-]{36}$/i.test(cursor)), 'WORK_PAGE_INVALID', 400);
     const rows = this.db.all('SELECT id FROM work_cases WHERE partner_id=? AND id>? ORDER BY id LIMIT ?', this.partnerId, cursor, limit + 1);
     return { enabled: this.service.config.workspace?.enabled === true, model_enabled: this.service.config.workspace?.modelEnabled === true,
-      source_refs: this.service.config.opportunity.allowedSourceRefs.slice(0, 100), goals: this.service.continuity.list({ limit: 50 }).items.map(g => this.service.continuity.detail(g.id)),
+      source_refs: (effectiveSourceConfig(this.service).opportunity?.allowedSourceRefs ?? []).slice(0, 100), goals: this.service.continuity.list({ limit: 50 }).items.map(g => this.service.continuity.detail(g.id)),
       cases: rows.slice(0, limit).map(r => this.presentation(r.id)), next_cursor: rows.length > limit ? rows[limit - 1].id : null, control: this.service.control.status(), ...EFFECTS };
   }
   addMaterial(row, p, producer = 'operator', runId = null) {

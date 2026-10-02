@@ -1,6 +1,8 @@
 import { hash } from './store.mjs';
 import { ensure } from './errors.mjs';
 import { validateTelegramSources, validateBrowserSources } from './config.mjs';
+import { effectiveSourceConfig } from './scout-policy.mjs';
+import { telegramReadState } from './telegram-read-gate.mjs';
 
 export const SOURCE_MESSAGE = 'source.message';
 export const PIPELINE_FINISHED = 'opportunity.pipeline.finished';
@@ -74,8 +76,9 @@ export const browserPolicyHash = (p) => digest(browserPolicyShape(p));
 // the polling module because the freshness boundary below needs it, and a boundary that asked the
 // poller which transport it was would be a cycle between two things that must agree.
 export function sourceTransportKind(service, sourceId) {
-  const browser = (service.config.opportunity?.browserSources ?? []).some((e) => e.sourceId === sourceId);
-  const telegram = (service.config.opportunity?.telegramSources ?? []).some((e) => e.sourceId === sourceId);
+  const config = effectiveSourceConfig(service);
+  const browser = (config.opportunity?.browserSources ?? []).some((e) => e.sourceId === sourceId);
+  const telegram = (config.opportunity?.telegramSources ?? []).some((e) => e.sourceId === sourceId);
   // A source id in both lists does not say which transport is meant, and picking one silently makes
   // the choice depend on the order of two conditions. It is refused instead.
   check(!(browser && telegram), 'SOURCE_TRANSPORT_AMBIGUOUS');
@@ -139,13 +142,15 @@ function browserTransportBoundary(service, sourceId) {
   return state;
 }
 function telegramTransportBoundary(service, sourceId) {
-  validateTelegramSources(service.config);
-  const bindings = service.config.opportunity.telegramSources;
+  const config = effectiveSourceConfig(service);
+  validateTelegramSources(config);
+  const bindings = config.opportunity.telegramSources;
   const configured = bindings.filter(p => p.sourceId === sourceId);
   const state = sourceCheckpoint(service, sourceId);
   if (!configured.length && !state) return null; // Existing operator/fixture sources remain unchanged.
   check(configured.length === 1, 'SOURCE_TRANSPORT_POLICY_UNAVAILABLE');
   const p = configured[0];
+  if(service.scout?.enabled){const read=telegramReadState(service,p.accountId,{sourceId});check(!['SCOUT_ACCOUNT_BACKOFF','SCOUT_READ_GATE_UNPROVEN','SCOUT_OWNERSHIP_UNAVAILABLE'].includes(read.reason),'SOURCE_TRANSPORT_DIRTY');}
   check(state && state.policy_hash === digest(p), 'SOURCE_TRANSPORT_NOT_READY');
   validateSourceCheckpoint(state,p);
   check(state.phase === 'current', 'SOURCE_TRANSPORT_NOT_CURRENT');
@@ -159,7 +164,7 @@ export function sourceTransportBoundary(service, sourceId) {
   const kind = sourceTransportKind(service, sourceId);
   if (kind === 'browser') return browserTransportBoundary(service, sourceId);
   if (kind === 'fixture') {
-    const bindings = service.config.opportunity?.telegramSources ?? [];
+    const bindings = effectiveSourceConfig(service).opportunity?.telegramSources ?? [];
     if (!bindings.some((p) => p.sourceId === sourceId) && !sourceCheckpoint(service, sourceId)) return null;
   }
   const telegram = telegramTransportBoundary(service, sourceId);
@@ -181,7 +186,7 @@ export function sourceTransportReadiness(service, sourceId) {
   }
 }
 export function sourceAllowlist(service) {
-  const refs = service.config.opportunity?.allowedSourceRefs;
+  const refs = effectiveSourceConfig(service).opportunity?.allowedSourceRefs;
   check(Array.isArray(refs) && refs.every(ref => typeof ref === 'string'), 'INVALID_SOURCE_ALLOWLIST');
   return refs;
 }
@@ -278,8 +283,9 @@ export function ingestSource(service, raw) {
   return { source_event_id: String(service.store.get('SELECT last_insert_rowid() AS id').id), duplicate: false, disposition: 'registered' };
 }
 function isTelegramChannelAuthor(service, message) {
-  return Array.isArray(service.config.opportunity.telegramSources)
-    && service.config.opportunity.telegramSources.some(p=>p.sourceId===message.source_id)
+  const config = effectiveSourceConfig(service);
+  return Array.isArray(config.opportunity?.telegramSources)
+    && config.opportunity.telegramSources.some(p=>p.sourceId===message.source_id)
     && message.author_id?.startsWith('channel:');
 }
 function authorBinding(service, message) {

@@ -112,6 +112,8 @@ export class ControlPlane {
     return { enabled: this.enabled, active: this.db.all("SELECT id,plane,operation,run_id,status,expires_at,reserved_usd FROM control_tickets WHERE partner_id=? AND status IN ('reserved','running') ORDER BY created_at LIMIT 4", this.service.config.partnerId),
       limits: this.service.config.controlPlane ?? null, planes: PLANES.map(plane => ({ id: plane, max_active: 1, effect_authority: 'none_from_admission' })),
       capabilities: [{ id: 'source.read.v1', effect: 'read_only_public', authority: 'configured_source_allowlist' },
+        { id: 'source.audit.v1', effect: 'bounded_read_only_history', authority: 'exact_current_owner_scout_audit_grant' },
+        { id: 'source.monitor.v1', effect: 'read_only_public', authority: 'exact_current_owner_monitor_grant_and_native_checkpoint' },
         { id: 'conversation.reason.v1', effect: 'private_proposals', authority: 'existing_conversation_and_permissions' },
         { id: 'material.prepare.v1', effect: 'advisory_ready_material', authority: 'explicit_request_current_accepted_basis' },
         ...ACTION_CAPABILITIES.map(c => ({ ...c, authority: 'exact_unexpired_owner_action_grant' }))],

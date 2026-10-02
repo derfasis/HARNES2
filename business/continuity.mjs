@@ -5,6 +5,7 @@ import { ROOT, readJson } from './config.mjs';
 import { id } from './store.mjs';
 import { ensure, requiredText, dateTime, now, AppError } from './errors.mjs';
 import { sourceEvent, sourceRows, sourceAccessReadiness, sourceTransportKind, browserCheckpoint, digest } from './source-ingestion.mjs';
+import { effectiveSourceConfig } from './scout-policy.mjs';
 
 export const proposalSchema = readJson(path.join(ROOT, 'contracts/continuity-proposal.schema.json'));
 const validate = new Ajv({ strict: true, allowUnionTypes: true }).compile(proposalSchema);
@@ -25,7 +26,7 @@ export class ContinuityLoop {
   businessBasis() { return digest({ mission: this.service.partner().mission,
     offer: this.service.config.opportunity?.activeOffer, goal: this.service.config.opportunity?.goalText }); }
   policyHash(sourceRef) {
-    const cfg = this.service.config.opportunity;
+    const cfg = effectiveSourceConfig(this.service).opportunity;
     const browser = cfg.browserSources?.find(p => p.sourceId === sourceRef);
     const telegram = cfg.telegramSources?.find(p => p.sourceId === sourceRef);
     const policy = browser ? { ...browser } : telegram ?? { sourceId: sourceRef, kind: 'fixture' };
@@ -135,7 +136,7 @@ export class ContinuityLoop {
     const rows = this.store.all('SELECT id,title,status,revision,attention,attention_at,wake_at FROM partner_threads WHERE partner_id=? AND id>? ORDER BY id LIMIT ?', this.partnerId, cursor, limit + 1);
     return { items: rows.slice(0, limit).map(r => ({ ...r, ...AUTHORITY })), next_cursor: rows.length > limit ? rows[limit - 1].id : null,
       enabled: this.service.config.continuity?.enabled === true, model_enabled: this.service.config.continuity?.modelEnabled === true,
-      source_refs: (this.service.config.opportunity?.allowedSourceRefs ?? []).filter(ref => typeof ref === 'string').slice(0, 100) };
+      source_refs: (effectiveSourceConfig(this.service).opportunity?.allowedSourceRefs ?? []).filter(ref => typeof ref === 'string').slice(0, 100) };
   }
   turn(turnId) {
     const row = this.store.get('SELECT t.* FROM partner_turns t JOIN partner_threads p ON p.id=t.thread_id WHERE t.id=? AND p.partner_id=?', turnId, this.partnerId);
@@ -166,8 +167,8 @@ export class ContinuityLoop {
     for (const sourceRef of p.source_ids) {
       requiredText(sourceRef, 'source_id', 300);
       // Enrollment requires authorization, not a live connection. Missing health is visible.
-      check(Array.isArray(this.service.config.opportunity?.allowedSourceRefs)
-        && this.service.config.opportunity.allowedSourceRefs.includes(sourceRef), 'CONTINUITY_SOURCE_SCOPE');
+      const allowedSourceRefs = effectiveSourceConfig(this.service).opportunity?.allowedSourceRefs;
+      check(Array.isArray(allowedSourceRefs) && allowedSourceRefs.includes(sourceRef), 'CONTINUITY_SOURCE_SCOPE');
       this.store.run('INSERT INTO partner_watches VALUES(?,?,?,?,?,NULL)', threadId, sourceRef, this.policyHash(sourceRef), this.head(sourceRef), 'active');
     }
     const initial = p.initial_evidence_event_ids ?? [];

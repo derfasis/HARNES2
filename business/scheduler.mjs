@@ -12,9 +12,14 @@ import { ActionRuntime } from './action-runtime.mjs';
 import { processActionPlan } from './action-reasoning.mjs';
 import { processExecutive } from './executive-reasoning.mjs';
 import { processWork } from './work-reasoning.mjs';
+import { ScoutRuntime } from './scout-runtime.mjs';
+import { processScoutAssessment } from './scout-reasoning.mjs';
+import { effectiveSourceConfig } from './scout-policy.mjs';
+import { reconcileTelegramReaders } from './sources/telegram-source-registry.mjs';
+import { dueTelegramSources } from './telegram-monitoring.mjs';
 
 export class Scheduler {
-  constructor(service, runtime, telegram, sourceReaders = []) { this.sourceReaders = sourceReaders; this.service = service; this.runtime = runtime; this.telegram = telegram; this.busy = false; this.reasonBusy = false; this.stopped = false; this.lastReason = null; this.sourceReadReason = null; this.activeRun = null; this.readersAbsentReported = false; this.sourceReadersState = null; this.browserPolls = new Map(); this.sourceReadFailures = new Map();
+  constructor(service, runtime, telegram, sourceReaders = []) { this.sourceReaders = sourceReaders; this.service = service; this.runtime = runtime; this.telegram = telegram; this.scoutRuntime = new ScoutRuntime(service,telegram); this.busy = false; this.reasonBusy = false; this.stopped = false; this.lastReason = null; this.sourceReadReason = null; this.activeRun = null; this.readersAbsentReported = false; this.sourceReadersState = null; this.browserPolls = new Map(); this.sourceReadFailures = new Map();
     // Tri-state on purpose. `false` is a claim — "a reconciliation was attempted and it failed" —
     // and a partner that has not run a pass yet has made no such claim. Reporting `false` at cold
     // start told the operator the partner was broken when the only true thing was that it had not
@@ -38,6 +43,9 @@ export class Scheduler {
     this.workTimer = setInterval(() => this.workTick().catch(failed), seconds);
     this.controlTimer = setInterval(() => { try { this.service.control.heartbeat(); } catch { this.stop(); } }, Math.min(seconds, 10000));
     this.actionTimer = setInterval(() => this.actionTick().catch(failed), seconds);
+    this.scoutRuntime = this.scoutRuntime ?? new ScoutRuntime(this.service,this.telegram);
+    this.scoutTimer = setInterval(() => this.scoutTick().catch(failed),seconds);
+    this.scoutReasonTimer = setInterval(() => this.scoutReasonTick().catch(failed),seconds);
   }
   // One full pass, eyes then head, in that order. This is what an operator or a test means by
   // "run a tick", and it is what `/api/scheduler/wake` uses. The scheduled loops never call it,
@@ -47,6 +55,8 @@ export class Scheduler {
     await this.sourceTick();
     await Promise.all([this.reasonTick(), this.privateTick(), this.workTick()]);
     await this.actionTick();
+    await this.scoutTick();
+    await this.scoutReasonTick();
   }
   async actionTick() {
     if (this.stopped || !this.service.config.scheduler.enabled) return;
@@ -60,15 +70,19 @@ export class Scheduler {
   // `reason_busy` is reported beside `busy` rather than inside it: the two loops are independent,
   // and an operator looking at one long-running tick must be able to tell whether the eyes or the
   // head is the thing that is working.
-  status() { return { enabled: this.service.config.scheduler.enabled, control: this.service.control.status(), workspace: this.workState ?? { disposition: 'not_run' }, private: this.privateState ?? { disposition: 'not_run' }, busy: this.busy, reason_busy: this.reasonBusy, action_busy: this.actionRuntime.busy, actions: this.actionState ?? { disposition: 'not_run' }, active_run: this.activeRun, reason: this.lastReason, model: runtimeReadiness(this.service.config), source_readers: this.sourceReadersState, continuity: this.continuityState ?? { disposition: 'not_run' }, executive: this.executiveState ?? { disposition: 'not_run' }, outcomes: this.outcomesState ?? { disposition: 'not_run' } }; }
+  status() { return { enabled: this.service.config.scheduler.enabled, control: this.service.control.status(), workspace: this.workState ?? { disposition: 'not_run' }, scout: this.scoutRuntime.state, scout_reasoning: this.scoutReasonState ?? { disposition: 'not_run' }, private: this.privateState ?? { disposition: 'not_run' }, busy: this.busy, reason_busy: this.reasonBusy, action_busy: this.actionRuntime.busy, actions: this.actionState ?? { disposition: 'not_run' }, active_run: this.activeRun, reason: this.lastReason, model: runtimeReadiness(this.service.config), source_readers: this.sourceReadersState, continuity: this.continuityState ?? { disposition: 'not_run' }, executive: this.executiveState ?? { disposition: 'not_run' }, outcomes: this.outcomesState ?? { disposition: 'not_run' } }; }
   // The source loop. Poll, checkpoint, retire, discover. No model call anywhere in it.
   async sourceTick() {
     if (this.busy || this.stopped || !this.service.config.scheduler.enabled) return;
     this.busy = true;
     try {
-      const cfg = this.service.config;
+      const cfg = effectiveSourceConfig(this.service);
       if (this.service.control.enabled && !this.service.control.processCurrent()) return;
       this.service.control.sweep();
+      if(this.service.scout.enabled){
+        await this.service.exclusive(()=>this.service.store.transaction(()=>this.service.scout.reconcile()));
+        await reconcileTelegramReaders(this.telegram);
+      }
       try { await this.service.exclusive(() => this.service.work.reconcile()); this.workReconcileState = 'reconciled'; }
       catch { this.workReconcileState = 'failed'; }
       await this.service.exclusive(() => this.service.store.transaction(() => this.service.engagement.sweep()));
@@ -193,12 +207,15 @@ export class Scheduler {
         // as one flag for the pass. The flag was the bug: a pass that read nothing reported the
         // partner healthy because nothing had been tried, not because anything had worked.
         let sourceReadFailure=null;
-        // Telegram is polled exactly as before, every tick, all of it. Browser sources are chosen
+        // Telegram retains its legacy cadence unless Scout portfolio observation is enabled.
+        // Scout selects a bounded, durable rotation; browser sources are chosen
         // by their own interval and capped per tick, because a page that has not changed in five
         // minutes does not need to be fetched every twenty seconds — and a page that is down must
         // not be retried on every tick for being down.
         const { selected: dueBrowser, considered } = dueBrowserSources(this.service, this.sourceReaders, this.browserPolls);
         const dueBrowserIds = new Set(dueBrowser.map((entry) => entry.sourceId));
+        const dueTelegram=await this.service.exclusive(()=>this.service.store.transaction(()=>dueTelegramSources(this.service,this.sourceReaders)));
+        const dueTelegramIds=new Set(dueTelegram.map(entry=>entry.sourceId));
         // Everything the tick looked at is stamped, read or not: a source that was due and
         // passed over because the budget was spent is not due again on the next tick, or the
         // budget would drain the whole list in a minute and the interval would mean nothing.
@@ -210,6 +227,7 @@ export class Scheduler {
           // was re-read on every tick until one happened to be due. A set has no empty case.
           const isBrowser = sourceTransportKind(this.service, sourceId) === 'browser';
           if (isBrowser && !dueBrowserIds.has(sourceId)) continue;
+          if (!isBrowser && sourceTransportKind(this.service,sourceId)==='telegram'&&!dueTelegramIds.has(sourceId))continue;
           // Read sources carry a second stamp: a source that was read is older than one that was
           // merely passed over, and that is what makes the next round reach a different pair.
           if (isBrowser) markBrowserRead(this.browserPolls, sourceId);
@@ -438,6 +456,17 @@ export class Scheduler {
     try { this.workState = await processWork(this.service, this.runtime); return this.workState; }
     finally { this.workBusy = false; }
   }
+  async scoutTick(){
+    if(this.stopped||!this.service.config.scheduler.enabled)return;
+    return this.scoutRuntime.tick();
+  }
+  async scoutReasonTick(){
+    if(this.stopped||this.scoutReasonBusy||!this.service.config.scheduler.enabled)return;
+    // Existing public reasoning retains first admission; Scout uses its own capped requests.
+    this.scoutReasonBusy=true;
+    try{this.scoutReasonState=await processScoutAssessment(this.service,this.runtime);return this.scoutReasonState;}
+    finally{this.scoutReasonBusy=false;}
+  }
   async ensurePlanningTask() {
     const cfg = this.service.config.scheduler; if (!cfg.dailyPlanning) return;
     const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: cfg.timezone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' }).formatToParts().map(p => [p.type,p.value]));
@@ -448,5 +477,5 @@ export class Scheduler {
   cancel(runId) { this.runtime.cancel(runId); }
   // Retire ownership and stop every clock. The server drains all in-flight planes before
   // releasing the process lease or closing SQLite; late model answers cannot regain admission.
-  stop() { this.stopped = true; clearInterval(this.timer); clearInterval(this.reasonTimer); clearInterval(this.actionTimer); clearInterval(this.privateTimer); clearInterval(this.workTimer); clearInterval(this.controlTimer); this.service.control.close(); this.actionRuntime.stop(); this.runtime.close(); }
+  stop() { this.stopped = true; clearInterval(this.timer); clearInterval(this.reasonTimer); clearInterval(this.actionTimer); clearInterval(this.privateTimer); clearInterval(this.workTimer); clearInterval(this.controlTimer); clearInterval(this.scoutTimer); clearInterval(this.scoutReasonTimer); this.scoutRuntime.stop(); this.service.control.close(); this.actionRuntime.stop(); this.runtime.close(); }
 }

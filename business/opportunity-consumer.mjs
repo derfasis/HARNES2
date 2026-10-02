@@ -1,6 +1,7 @@
 import { ensure } from './errors.mjs';
 import { digest, automaticBoundary, sourceFreshnessReasons, sourceEvent } from './source-ingestion.mjs';
 import { buildOpportunityContext, parseOpportunityOutput } from './opportunity-projection.mjs';
+import { effectiveSourceConfig } from './scout-policy.mjs';
 
 export const OPPORTUNITY_TASK = 'opportunity_review';
 const CAPTURE = 'opportunity.snapshot';
@@ -13,7 +14,7 @@ function fields(value, allowed) {
   check(Buffer.byteLength(JSON.stringify(value)) <= 100000, 'INPUT_TOO_LARGE');
 }
 function policy(service) {
-  const p = service.config.opportunity;
+  const p = effectiveSourceConfig(service).opportunity;
   check(p && Array.isArray(p.allowedSourceRefs) && p.allowedSourceRefs.every(ref => typeof ref === 'string' && ref.trim()), 'SOURCE_POLICY_REQUIRED');
   check(p.activeOffer && typeof p.goalText === 'string' && p.goalText.trim() && p.goalText.length <= 4000, 'ACTIVE_OFFER_AND_GOAL_REQUIRED');
   check(Array.isArray(p.allowedChannels) && p.allowedChannels.length === 1 && p.allowedChannels.every(channel => channel === 'public')

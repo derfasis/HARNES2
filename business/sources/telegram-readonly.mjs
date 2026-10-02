@@ -4,6 +4,7 @@ import { AppError, ensure, now } from '../errors.mjs';
 import { automaticBoundary, digest, ingestSource, finishSource, sourceRows, sourceCheckpoint, sourceAllowlist, SOURCE_CHECKPOINT_CHANNEL, validateSourceCheckpoint } from '../source-ingestion.mjs';
 import { markDiscoveryPending } from '../discovery.mjs';
 import { validateTelegramSources } from '../config.mjs';
+import { effectiveSourceConfig } from '../scout-policy.mjs';
 
 const UPDATE = 'source.telegram.update';
 const TOMBSTONE = 'source.telegram.tombstone';
@@ -61,7 +62,7 @@ function fields(value, keys) {
 }
 function policy(service, sourceId) {
   automaticBoundary(service);
-  const all = validateTelegramSources(service.config);
+  const all = validateTelegramSources(effectiveSourceConfig(service));
   const matches = all.filter(s => s.sourceId === sourceId);
   check(matches.length === 1, 'TELEGRAM_SOURCE_NOT_CONFIGURED');
   const p = matches[0];

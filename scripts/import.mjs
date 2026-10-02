@@ -10,6 +10,7 @@ import { ACTION_TABLES } from '../business/action-tables.mjs';
 import { EXECUTIVE_TABLES } from '../business/executive-tables.mjs';
 import { OUTCOME_TABLES } from '../business/outcome-tables.mjs';
 import { WORK_TABLES, CONTROL_TABLES } from '../business/work-tables.mjs';
+import { SCOUT_TABLES } from '../business/scout-tables.mjs';
 import { BusinessService } from '../business/service.mjs';
 
 const [source,destinationArg] = process.argv.slice(2);
@@ -21,7 +22,7 @@ if (fs.existsSync(destination)) throw new Error('Destination already exists. Cho
 if (bundle.format !== 'digital-ai-partner' || bundle.schema_version !== 1 || !bundle.tables) throw new Error('Unsupported bundle');
 const migrationCount = Array.isArray(bundle.migrations) ? bundle.migrations.length : -1;
 const without = (...groups) => {
-  const excluded = new Set(groups.flat());
+  const excluded = new Set([...groups.flat(),...SCOUT_TABLES]);
   return TABLES.filter(table => !excluded.has(table));
 };
 // These are historical export catalogues. Deriving them from the current list alone silently
@@ -35,7 +36,8 @@ const inputCatalogues = new Map([
   [7, without(OUTCOME_TABLES, WORK_TABLES, CONTROL_TABLES)],
   [8, without(WORK_TABLES, CONTROL_TABLES)],
   [9, without(WORK_TABLES, CONTROL_TABLES)],
-  [10, TABLES],
+  [10, without()],
+  [11, TABLES],
 ]);
 const inputTables = inputCatalogues.get(migrationCount);
 if (!inputTables) throw new Error('Migration version differs');
@@ -275,6 +277,13 @@ try {
       const partnerId = JSON.parse(profile.content).id;
       if (!partnerId || store.get('SELECT id FROM partners WHERE id=?', partnerId) == null) throw new Error('Imported profile does not match partner data');
       sanitizeTransferredWorkspace(store, partnerId);
+    }
+    if (migrationCount >= 11) {
+      store.run("UPDATE scout_grants SET status='revoked',reason='TRANSFER_AUTHORITY_REQUIRES_REVIEW' WHERE status='active'");
+      store.run("UPDATE scout_jobs SET status='stale',owner_id=NULL,reason='TRANSFER_AUTHORITY_REQUIRES_REVIEW' WHERE status IN ('queued','running','interrupted')");
+      store.run("UPDATE scout_assessments SET status='stale' WHERE status IN ('proposed','approved')");
+      store.run("UPDATE scout_calls SET status='unknown',reason='TRANSFER_READ_UNKNOWN' WHERE status='started'");
+      store.run("DELETE FROM channel_offsets WHERE channel IN ('scout-monitor-v1','telegram-source-start-v1')");
     }
     // Observation cursors are local recovery progress, not transferable evidence.
     // Replaying committed intents is idempotent and never repeats a send.

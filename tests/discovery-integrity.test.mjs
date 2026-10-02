@@ -900,7 +900,8 @@ test('v3 bundle from a clean database imports into the current schema with empty
   const { ACTION_TABLES } = await import('../business/action-tables.mjs');
   const { OUTCOME_TABLES } = await import('../business/outcome-tables.mjs');
   const { WORK_TABLES, CONTROL_TABLES } = await import('../business/work-tables.mjs');
-  for (const table of [...DISCOVERY_TABLES, ...CONTINUITY_TABLES, ...EXECUTIVE_TABLES, ...ACTION_TABLES, ...OUTCOME_TABLES, ...WORK_TABLES, ...CONTROL_TABLES]) delete v3.tables[table];
+  const { SCOUT_TABLES } = await import('../business/scout-tables.mjs');
+  for (const table of [...DISCOVERY_TABLES, ...CONTINUITY_TABLES, ...EXECUTIVE_TABLES, ...ACTION_TABLES, ...OUTCOME_TABLES, ...WORK_TABLES, ...CONTROL_TABLES, ...SCOUT_TABLES]) delete v3.tables[table];
   for (const row of v3.tables.messages) { delete row.occurred_at; delete row.time_basis; }
   v3.migrations = v3.migrations.slice(0, 3);
   v3.tables_sha256 = hash(JSON.stringify(v3.tables));

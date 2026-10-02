@@ -88,5 +88,15 @@
     "enabled": false,
     "maxConcurrent": 3,
     "reservationUsd": 0.25
+  },
+  "scout": {
+    "enabled": false,
+    "modelEnabled": false,
+    "maxRequestsPerDay": 10000,
+    "maxRequestsPerSourceDay": 1000,
+    "maxMessagesPerAudit": 500,
+    "maxCandidates": 30,
+    "maxModelRunsPerDay": 5,
+    "auditMaxAgeSeconds": 86400
   }
 }

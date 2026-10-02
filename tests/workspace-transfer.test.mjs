@@ -8,6 +8,7 @@ import { ROOT } from '../business/config.mjs';
 import { Store, id, hash } from '../business/store.mjs';
 import { exportPartner } from '../business/export.mjs';
 import { WORK_TABLES, CONTROL_TABLES } from '../business/work-tables.mjs';
+import { SCOUT_TABLES } from '../business/scout-tables.mjs';
 import { BusinessService } from '../business/service.mjs';
 import { workspaceHarness } from './helpers/workspace-harness.mjs';
 
@@ -33,10 +34,15 @@ function addPrivateHistory(h) {
   return drafts;
 }
 
-function importBundle(t, h, destinationName, { migrationCount = 10 } = {}) {
+function importBundle(t, h, destinationName, { migrationCount = 11 } = {}) {
   const bundle = exportPartner(h.store);
+  if (migrationCount < 11) {
+    for (const table of SCOUT_TABLES) delete bundle.tables[table];
+  }
   if (migrationCount < 10) {
     for (const table of [...WORK_TABLES, ...CONTROL_TABLES]) delete bundle.tables[table];
+  }
+  if (migrationCount < 11) {
     bundle.migrations = bundle.migrations.slice(0, migrationCount);
     bundle.tables_sha256 = hash(JSON.stringify(bundle.tables));
   }
@@ -50,7 +56,7 @@ function importBundle(t, h, destinationName, { migrationCount = 10 } = {}) {
   return { destination, bundle };
 }
 
-test('schema-10 transfer keeps work/material history but removes live authority and invalidates private approvals', async t => {
+test('schema-11 transfer keeps work/material history but removes live authority and invalidates private approvals', async t => {
   const h = workspaceHarness(t), caseId = await h.ready();
   const { material_id: materialId } = await h.material(caseId); await h.approve(caseId, materialId);
   const originalMaterial = h.service.work.detail(caseId).materials.find(m => m.id === materialId);
@@ -74,7 +80,17 @@ test('schema-10 transfer keeps work/material history but removes live authority 
   const request = await h.command('work.request_material', { case_id: caseId, expected_revision: h.service.work.detail(caseId).revision });
   h.store.run("UPDATE work_material_requests SET status='running' WHERE id=?", request.request_id);
 
-  const { destination } = importBundle(t, h, 'workspace-transfer-v10');
+  const scoutCampaign=id(),scoutGrant=id(),scoutJob=id(),scoutCall=id(),created=new Date().toISOString();
+  h.store.run("INSERT INTO scout_campaigns VALUES(?,?,?,?,?,1,?,'active',?,?)",scoutCampaign,h.config.partnerId,'Transfer Scout','Transfer Scout topic','{}','a'.repeat(64),created,created);
+  h.store.run("INSERT INTO scout_grants(id,campaign_id,campaign_revision,kind,account_id,purpose,expires_at,status,created_at) VALUES(?,?,1,'audit',?,?,?,'active',?)",
+    scoutGrant,scoutCampaign,'999','Transfer fixture',new Date(Date.now()+86400000).toISOString(),created);
+  h.store.run("INSERT INTO scout_jobs(id,campaign_id,campaign_revision,grant_id,kind,status,cursor_json,next_at,created_at,updated_at) VALUES(?,?,1,?,'search','queued','{}',?,?,?)",
+    scoutJob,scoutCampaign,scoutGrant,created,created,created);
+  h.store.run("INSERT INTO scout_calls(id,partner_id,account_id,job_id,operation,status,created_at) VALUES(?,?,?,?,'search','started',?)",
+    scoutCall,h.config.partnerId,'999',scoutJob,created);
+
+  const { destination,bundle } = importBundle(t, h, 'workspace-transfer-v11');
+  assert.equal(SCOUT_TABLES.every(table=>Object.hasOwn(bundle.tables,table)),true);
   const store = new Store(path.join(destination, 'data'));
   try {
     const restoredMaterial = store.get('SELECT * FROM work_materials WHERE id=?', materialId);
@@ -93,6 +109,9 @@ test('schema-10 transfer keeps work/material history but removes live authority 
     assert.equal(store.get("SELECT COUNT(*) n FROM control_tickets WHERE status IN ('reserved','running')").n, 0);
     assert.equal(store.get("SELECT status FROM action_proposals WHERE id=?", actionId).status, 'revoked');
     assert.equal(store.get("SELECT COUNT(*) n FROM action_grants WHERE action_id=? AND status IN ('active','consumed')", actionId).n, 0);
+    assert.equal(store.get('SELECT status FROM scout_grants WHERE id=?',scoutGrant).status,'revoked');
+    assert.equal(store.get('SELECT status FROM scout_jobs WHERE id=?',scoutJob).status,'stale');
+    assert.equal(store.get('SELECT status FROM scout_calls WHERE id=?',scoutCall).status,'unknown');
 
     for (const state of ['pending','approved']) {
       const draft = privateDrafts[state];
@@ -120,9 +139,23 @@ test('schema-9 bundle remains a supported positive control with Outcome transfer
   assert.equal(Object.keys(bundle.tables).some(table => [...WORK_TABLES, ...CONTROL_TABLES].includes(table)), false);
   const store = new Store(path.join(destination, 'data'));
   try {
-    assert.equal(store.all('SELECT * FROM schema_migrations').length, 10);
+    assert.equal(store.all('SELECT * FROM schema_migrations').length, 11);
     assert.equal(store.get('SELECT COUNT(*) n FROM work_cases').n, 0);
     assert.equal(store.get('SELECT COUNT(*) n FROM control_tickets').n, 0);
     assert.deepEqual(store.all('PRAGMA foreign_key_check'), []);
   } finally { store.close(); }
+});
+
+test('schema-10 historical bundle has work/control state but excludes later Scout tables',async t=>{
+  const h=workspaceHarness(t),caseId=await h.ready();
+  const {destination,bundle}=importBundle(t,h,'workspace-transfer-v10-history',{migrationCount:10});
+  assert.equal(SCOUT_TABLES.some(table=>Object.hasOwn(bundle.tables,table)),false);
+  assert.equal(Object.hasOwn(bundle.tables,'work_cases'),true);
+  const store=new Store(path.join(destination,'data'));
+  try{
+    assert.equal(store.all('SELECT * FROM schema_migrations').length,11);
+    assert.equal(store.get('SELECT COUNT(*) n FROM work_cases WHERE id=?',caseId).n,1);
+    assert.equal(store.get('SELECT COUNT(*) n FROM scout_campaigns').n,0);
+    assert.deepEqual(store.all('PRAGMA foreign_key_check'),[]);
+  }finally{store.close();}
 });

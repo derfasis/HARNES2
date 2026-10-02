@@ -20,13 +20,15 @@ import { outcomeCommand } from './outcome-feedback.mjs';
 import { WorkCore } from './work.mjs';
 import { WORK_COMMANDS } from './work-tables.mjs';
 import { ControlPlane } from './control-plane.mjs';
+import { SourceScout, SCOUT_COMMANDS } from './scout.mjs';
+import { effectiveSourceConfig } from './scout-policy.mjs';
 import { discoveryCommand, discoveryDecisionQueue, discoveryDetail, discoveryPresentationDetail, discoveryReasonStates, ensureDiscoveryApplied, hasDiscoveryPending, invalidateDiscoveryOffers, markDiscoveryPending, reconcileDiscoveryPending, recordDiscoveryFailure, staleMaterialEvidence, DISCOVERY_ACTIONS, DISCOVERY_REVIEW_TASK } from './discovery.mjs';
 
 // One list, shared with the feedback loop: a candidate may only ever be promoted to a kind the
 // manual path would also have accepted, or promotion becomes a way around that refusal.
 const OUTCOMES = new Set(OUTCOME_KINDS);
 export class BusinessService {
-  constructor(store, config) { this.store = store; this.config = config; this.tail = Promise.resolve(); this.telegramAccountId = null; this.engagement = new EngagementLoop(this); this.continuity = new ContinuityLoop(this); this.executive = new ExecutiveLoop(this); this.actions = new ActionLoop(this); this.outcomes = new OutcomeLoop(this); this.control = new ControlPlane(this); this.work = new WorkCore(this); this.discoveryApply = ensureDiscoveryApplied; this.reconcileDiscovery = () => reconcileDiscoveryPending(this, 50); }
+  constructor(store, config) { this.store = store; this.config = config; this.tail = Promise.resolve(); this.telegramAccountId = null; this.engagement = new EngagementLoop(this); this.continuity = new ContinuityLoop(this); this.executive = new ExecutiveLoop(this); this.actions = new ActionLoop(this); this.outcomes = new OutcomeLoop(this); this.control = new ControlPlane(this); this.work = new WorkCore(this); this.scout = new SourceScout(this); this.discoveryApply = ensureDiscoveryApplied; this.reconcileDiscovery = () => reconcileDiscoveryPending(this, 50); }
   exclusive(fn) { const job = this.tail.then(fn); this.tail = job.catch(() => {}); return job; }
   partner() { return this.store.get('SELECT * FROM partners WHERE id=?', this.config.partnerId); }
   person(personId) {
@@ -107,6 +109,7 @@ export class BusinessService {
     requiredText(requestId, 'request_id', 150);
     ensure(p && typeof p === 'object' && !Array.isArray(p), 'payload должен быть объектом');
     if (WORK_COMMANDS.has(action)) ensure(actor.kind === 'operator', 'WORK_OPERATOR_REQUIRED', 403, 'WORK_OPERATOR_REQUIRED');
+    if (SCOUT_COMMANDS.has(action)) ensure(actor.kind === 'operator', 'SCOUT_OPERATOR_REQUIRED', 403, 'SCOUT_OPERATOR_REQUIRED');
     if (actor.kind === 'agent' && (this.config.controlPlane?.enabled === true || this.control.ticket(actor.runId))) {
       const ticket = this.control.require(actor.runId, { plane: 'private' });
       const run = this.store.get('SELECT * FROM runs WHERE id=? AND partner_id=?', actor.runId, this.config.partnerId);
@@ -118,7 +121,7 @@ export class BusinessService {
     if (action === 'source.ingest') {
       ensure(actor.kind === 'operator' || actor.kind === 'channel' && actor.sourceId === p.source_id, 'Источник вне области adapter', 403);
       // Transport-owned sources must commit messages, native receipts and cursor together.
-      const sources = this.config.opportunity?.telegramSources;
+      const sources = effectiveSourceConfig(this).opportunity?.telegramSources;
       ensure(!(Array.isArray(sources) && sources.some(s => s.sourceId === p.source_id)) && !sourceCheckpoint(this, p.source_id),
         'Источник требует transactional Telegram intake', 409, 'SOURCE_TRANSPORT_INGEST_REQUIRED');
     }
@@ -137,7 +140,9 @@ export class BusinessService {
       ensure(!['fact.propose','task.propose','lesson.propose','capability.propose'].includes(action),'Use engagement-scoped proposals',403);
     }
     let result;
-    if (WORK_COMMANDS.has(action)) {
+    if (SCOUT_COMMANDS.has(action)) {
+      result = this.scout.command(action, p, actor);
+    } else if (WORK_COMMANDS.has(action)) {
       result = this.work.command(action, p, actor);
     } else if (OUTCOME_COMMANDS.has(action)) {
       // Every outcome command is operator-only, checked here as well as inside the loop: this is

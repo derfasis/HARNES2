@@ -4,6 +4,7 @@ import { ROOT, readJson } from './config.mjs';
 import { id } from './store.mjs';
 import { ensure, requiredText, dateTime, now, AppError } from './errors.mjs';
 import { automaticBoundary, digest, sourceRows, sourceTransportKind, sourceEvent } from './source-ingestion.mjs';
+import { effectiveSourceConfig } from './scout-policy.mjs';
 import { importOpenOutFind } from './executive-donors.mjs';
 
 export const planSchema = readJson(path.join(ROOT, 'contracts/executive-plan.schema.json'));
@@ -40,8 +41,9 @@ export class ExecutiveLoop {
     automaticBoundary(this.service);
     const t = this.continuity.thread(threadId), watches = this.continuity.watches(threadId);
     check(t.status === 'OPEN' && t.pause_reason === null && t.business_basis === this.continuity.businessBasis(), 'EXECUTIVE_AUTHORITY_CHANGED');
+    const allowedSourceRefs = effectiveSourceConfig(this.service).opportunity?.allowedSourceRefs ?? [];
     for (const w of watches) check(w.status === 'active'
-      && this.service.config.opportunity.allowedSourceRefs.includes(w.source_ref)
+      && allowedSourceRefs.includes(w.source_ref)
       && this.continuity.policyHash(w.source_ref) === w.policy_hash, 'EXECUTIVE_SOURCE_REVOKED');
     const control = this.db.get(`SELECT COALESCE(MAX(id),0) n FROM events WHERE partner_id=? AND actor='operator' AND
       (kind='partner.update' OR (kind IN ('continuity.owner_note','continuity.status') AND payload_json->>'$.thread_id'=?))`, this.partnerId, threadId).n;
@@ -264,7 +266,7 @@ export class ExecutiveLoop {
       WHERE partner_id=? AND id>? ${threadId ? 'AND thread_id=?' : ''} ORDER BY id LIMIT ?`, this.partnerId, cursor, ...(threadId ? [threadId] : []), limit + 1);
     return { items: items.slice(0, limit), next_cursor: items.length > limit ? items[limit - 1].id : null,
       enabled: this.service.config.executive?.enabled === true, model_enabled: this.service.config.executive?.modelEnabled === true,
-      refreshable_source_refs: (this.service.config.opportunity?.browserSources ?? []).filter(s => this.service.config.opportunity.allowedSourceRefs.includes(s.sourceId)).map(s => s.sourceId).slice(0, 100),
+      refreshable_source_refs: (this.service.config.opportunity?.browserSources ?? []).filter(s => effectiveSourceConfig(this.service).opportunity?.allowedSourceRefs?.includes(s.sourceId)).map(s => s.sourceId).slice(0, 100),
       capabilities: ['research.read_evidence','research.refresh_source','research.submit_brief'].map(capability_id => ({ capability_id, version: EXECUTIVE_VERSION, effect: 'read_and_propose' })), ...effects };
   }
   queueAutoPlan() {

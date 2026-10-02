@@ -5,6 +5,8 @@
 //
 // Nothing here sends. It reads, and closing it drops its own subscription and nothing else.
 import { createRequire } from 'node:module';
+import { telegramRead } from '../telegram-read-gate.mjs';
+import { telegramSourcePolicy } from './telegram-readonly.mjs';
 
 const require = createRequire(import.meta.url);
 const { Api } = require('telegram');
@@ -12,7 +14,7 @@ const { UpdateConnectionState } = require('telegram/network');
 const bigInt = require('big-integer');
 
 export class GramjsSourceRpc {
-  #client; #service; #sourceId; #handler = null; #builder = null; #closed = false;
+  #client; #service; #sourceId; #accountId; #handler = null; #builder = null; #closed = false;
 
   constructor(client, service, sourceId) {
     if (!client || typeof client.invoke !== 'function' || typeof client.addEventHandler !== 'function')
@@ -20,6 +22,7 @@ export class GramjsSourceRpc {
     this.#client = client;
     this.#service = service;
     this.#sourceId = sourceId;
+    this.#accountId = service.telegramAccountId;
   }
 
   // Raw updates, exactly as the SDK delivers them. Filtering is the reader's job: it is written
@@ -45,7 +48,7 @@ export class GramjsSourceRpc {
       build(update) { return update; },
     };
     this.#handler = event => {
-      if (this.#closed) return;
+      if (this.#closed||this.#accountId&&this.#service.telegramAccountId!==this.#accountId) return;
       if (event instanceof UpdateConnectionState) {
         if (this.#client.connected === false) onUpdate(event);
         return;
@@ -55,9 +58,17 @@ export class GramjsSourceRpc {
     this.#client.addEventHandler(this.#handler, this.#builder);
   }
 
-  async invokeRead(request) { return this.#client.invoke(request); }
+  async invokeRead(request) {
+    const result=await telegramRead(this.#service,{accountId:this.#accountId,sourceId:this.#sourceId,priority:'monitor'},()=>{
+      telegramSourcePolicy(this.#service,this.#sourceId);
+      if(this.#closed||this.#accountId&&this.#service.telegramAccountId!==this.#accountId||this.#service.control?.stopped||this.#service.control&&!this.#service.control.processCurrent())throw new Error('Source reader retired');
+      return this.#client.invoke(request);
+    });
+    if(!this.connected())throw new Error('Source connection retired');
+    return result;
+  }
 
-  connected() { return !this.#closed && this.#client.connected === true; }
+  connected() { return !this.#closed && (!this.#accountId||this.#service.telegramAccountId===this.#accountId) && this.#client.connected === true; }
 
   // The reader closing must not take the shared client down: the owner of the connection is the
   // channel, which may still be serving other work. Only this subscription is released.
