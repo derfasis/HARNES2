@@ -99,6 +99,22 @@ test('stop drains callbacks already admitted and reports unverified coverage', a
   assert.equal(health.coverage, 'unverified');
 });
 
+test('private callback completing after process ownership moves cannot write or latch over the successor', async t => {
+  const h = harness(t), gate = deferred(), entered = deferred(), control = h.channel.service.control;
+  control.processOwned = true;
+  h.store.run('INSERT INTO control_owners(partner_id,owner_id,pid,expires_at) VALUES(?,?,?,?)',
+    h.channel.service.config.partnerId, control.ownerId, process.pid, new Date(Date.now() + 60000).toISOString());
+  h.emit(1, '100', { async getSender() { entered.resolve(); await gate.promise; return { firstName: 'Old owner' }; } });
+  await entered.promise;
+  h.store.run('UPDATE control_owners SET owner_id=? WHERE partner_id=?', 'successor-owner', h.channel.service.config.partnerId);
+  h.emit(2, '200');
+  gate.resolve();
+  await h.channel.drain();
+  assert.equal(h.store.get("SELECT COUNT(*) n FROM messages WHERE direction='in'").n, 0);
+  assert.equal(h.store.get("SELECT COUNT(*) n FROM persons WHERE name='Person 100'").n, 0);
+  assert.equal(h.health().last_message_id, null, 'stale callback did not advance the successor checkpoint');
+});
+
 test('bounded queue overload refuses admission and leaves a durable sticky gap', async t => {
   const h = harness(t), gate = deferred(), entered = deferred();
   h.channel.privateQueueLimit = 1;

@@ -25,7 +25,8 @@ export class TelegramPublicSourceReader {
     this.#health=()=>this.confirmCurrent();service.sourceTransportHealth??=new Map();service.sourceTransportHealth.set(sourceId,this.#health);
     rpc.subscribe(update=>this.receive(update),()=>this.fault());
   }
-  #owns() {return this.#service.sourceTransportHealth.get(this.#p.sourceId)===this.#health;}
+  #owns() {const control=this.#service.control;return this.#service.sourceTransportHealth.get(this.#p.sourceId)===this.#health
+    && !control?.stopped && (!control || control.processCurrent());}
   #allowedChannel(channel) {
     return channel && !channel.min && !channel.restricted && (channel.broadcast || channel.megagroup)
       && (this.#joinedPeer ? !channel.left && channel.accessHash?.toString()===this.#peer.accessHash?.toString()

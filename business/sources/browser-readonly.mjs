@@ -31,6 +31,11 @@ export const browserPolicy = (service, sourceId) => {
   return Object.freeze({ ...browserPolicyShape({ sourceId: id, url, maxLagSeconds }), pollEverySeconds });
 };
 
+const processCurrent = service => !service.control?.stopped
+  && (!service.control || service.control.processCurrent());
+const requireProcessOwner = service => ensure(processCurrent(service), 'Control Plane process ownership was lost', 409,
+  'CONTROL_PROCESS_OWNERSHIP_LOST');
+
 const digest = (value) => createHash('sha256').update(typeof value === 'string' ? value : JSON.stringify(value)).digest('hex');
 
 // The identities are derived, not invented per run: the same page always yields the same message
@@ -58,13 +63,13 @@ export class BrowserSourceReader {
     this.#policy = policy; this.#transport = { request, lookup };
     // `null` is unproven, and unproven is not readable. A reader that has never succeeded does
     // not get to vouch for the source.
-    this.#health = () => this.#readable === true;
+    this.#health = () => this.#readable === true && processCurrent(service);
     if (service) { service.sourceTransportHealth ??= new Map(); service.sourceTransportHealth.set(policy.sourceId, this.#health); }
   }
   policy() { return this.#policy; }
   // Whether this reader is still the one the boundary should ask. Mirrors the Telegram reader's
   // ownership check, so a reader replaced or retired cannot answer on another's behalf.
-  owns(service) { return service?.sourceTransportHealth?.get(this.#policy.sourceId) === this.#health; }
+  owns(service) { return service?.sourceTransportHealth?.get(this.#policy.sourceId) === this.#health && processCurrent(service); }
   // The latch is about source truth, not about the network. A page that was fetched and then
   // refused by the intake has not been accepted, and a boundary asked only "did the socket
   // answer" would call a source current on the strength of a read that was thrown away. So the
@@ -125,6 +130,7 @@ const envelopeFor = (service, policy, page) => {
 // two different facts.
 export async function pollBrowserSource(service, sourceId, transport) {
   ensure(transport && typeof transport.readPage === 'function', 'The browser reader is required', 409, 'BROWSER_READER_REQUIRED');
+  requireProcessOwner(service);
   const policy = browserPolicy(service, sourceId);
 
   // A source that has been blocked stays blocked until something clears it. A failed poll marks the
@@ -154,8 +160,11 @@ export async function pollBrowserSource(service, sourceId, transport) {
     // address or a credential, and this is durable storage an operator will read.
     const raw = String(error?.code ?? '');
     const code = /^[A-Z][A-Z0-9_]{1,63}$/.test(raw) ? raw : 'BROWSER_READ_FAILED';
-    try { await service.exclusive(() => service.store.transaction(() => writeBrowserCheckpoint(service, sourceId,
-      { source_id: sourceId, policy_hash: browserPolicyHash(policy), phase: 'retrying', confirmed_at: null, reason: code }))); }
+    try { await service.exclusive(() => service.store.transaction(() => {
+      requireProcessOwner(service);
+      writeBrowserCheckpoint(service, sourceId,
+        { source_id: sourceId, policy_hash: browserPolicyHash(policy), phase: 'retrying', confirmed_at: null, reason: code });
+    })); }
     catch {
       // Not swallowed. The reader's latch already withholds the source, so nothing unsafe is
       // believed either way — but durable storage now disagrees with reality, and an operator
@@ -172,6 +181,7 @@ export async function pollBrowserSource(service, sourceId, transport) {
   let result;
   try {
     result = await service.exclusive(() => service.store.transaction(() => {
+      requireProcessOwner(service);
       const envelope = envelopeFor(service, policy, page);
       const ingested = ingestSource(service, envelope);
       // Written with the intake, never after it: a page that was ingested and a source that was not
@@ -198,11 +208,15 @@ export async function pollBrowserSource(service, sourceId, transport) {
 // rather than pretending the page is still fresh. Only a code leaves this function: a provider or
 // network message can carry detail, and this lands in durable storage.
 export function markBrowserSourceBlocked(service, sourceId, code) {
+  requireProcessOwner(service);
   const policy = browserPolicy(service, sourceId);
   const clean = /^[A-Z][A-Z0-9_]{1,63}$/.test(String(code)) ? String(code) : 'BROWSER_READ_FAILED';
-  service.store.run('INSERT OR REPLACE INTO channel_offsets(channel,account_id,cursor) VALUES(?,?,?)',
-    BROWSER_CHECKPOINT_CHANNEL, digest([service.config.partnerId, sourceId]),
-    JSON.stringify({ source_id: sourceId, policy_hash: browserPolicyHash(policy), phase: 'blocked',
-      confirmed_at: null, reason: clean }));
+  service.store.transaction(() => {
+    requireProcessOwner(service);
+    service.store.run('INSERT OR REPLACE INTO channel_offsets(channel,account_id,cursor) VALUES(?,?,?)',
+      BROWSER_CHECKPOINT_CHANNEL, digest([service.config.partnerId, sourceId]),
+      JSON.stringify({ source_id: sourceId, policy_hash: browserPolicyHash(policy), phase: 'blocked',
+        confirmed_at: null, reason: clean }));
+  });
   return clean;
 }

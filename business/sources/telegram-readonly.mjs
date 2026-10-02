@@ -496,12 +496,13 @@ export function applyTelegramDifference(service,sourceId,page,expectedPts=null,c
       // Separate failure transaction keeps the previous cursor but invalidates evidence.
       // If DB is unavailable even here, rethrow: never report success or advance transport.
       service.store.transaction(()=>{
+        if(stillOwned()!==true)return;
         const s=sourceCheckpoint(service,sourceId);
         if(s) writeState(service,p,{...s,phase:error.code==='TELEGRAM_CLOCK_SKEW' && s.reason!==INTEGRITY?'catching_up':'blocked',confirmed_at:null,
           reason:s.reason===INTEGRITY || integrityErrors.has(error.code)?INTEGRITY:error.code==='TELEGRAM_CLOCK_SKEW'?error.code:'INTAKE_FAILED'});
         if(authorizationId && telegramRecoveryAuthorization(service,p)===authorizationId)finishRecovery(service,p,authorizationId,'failed');
       });
-      publishConflict(service,error.telegramConflict);
+      if(stillOwned()===true)publishConflict(service,error.telegramConflict);
       throw error;
     }
   });

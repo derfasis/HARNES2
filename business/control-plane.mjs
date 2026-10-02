@@ -20,7 +20,9 @@ export class ControlPlane {
   acquireProcess() {
     this.db.transaction(() => {
       const old = this.db.get('SELECT * FROM control_owners WHERE partner_id=?', this.service.config.partnerId);
-      check(!old || old.owner_id === this.ownerId || Date.parse(old.expires_at) <= Date.now() || !this.alive(old.pid), 'CONTROL_PROCESS_ALREADY_OWNED');
+      // Lease expiry makes the owner unable to act; it does not prove that its process stopped.
+      // A successor may take over only after the PID is known dead (or this is the same owner).
+      check(!old || old.owner_id === this.ownerId || !this.alive(old.pid), 'CONTROL_PROCESS_ALREADY_OWNED');
       // Disabling CP in a second launch must not permit recovery against a live owner's DB.
       if (!this.enabled) {
         if (old) this.db.run('DELETE FROM control_owners WHERE partner_id=? AND owner_id=?', this.service.config.partnerId, old.owner_id);

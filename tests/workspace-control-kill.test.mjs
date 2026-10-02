@@ -8,6 +8,7 @@ import { processWork } from '../business/work-reasoning.mjs';
 import { checkAutomaticPrerequisite } from '../business/config.mjs';
 import { automaticBoundary } from '../business/source-ingestion.mjs';
 import { start } from '../business/server.mjs';
+import { ControlPlane } from '../business/control-plane.mjs';
 
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
 async function spin(predicate) { for (let i = 0; i < 100; i++) { if (predicate()) return; await new Promise(r => setImmediate(r)); } assert.fail('expected state was never reached'); }
@@ -15,6 +16,27 @@ function bind(h, runtime = 'hermes-continuity-v1') {
   const runId = id(); h.store.run("INSERT INTO runs(id,partner_id,status,runtime,model,context_json,created_at) VALUES(?,?,'running',?,'fake','{}',?)", runId, h.config.partnerId, runtime, new Date().toISOString());
   h.service.control.bindRun(runId); return runId;
 }
+
+test('expired process lease does not allow a live or unknown PID takeover, and expiry fences its owner', async t => {
+  const h = workspaceHarness(t), owner = h.service.control;
+  owner.processOwned = true;
+  h.store.run('INSERT INTO control_owners(partner_id,owner_id,pid,expires_at) VALUES(?,?,?,?)',
+    h.config.partnerId, owner.ownerId, process.pid, '2000-01-01T00:00:00.000Z');
+  assert.equal(owner.processCurrent(), false, 'expired owner cannot keep applying work');
+
+  for (const pid of [process.pid, 0]) {
+    h.store.run('UPDATE control_owners SET owner_id=?,pid=?,expires_at=? WHERE partner_id=?',
+      `stale-live-${pid}`, pid, '2000-01-01T00:00:00.000Z', h.config.partnerId);
+    const successor = new ControlPlane(h.service);
+    assert.throws(() => successor.acquireProcess(), { code: 'CONTROL_PROCESS_ALREADY_OWNED' });
+    assert.equal(h.store.get('SELECT owner_id FROM control_owners WHERE partner_id=?', h.config.partnerId).owner_id, `stale-live-${pid}`);
+  }
+
+  const successor = new ControlPlane(h.service);
+  successor.alive = () => false; // Deterministic proof-of-death positive control.
+  successor.acquireProcess();
+  assert.equal(h.store.get('SELECT owner_id FROM control_owners WHERE partner_id=?', h.config.partnerId).owner_id, successor.ownerId);
+});
 
 test('resource admission is atomic, reserves a private slot, and expired worker cannot release its successor', async t => {
   const h = workspaceHarness(t); h.config.controlPlane.maxConcurrent = 2;

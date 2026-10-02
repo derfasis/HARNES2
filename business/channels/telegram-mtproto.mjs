@@ -168,6 +168,15 @@ export class MtprotoTelegramChannel {
     return `${this.service.config.partnerId}:${account}`;
   }
 
+  ownsProcess() {
+    const control = this.service.control;
+    return !control?.stopped && (!control || control.processCurrent());
+  }
+
+  requireProcessOwner() {
+    ensure(this.ownsProcess(), 'Control Plane process ownership was lost', 409, 'CONTROL_PROCESS_OWNERSHIP_LOST');
+  }
+
   registerIncomingHandler(client = this.client) {
     client.addEventHandler(event => {
       try { this.enqueueIncoming(event); }
@@ -188,28 +197,31 @@ export class MtprotoTelegramChannel {
   // recovery protocol, so a persisted last message can never prove that the gap since it is closed.
   initializePrivateIntake() {
     if (!this.accountId) return;
-    const row = this.privateHealthRow();
-    let previous = {};
-    try { previous = row ? JSON.parse(row.cursor) : {}; } catch { /* Corrupt health is not coverage. */ }
-    this.privateGap = previous.gap ?? null;
-    this.privateHealth = {
-      version: 1,
-      partner_id: this.service.config.partnerId,
-      account_id: this.accountId,
-      phase: this.privateGap ? 'gap' : 'catching_up',
-      coverage: 'unverified',
-      gap: this.privateGap,
-      last_message_id: previous.last_message_id ?? null,
-      last_message_at: previous.last_message_at ?? null,
-      started_at: now()
-    };
-    this.service.store.run(`INSERT INTO channel_offsets(channel,account_id,cursor) VALUES(?,?,?)
-      ON CONFLICT(channel,account_id) DO UPDATE SET cursor=excluded.cursor`,
-      'telegram-private-intake-v1', this.privateAccountKey(), JSON.stringify(this.privateHealth));
+    this.service.store.transaction(() => {
+      this.requireProcessOwner();
+      const row = this.privateHealthRow();
+      let previous = {};
+      try { previous = row ? JSON.parse(row.cursor) : {}; } catch { /* Corrupt health is not coverage. */ }
+      this.privateGap = previous.gap ?? null;
+      this.privateHealth = {
+        version: 1,
+        partner_id: this.service.config.partnerId,
+        account_id: this.accountId,
+        phase: this.privateGap ? 'gap' : 'catching_up',
+        coverage: 'unverified',
+        gap: this.privateGap,
+        last_message_id: previous.last_message_id ?? null,
+        last_message_at: previous.last_message_at ?? null,
+        started_at: now()
+      };
+      this.service.store.run(`INSERT INTO channel_offsets(channel,account_id,cursor) VALUES(?,?,?)
+        ON CONFLICT(channel,account_id) DO UPDATE SET cursor=excluded.cursor`,
+        'telegram-private-intake-v1', this.privateAccountKey(), JSON.stringify(this.privateHealth));
+    });
   }
 
   enqueueIncoming(event) {
-    if (this.stopped || !this.connected) return;
+    if (this.stopped || !this.connected || !this.ownsProcess()) return;
     // Fast filters do not await SDK methods and cannot race queue admission.
     const message = event.message;
     if (!message || message.out || !(event.isPrivate || message.isPrivate)) return;
@@ -252,12 +264,14 @@ export class MtprotoTelegramChannel {
   }
 
   async latchPrivateGap(code) {
+    if (!this.ownsProcess()) return;
     const gap = this.privateGap ?? { code, at: now() };
     this.privateGap = gap;
     this.privateHealth = { ...(this.privateHealth ?? {}), version: 1,
       partner_id: this.service.config.partnerId, account_id: this.accountId,
       phase: 'gap', coverage: 'unverified', gap };
     const write = this.service.exclusive(() => this.service.store.transaction(() => {
+        this.requireProcessOwner();
         this.service.store.run(`INSERT INTO channel_offsets(channel,account_id,cursor) VALUES(?,?,?)
           ON CONFLICT(channel,account_id) DO UPDATE SET cursor=excluded.cursor`,
           'telegram-private-intake-v1', this.privateAccountKey(), JSON.stringify(this.privateHealth));
@@ -274,6 +288,7 @@ export class MtprotoTelegramChannel {
   }
 
   async handleIncoming(event) {
+    this.requireProcessOwner();
     const message = event.message;
     if (!message || message.out || !(event.isPrivate || message.isPrivate)) return;
     const chatId = String(event.chatId ?? message.chatId ?? message.senderId ?? '');
@@ -287,19 +302,27 @@ export class MtprotoTelegramChannel {
       const peer = typeof message.getInputChat === 'function' ? await message.getInputChat() : null;
       if (peer) this.peerEntities.set(chatId, peer);
     } catch { /* The numeric ID remains available for the fallback lookup on send. */ }
+    this.requireProcessOwner();
     const sender = typeof message.getSender === 'function' ? await message.getSender() : null;
+    this.requireProcessOwner();
     const name = [sender?.firstName, sender?.lastName].filter(Boolean).join(' ') || chatId;
     const account = this.service.telegramAccount();
     let identity = this.service.store.get('SELECT * FROM channel_identities WHERE channel=? AND account_id=? AND external_id=?', 'telegram', account, chatId);
     if (!identity) {
-      await this.service.command('person.create', {
+      const payload = {
         name,
         source: `Входящее MTProto-сообщение Telegram, chat ${chatId}`,
         channel: 'telegram',
         external_id: chatId,
         account_id: account,
         permission: `Ответ только на входящее сообщение Telegram ${message.id}; произвольная рассылка не разрешена`
-      }, `telegram-mtproto-person:${account}:${chatId}`, { kind: 'channel' });
+      };
+      const requestId = `telegram-mtproto-person:${account}:${chatId}`;
+      await this.service.exclusive(() => this.service.store.transaction(() => {
+        this.requireProcessOwner();
+        return this.service.execute('person.create', payload, requestId, { kind: 'channel' });
+      }));
+      this.requireProcessOwner();
       identity = this.service.store.get('SELECT * FROM channel_identities WHERE channel=? AND account_id=? AND external_id=?', 'telegram', account, chatId);
     }
     const conversation = this.service.store.get('SELECT id FROM conversations WHERE channel_identity_id=?', identity.id);
@@ -313,6 +336,7 @@ export class MtprotoTelegramChannel {
     };
     const requestId = `telegram-mtproto-update:v2:${this.service.config.partnerId}:${account}:${chatId}:${message.id}`;
     const committedHealth = await this.service.exclusive(() => this.service.store.transaction(() => {
+      this.requireProcessOwner();
       // `execute` is the synchronous command body. Running it inside the same exclusive SQLite
       // transaction lets its message, audit and idempotency receipt commit with this intake cursor.
       const result = this.service.execute('message.record', payload, requestId, { kind: 'channel' });
@@ -325,6 +349,7 @@ export class MtprotoTelegramChannel {
         'telegram-private-intake-v1', this.privateAccountKey(account), JSON.stringify(nextHealth));
       return { result, health: nextHealth };
     }));
+    this.requireProcessOwner();
     this.privateHealth = committedHealth.health;
     this.lastEvent = now();
     if (!this.privateGap) this.lastError = null;
