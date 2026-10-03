@@ -45,6 +45,25 @@ export class ControlPlane {
     if (!this.enabled) return;
     this.db.run("UPDATE control_tickets SET status='expired',reason='LEASE_EXPIRED',finished_at=? WHERE partner_id=? AND status IN ('reserved','running') AND expires_at<=?", now(), this.service.config.partnerId, now());
   }
+  assertModelBudget({ runtime, maxRunsPerDay } = {}) {
+    // Read-only preflight and execution admission share the same ledger rules.
+    // Queuing a domain request reserves neither resources nor effect authority.
+    const cfg = this.service.config, c = cfg.controlPlane, at = now();
+    const active = this.db.all("SELECT * FROM control_tickets WHERE partner_id=? AND status IN ('reserved','running') AND expires_at>?", cfg.partnerId, at);
+    const spent = this.db.get(`SELECT COUNT(*) n,COALESCE(SUM(estimated_cost_usd),0) cost,
+      SUM(CASE WHEN cost_status='unknown' AND status NOT IN ('running','analyzed') THEN 1 ELSE 0 END) unknown FROM runs WHERE partner_id=? AND created_at>=?`, cfg.partnerId, at.slice(0,10));
+    const pendingCount = active.filter(t => !t.run_id).length;
+    check(spent.n + pendingCount < cfg.runtime.maxRunsPerDay, 'CONTROL_RUN_BUDGET');
+    const reserved = active.reduce((a,t) => a + t.reserved_usd, 0);
+    check(cfg.runtime.dailyBudgetUsd === null || !spent.unknown && spent.cost + reserved + c.reservationUsd <= cfg.runtime.dailyBudgetUsd, 'CONTROL_COST_BUDGET');
+    const unowned = this.db.get(`SELECT r.id FROM runs r WHERE r.partner_id=? AND r.created_at>=? AND r.cost_status='unknown'
+      AND NOT EXISTS(SELECT 1 FROM control_tickets t WHERE t.partner_id=r.partner_id AND t.run_id=r.id AND t.status IN ('reserved','running') AND t.expires_at>?) LIMIT 1`, cfg.partnerId, at.slice(0,10), at);
+    check(cfg.runtime.dailyBudgetUsd === null || !unowned, 'CONTROL_UNKNOWN_COST');
+    if (runtime !== undefined) {
+      const count = this.db.get('SELECT COUNT(*) n FROM runs WHERE partner_id=? AND runtime=? AND created_at>=?', cfg.partnerId, runtime, at.slice(0,10));
+      check(count.n < maxRunsPerDay, 'CONTROL_DOMAIN_RUN_BUDGET');
+    }
+  }
   reserve(plane, operation) {
     check(this.enabled && !this.stopped && this.processCurrent(), 'CONTROL_NOT_READY'); check(PLANES.includes(plane), 'CONTROL_PLANE_INVALID');
     const cfg = this.service.config, c = cfg.controlPlane; this.sweep();
@@ -52,16 +71,7 @@ export class ControlPlane {
     // Private conversation reasoning retains a slot even when public/material work is hot.
     const nonPrivate = active.filter(t => t.plane !== 'private').length;
     check(!active.some(t => t.plane === plane) && active.length < c.maxConcurrent && (plane === 'private' || nonPrivate < c.maxConcurrent - 1), 'CONTROL_CAPACITY');
-    const spent = this.db.get(`SELECT COUNT(*) n,COALESCE(SUM(estimated_cost_usd),0) cost,
-      SUM(CASE WHEN cost_status='unknown' AND status NOT IN ('running','analyzed') THEN 1 ELSE 0 END) unknown FROM runs WHERE partner_id=? AND created_at>=?`, cfg.partnerId, now().slice(0,10));
-    const pendingCount = active.filter(t => !t.run_id).length;
-    check(spent.n + pendingCount < cfg.runtime.maxRunsPerDay, 'CONTROL_RUN_BUDGET');
-    const reserved = active.reduce((a,t) => a + t.reserved_usd, 0);
-    check(cfg.runtime.dailyBudgetUsd === null || !spent.unknown && spent.cost + reserved + c.reservationUsd <= cfg.runtime.dailyBudgetUsd, 'CONTROL_COST_BUDGET');
-    // Unowned running/unknown cost cannot be excused by a ticket in a different process.
-    const unowned = this.db.get(`SELECT r.id FROM runs r WHERE r.partner_id=? AND r.created_at>=? AND r.cost_status='unknown'
-      AND NOT EXISTS(SELECT 1 FROM control_tickets t WHERE t.run_id=r.id AND t.status IN ('reserved','running')) LIMIT 1`, cfg.partnerId, now().slice(0,10));
-    check(cfg.runtime.dailyBudgetUsd === null || !unowned, 'CONTROL_UNKNOWN_COST');
+    this.assertModelBudget();
     const ticketId = id(); this.db.run("INSERT INTO control_tickets(id,partner_id,plane,operation,owner_id,status,reserved_usd,expires_at,created_at) VALUES(?,?,?,?,?,'reserved',?,?,?)", ticketId, cfg.partnerId, plane, operation, this.ownerId, c.reservationUsd, this.expiry(), now());
     return this.db.get('SELECT * FROM control_tickets WHERE id=?', ticketId);
   }

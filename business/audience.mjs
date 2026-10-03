@@ -7,6 +7,7 @@ import { ensure, requiredText, now, AppError } from './errors.mjs';
 import { sourceRows, sourceEvent, digest } from './source-ingestion.mjs';
 import { effectiveSourceConfig } from './scout-policy.mjs';
 import { proposalRefs, proposalBindings, previewHash, frozenProposalBasis } from './audience-proposals.mjs';
+import { normalizeFailureCause } from './failure-cause.mjs';
 
 const storedOutputSchema = readJson(path.join(ROOT, 'contracts/audience-assessment.schema.json'));
 export const outputSchema = structuredClone(storedOutputSchema);
@@ -276,6 +277,104 @@ export class AudienceLoop {
       need_revision: focus.need_revision, need_basis_fingerprint: focus.need_basis_fingerprint,
       observation_heads: focus.observation_heads });
   }
+  reassessmentAttemptFingerprint(scope, focus) {
+    const context = this.reassessmentFingerprint(scope, focus);
+    return focus.retry_of ? digest({ purpose: 'explicit_reassessment_retry_v1',
+      context_fingerprint: context, retry_of: focus.retry_of }) : context;
+  }
+  assessmentRecord(assessmentId) {
+    const row = this.store.get('SELECT a.* FROM audience_assessments a JOIN audience_goals g ON g.id=a.goal_id WHERE a.id=? AND g.partner_id=?', assessmentId, this.partnerId);
+    check(row, 'AUDIENCE_ASSESSMENT_NOT_FOUND', 404); return row;
+  }
+  failedReassessment(row) {
+    check(['interrupted','invalid'].includes(row.status) && row.producer === 'model', 'AUDIENCE_RETRY_UNAVAILABLE');
+    check(typeof row.run_id === 'string', 'AUDIENCE_RECORD_INVALID');
+    let packet, frozen, receipt;
+    const run = this.store.get('SELECT * FROM runs WHERE id=? AND partner_id=?', row.run_id, this.partnerId);
+    check(run && run.runtime === 'hermes-audience-v1', 'AUDIENCE_RECORD_INVALID');
+    check(['failed','interrupted'].includes(run.status), 'AUDIENCE_RETRY_UNAVAILABLE');
+    try { packet = row.packet ?? parse(row.packet_json); frozen = parse(run.context_json);
+      receipt = run.result_json ? parse(run.result_json) : null; }
+    catch { check(false, 'AUDIENCE_RECORD_INVALID'); }
+    check(packet && validateReassessment(packet.reassessment) && packet.scope
+      && packet.id === row.goal_id && packet.assessment_id === row.id
+      && packet.basis_fingerprint === row.basis_fingerprint
+      && this.reassessmentFingerprint(packet.scope, packet.reassessment) === packet.reassessment.context_fingerprint
+      && this.reassessmentAttemptFingerprint(packet.scope, packet.reassessment) === row.basis_fingerprint,
+    'AUDIENCE_RECORD_INVALID');
+    check(frozen && frozen.assessment_id === row.id && frozen.goal_id === row.goal_id
+      && frozen.packet && digest(frozen.packet) === digest(packet)
+      && (!receipt || receipt && typeof receipt === 'object' && !Array.isArray(receipt)
+        && !['proposal_created','no_revision_proposed'].includes(receipt.disposition)), 'AUDIENCE_RECORD_INVALID');
+    return { row, packet, run };
+  }
+  attemptReceipt(row) {
+    if (typeof row.run_id !== 'string') return null;
+    const run = this.store.get('SELECT * FROM runs WHERE id=? AND partner_id=?', row.run_id, this.partnerId);
+    if (!run || run.runtime !== 'hermes-audience-v1') return null;
+    let context, result;
+    try { context = parse(run.context_json); result = run.result_json ? parse(run.result_json) : null; }
+    catch { return null; }
+    if (!context || context.assessment_id !== row.id || context.goal_id !== row.goal_id) return null;
+    const count = n => Number.isSafeInteger(n) && n >= 0 ? n : null;
+    const input = count(run.input_tokens), output = count(run.output_tokens);
+    const estimated = ['configured_estimate','runtime_estimate'].includes(run.cost_status) && Number.isFinite(run.estimated_cost_usd) && run.estimated_cost_usd >= 0;
+    return { run_id: run.id, status: run.status,
+      model_api_calls: Number.isInteger(result?.model_api_calls) && result.model_api_calls >= 0 && result.model_api_calls <= 1000 ? result.model_api_calls : null,
+      input_tokens: input, output_tokens: output,
+      usage_status: input !== null && output !== null && (input > 0 || output > 0 || estimated) ? 'known' : 'unknown',
+      cost_status: estimated ? run.cost_status : 'unknown', estimated_cost_usd: estimated ? run.estimated_cost_usd : null,
+      failure_cause: result?.failure_cause ? normalizeFailureCause(result.failure_cause) : null };
+  }
+  retryState(row) {
+    const reasons = []; let eligible = false, child = null;
+    try {
+      const parent = this.failedReassessment(row); this.assertAssessmentCurrent(row); eligible = true;
+      const focus = { ...parent.packet.reassessment, retry_of: { assessment_id: row.id, basis_fingerprint: row.basis_fingerprint } };
+      const basis = this.reassessmentAttemptFingerprint(parent.packet.scope, focus);
+      child = this.store.get('SELECT id,status FROM audience_assessments WHERE goal_id=? AND basis_fingerprint=?', row.goal_id, basis) ?? null;
+      if (child) reasons.push('AUDIENCE_ALREADY_CONSIDERED');
+      if (this.store.get("SELECT id FROM audience_assessments WHERE goal_id=? AND status IN ('captured','running') LIMIT 1", row.goal_id)) reasons.push('AUDIENCE_ASSESSMENT_PENDING');
+      this.service.control.assertModelBudget({ runtime: 'hermes-audience-v1', maxRunsPerDay: this.service.config.audience.maxRunsPerDay });
+    } catch (error) {
+      if (!(error instanceof AppError) && !(error instanceof SyntaxError)) throw error;
+      reasons.push(error.code ?? 'AUDIENCE_RECORD_INVALID');
+    }
+    if (!this.enabled()) reasons.push('AUDIENCE_DISABLED');
+    if (this.service.config.audience?.modelEnabled !== true) reasons.push('AUDIENCE_MODEL_DISABLED');
+    if (this.service.config.controlPlane?.enabled !== true) reasons.push('AUDIENCE_CONTROL_REQUIRED');
+    return { eligible, available: eligible && reasons.length === 0, reasons: [...new Set(reasons)], child_assessment: child };
+  }
+  assertRetryRequest(p) {
+    this.requireEnabled(); fields(p, ['assessment_id','expected_basis_fingerprint','expected_context_fingerprint','reason']);
+    check(this.service.config.audience?.modelEnabled === true, 'AUDIENCE_MODEL_DISABLED');
+    check(this.service.config.controlPlane?.enabled === true, 'AUDIENCE_CONTROL_REQUIRED');
+    check(typeof p.assessment_id === 'string' && p.assessment_id.length > 0 && p.assessment_id.length <= 36
+      && typeof p.reason === 'string' && p.reason.trim().length > 0 && p.reason.length <= 500, 'AUDIENCE_FIELDS_INVALID', 400);
+    const row = this.assessmentRecord(p.assessment_id), parent = this.failedReassessment(row);
+    check(row.basis_fingerprint === p.expected_basis_fingerprint, 'AUDIENCE_STALE_BASIS');
+    this.assertAssessmentCurrent(row);
+    const context = this.reassessmentContext(parent.packet.reassessment.need_id);
+    check(context.available && context.context_fingerprint === p.expected_context_fingerprint
+      && context.context_fingerprint === parent.packet.reassessment.context_fingerprint, 'AUDIENCE_STALE_BASIS');
+    return { ...parent, context };
+  }
+  retryReassessment(p) {
+    const { row, packet: previous, context } = this.assertRetryRequest(p);
+    const packet = structuredClone(previous), assessmentId = id();
+    packet.assessment_id = assessmentId;
+    packet.reassessment.retry_of = { assessment_id: row.id, basis_fingerprint: row.basis_fingerprint };
+    const basis = this.reassessmentAttemptFingerprint(packet.scope, packet.reassessment);
+    check(!this.store.get('SELECT id FROM audience_assessments WHERE goal_id=? AND basis_fingerprint=?', row.goal_id, basis), 'AUDIENCE_ALREADY_CONSIDERED');
+    check(!context.pending_assessment, 'AUDIENCE_ASSESSMENT_PENDING');
+    this.service.control.assertModelBudget({ runtime: 'hermes-audience-v1', maxRunsPerDay: this.service.config.audience.maxRunsPerDay });
+    packet.basis_fingerprint = basis;
+    this.store.run("INSERT INTO audience_assessments VALUES(?,?,?,?,'captured','operator',NULL,NULL,?)", assessmentId, row.goal_id, basis, JSON.stringify(packet), now());
+    this.record('reassessment_retry_requested', { assessment_id: assessmentId, retry_of: row.id,
+      parent_basis_fingerprint: row.basis_fingerprint, context_fingerprint: context.context_fingerprint,
+      reason: p.reason.trim(), max_model_turns: 1 }, 'operator');
+    return { assessment_id: assessmentId, retry_of: row.id, ...AUTHORITY };
+  }
   reassessmentContext(needId) {
     const need = this.need(needId, { includeWorkCase: false }), goal = this.goal(need.goal_id);
     const stored = this.store.get('SELECT basis_json FROM audience_needs WHERE id=?', needId);
@@ -430,11 +529,18 @@ export class AudienceLoop {
     if (packet.reassessment !== undefined) {
       const focus = packet.reassessment;
       check(validateReassessment(focus) && packet.id === goal.id && packet.proposal_contract_version === 2
-        && packet.basis_fingerprint === row.basis_fingerprint && focus.context_fingerprint === row.basis_fingerprint
-        && this.reassessmentFingerprint(packet.scope, focus) === row.basis_fingerprint, 'AUDIENCE_RECORD_INVALID');
+        && packet.basis_fingerprint === row.basis_fingerprint
+        && this.reassessmentFingerprint(packet.scope, focus) === focus.context_fingerprint
+        && this.reassessmentAttemptFingerprint(packet.scope, focus) === row.basis_fingerprint, 'AUDIENCE_RECORD_INVALID');
       // The completed assessment is historical output. Its own revision must not
       // make it invalid immediately; pending/running work still requires its target.
       if (row.status !== 'proposed') {
+        if (focus.retry_of) {
+          check(focus.retry_of.assessment_id !== row.id, 'AUDIENCE_RECORD_INVALID');
+          const parent = this.failedReassessment(this.assessmentRecord(focus.retry_of.assessment_id));
+          check(parent.row.goal_id === row.goal_id && parent.row.basis_fingerprint === focus.retry_of.basis_fingerprint
+            && parent.packet.reassessment.context_fingerprint === focus.context_fingerprint, 'AUDIENCE_RECORD_INVALID');
+        }
         const need = this.need(focus.need_id, { includeWorkCase: false });
         check(need.goal_id === goal.id && need.status !== 'rejected' && need.revision === focus.need_revision
           && need.basis_fingerprint === focus.need_basis_fingerprint
@@ -452,11 +558,12 @@ export class AudienceLoop {
     return goal;
   }
   assessment(assessmentId) {
-    const row = this.store.get('SELECT a.* FROM audience_assessments a JOIN audience_goals g ON g.id=a.goal_id WHERE a.id=? AND g.partner_id=?', assessmentId, this.partnerId);
-    check(row, 'AUDIENCE_ASSESSMENT_NOT_FOUND', 404);
+    const row = this.assessmentRecord(assessmentId);
     let current = false; try { this.assertAssessmentCurrent(row); current = true; } catch { /* historical packet */ }
     const { packet_json, output_json, ...rest } = row;
-    return { ...rest, packet: parse(packet_json), output: output_json ? parse(output_json) : null,
+    const packet = parse(packet_json);
+    return { ...rest, packet, output: output_json ? parse(output_json) : null,
+      ...(packet.reassessment ? { retry: this.retryState(row), attempt_receipt: this.attemptReceipt(row) } : {}),
       current, reviewable: current && ['captured', 'running', 'proposed'].includes(row.status), ...AUTHORITY };
   }
   propose(p, producer = 'operator') {
@@ -720,6 +827,7 @@ export class AudienceLoop {
     if (action === 'audience.pause') return this.pause(p);
     if (action === 'audience.capture') return this.capture(p);
     if (action === 'audience.reassess') return this.reassess(p);
+    if (action === 'audience.retry_reassessment') return this.retryReassessment(p);
     if (action === 'audience.cancel_reassessment') return this.cancelReassessment(p);
     if (action === 'audience.propose') return this.propose(p);
     if (action === 'audience.review') return this.review(p);
