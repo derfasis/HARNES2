@@ -128,7 +128,10 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
   // All source/router/transport contracts, Hermes worker and old SQL pins stay frozen.
   // Source Scout deliberately extends Store recovery/catalogue, gated MTProto reads,
   // and advisory capability metadata. No frozen Router/Projection/worker/SQL changes.
-  // Scout acceptance/SDK/transfer cases are authored; they were not run in this task.
+  // Scout acceptance/SDK/transfer cases protect the reviewed read-only extension.
+  // Audience adds only its export tables/interrupted-assessment recovery and
+  // advisory capability metadata. Audience acceptance/transfer tests cover these;
+  // all remaining transport, router, worker and migration pins stay unchanged.
   const pinned = {
     "business/situation-router.mjs": "ef2a2b53f0cec4560920453c4ff5c1e3fd88df61",
     "contracts/situation-router.schema.json": "ee18ffd684545585c8868ebe424578774bd771a0",
@@ -160,7 +163,7 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // pre-release 008 receipt, only against the unchanged published 008 SQL.
     // All other applied-migration checks remain strict; 009 is additive.
     // Actual old database upgrade/import: outcome-transfer-kill.test.mjs.
-    "business/store.mjs": "326539ec75326da62309dc6a8602d2539ddd118a",
+    "business/store.mjs": "0d3892fda6a23b8e455a9e4247e2da5f55c31285",
     "adapters/hermes/credentials.py": "2797bd89081eaf4a950178cec3d637015ee8f45f",
     "adapters/hermes/runner.py": "e631237829d9b7a4521799b4a19c4c500b33f5aa",
     // Deliberate v0 extension: existing worker, no-tool envelope tested in opportunity-runtime.test.mjs.
@@ -182,7 +185,7 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // leaves the channel is a code already shaped like one of ours. Behaviour is exercised by
     // tests/absent-source-readers.test.mjs.
     // Ownership-fence prerequisite: stale callbacks cannot mutate successor state.
-    // Authored kill cases are in workspace-telegram-kill; execution awaits owner authorization.
+    // Semantic ownership kill cases are in workspace-telegram-kill.
     // Pilot recovery extension: static read-only readers capture the shared
     // client generation too. No outbound/private path changes. Native kill
     // proofs are in telegram-source-owner-fence.test.mjs.
@@ -199,7 +202,7 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     "partner/behavioral_examples.md": "467282e6705e951f0376ae9cb712a6ebb57bab38",
     // Metadata correction: Browser v0 already implements an allowlisted read-only web reader.
     // Its catalog entry grants no runtime, contact or write authority.
-    "partner/capabilities.json": "3a8f1e9653331792db9e069027553ab5ae40a75d",
+    "partner/capabilities.json": "f063b04ded61312b30a3bbf619774ea110cbc60f",
     "partner/identity.md": "d62383e15fde5fbb78dcff171d58aa6905f97dcb",
     "partner/knowledge/pm-international.json": "a9fe030d2ed9602149e82062eb904fea4c542a1b",
     "partner/profile.json": "4a66a8207b4227be2f688701d0f0b67cbd9b544b",

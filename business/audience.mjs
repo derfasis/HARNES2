@@ -88,8 +88,40 @@ export class AudienceLoop {
     }
     return { anchor: message.message_id, chain, incomplete: true };
   }
+  members(row) {
+    let members;
+    try { members = parse(row.member_ids_json); }
+    catch { throw new AppError('AUDIENCE_RECORD_INVALID', 409, 'AUDIENCE_RECORD_INVALID'); }
+    check(Array.isArray(members) && members.length <= MEMBERS && new Set(members).size === members.length
+      && members.every(m => typeof m === 'string' && m.length > 0 && m.length <= 200), 'AUDIENCE_RECORD_INVALID');
+    return members;
+  }
+  projection(row) {
+    const members = this.members(row);
+    let state;
+    try { state = parse(row.state_json); }
+    catch { throw new AppError('AUDIENCE_RECORD_INVALID', 409, 'AUDIENCE_RECORD_INVALID'); }
+    check(state && Object.keys(state).sort().join(',') === 'evidence,members,reasons,unsupported_count'
+      && Array.isArray(state.members) && state.members.length <= MEMBERS
+      && state.members.every(m => Array.isArray(m) && m.length === 3 && members.includes(m[0])
+        && typeof m[1] === 'string' && /^[1-9][0-9]*$/.test(m[1]) && ['upsert','delete','unsupported'].includes(m[2]))
+      && new Set(state.members.map(m => m[0])).size === state.members.length
+      && Array.isArray(state.evidence) && digest(state.evidence) === digest(state.members.filter(m => m[2] === 'upsert').map(m => m[1]))
+      && Array.isArray(state.reasons) && state.reasons.length <= 16 && state.reasons.every(r => typeof r === 'string')
+      && (members.length > 0 || state.reasons.includes('AUDIENCE_RECORD_INVALID'))
+      && state.unsupported_count === state.members.filter(m => m[2] === 'unsupported').length
+      && digest({ members, state, overflow: !!row.overflow }) === row.fingerprint, 'AUDIENCE_RECORD_INVALID');
+    return state;
+  }
+  quarantineExchange(row) {
+    const members = [], state = { members: [], evidence: [], reasons: ['AUDIENCE_RECORD_INVALID'], unsupported_count: 0 };
+    const fingerprint = digest({ members, state, overflow: true });
+    this.store.run('UPDATE audience_exchanges SET member_ids_json=?,state_json=?,fingerprint=?,overflow=1,updated_at=? WHERE id=?',
+      JSON.stringify(members), JSON.stringify(state), fingerprint, now(), row.id);
+    this.record('quarantined', { exchange_id: row.id, reason: 'AUDIENCE_RECORD_INVALID' });
+  }
   refreshExchange(row) {
-    const members = parse(row.member_ids_json), latest = sourceRows(this.service, row.source_ref, members);
+    const members = this.members(row), latest = sourceRows(this.service, row.source_ref, members);
     const byId = new Map(latest.map(e => [e.message.message_id, e]));
     const reasons = [], canonical = latest.sort((a, b) => Number(a.event_id) - Number(b.event_id));
     if (row.overflow) reasons.push('AUDIENCE_EXCHANGE_CAPACITY');
@@ -147,14 +179,24 @@ export class AudienceLoop {
           ancestry.anchor, '[]', '', '{}', row.id, now(), now());
         exchange = this.store.get('SELECT * FROM audience_exchanges WHERE id=?', exchangeId);
       }
-      const all = [...new Set([...parse(exchange.member_ids_json), ...ancestry.chain])];
+      // Quarantine is terminal for this projection; new messages cannot resurrect its proof.
+      if (parse(exchange.state_json).reasons?.includes('AUDIENCE_RECORD_INVALID')) continue;
+      const all = [...new Set([...this.members(exchange), ...ancestry.chain])];
       this.store.run('UPDATE audience_exchanges SET member_ids_json=?,overflow=?,last_event_id=? WHERE id=?',
         JSON.stringify(all.slice(0, MEMBERS)), exchange.overflow || all.length > MEMBERS ? 1 : 0, row.id, exchange.id);
       this.refreshExchange(this.store.get('SELECT * FROM audience_exchanges WHERE id=?', exchange.id));
     }
   }
   exchangeState(goal, exchange, watch = this.watches(goal.id).find(w => w.source_ref === exchange.source_ref)) {
-    const state = parse(exchange.state_json), reasons = [...state.reasons], access = watch ? this.health(watch) : { current: false, reason: 'AUDIENCE_SOURCE_SCOPE' };
+    let state;
+    try { state = this.projection(exchange); }
+    catch (error) {
+      if (!(error instanceof AppError)) throw error;
+      return { id: exchange.id, source_ref: exchange.source_ref, anchor_id: exchange.anchor_id,
+        fingerprint: exchange.fingerprint, current: false, reasons: ['AUDIENCE_RECORD_INVALID'], evidence: [],
+        unsupported_count: null, coverage: 'bounded_explicit_reply_exchange_not_complete_history', considered: true };
+    }
+    const reasons = [...state.reasons], access = watch ? this.health(watch) : { current: false, reason: 'AUDIENCE_SOURCE_SCOPE' };
     if (!access.current) reasons.push(access.reason);
     if (goal.status !== 'OPEN') reasons.push('AUDIENCE_GOAL_PAUSED');
     if (!this.enabled()) reasons.push('AUDIENCE_DISABLED');
@@ -210,7 +252,7 @@ export class AudienceLoop {
     const start = watches.findIndex(w => w.source_ref === sourceCursor) + 1;
     const rotated = watches.slice(start).concat(watches.slice(0, start));
     const queues = rotated.map(w => this.store.all(`SELECT * FROM audience_exchanges WHERE goal_id=? AND source_ref=?
-      AND (considered_fingerprint IS NULL OR considered_fingerprint<>fingerprint) ORDER BY last_event_id LIMIT ?`, goal.id, w.source_ref, BATCH)
+      AND (considered_fingerprint IS NULL OR considered_fingerprint<>fingerprint) ORDER BY last_event_id LIMIT 100`, goal.id, w.source_ref)
       .map(e => this.exchangeState(goal, e, w)));
     const pools = queues.map(pool => pool.filter(e => e.current));
     // Round-robin sources within each finite packet; a noisy chat cannot fill all eight slots.
@@ -333,8 +375,12 @@ export class AudienceLoop {
   workScope(threadId) {
     const link = this.store.get('SELECT l.* FROM audience_work_links l JOIN partner_threads t ON t.id=l.thread_id WHERE l.thread_id=? AND t.partner_id=?', threadId, this.partnerId);
     if (!link) return null;
-    let n;
-    try { n = this.need(link.need_id); }
+    let n, basis;
+    try {
+      n = this.need(link.need_id);
+      basis = parse(link.basis_json);
+      check(!this.basisState(basis).reasons.includes('AUDIENCE_RECORD_INVALID'), 'AUDIENCE_RECORD_INVALID');
+    }
     catch (e) {
       if (!(e instanceof AppError) && !(e instanceof SyntaxError)) throw e;
       return { need_id: link.need_id, need_revision: link.need_revision, current: false, reasons: ['AUDIENCE_RECORD_INVALID'],
@@ -344,9 +390,9 @@ export class AudienceLoop {
     if (this.service.audienceReconciliationHealth === false || this.service.audienceReconciliationHealth === null)
       reasons.push('AUDIENCE_RECONCILIATION_UNPROVEN');
     if (n.status !== 'accepted' || n.revision !== link.need_revision) reasons.push('AUDIENCE_WORK_REVISION_STALE');
-    if (digest(parse(link.basis_json)) !== digest(parse(this.store.get('SELECT basis_json FROM audience_needs WHERE id=?', n.id).basis_json))) reasons.push('AUDIENCE_WORK_SCOPE_STALE');
+    if (digest(basis) !== digest(parse(this.store.get('SELECT basis_json FROM audience_needs WHERE id=?', n.id).basis_json))) reasons.push('AUDIENCE_WORK_SCOPE_STALE');
     return { need_id: n.id, need_revision: link.need_revision, current: reasons.length === 0, reasons,
-      evidence_event_ids: allRefs(n), fingerprint: digest({ need_id: n.id, revision: link.need_revision, basis: parse(link.basis_json), current: !reasons.length, reasons }) };
+      evidence_event_ids: allRefs(n), fingerprint: digest({ need_id: n.id, revision: link.need_revision, basis, current: !reasons.length, reasons }) };
   }
   temporaryWorkBlock(threadId) {
     const scope = this.workScope(threadId);
@@ -424,6 +470,15 @@ export class AudienceLoop {
       let events = 0;
       for (const goal of goals) {
         for (const watch of this.watches(goal.id)) {
+          // Validate the bounded projection before JSON membership queries or intake. One
+          // damaged exchange is withheld and audited without suppressing healthy neighbors.
+          for (const exchange of this.store.all('SELECT * FROM audience_exchanges WHERE goal_id=? AND source_ref=? LIMIT 100', goal.id, watch.source_ref)) {
+            try { this.projection(exchange); }
+            catch (error) {
+              if (!(error instanceof AppError)) throw error;
+              this.quarantineExchange(exchange);
+            }
+          }
           const health = this.health(watch);
           if (watch.status === 'active' && ['SOURCE_NOT_ALLOWED', 'AUDIENCE_SOURCE_POLICY_CHANGED', 'CONTINUITY_SOURCE_POLICY_CHANGED'].includes(health.reason)) {
             this.store.run("UPDATE audience_watches SET status='revoked',reason=? WHERE goal_id=? AND source_ref=?", health.reason, goal.id, watch.source_ref); continue;

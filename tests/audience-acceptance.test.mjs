@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { audienceHarness, SOURCE, SOURCE_B, proposalFrom } from './audience-test-helpers.mjs';
+import { scoutHarness, channel, message, noHistory } from './scout-test-helpers.mjs';
 
 async function seeded(h, { text = 'How do I get started with the programme?', source_id = SOURCE } = {}) {
   const goal = await h.open({ source_ids: [source_id] });
@@ -87,6 +88,16 @@ test('capture is finite and an identical packet cannot be billed or proposed twi
   assert.equal(h.service.audience.assessment(assessment.id).status, 'captured');
 });
 
+test('late assessment completion cannot write a proposal after its source basis changes', async t => {
+  const h = audienceHarness(t), { assessment, packet } = await seeded(h);
+  await h.ingest({ message_id: 'question-1', version: 2, operation: 'delete', text: null });
+  await assert.rejects(h.command('audience.propose', { assessment_id: assessment.id,
+    output: proposalFrom(packet) }), { code: 'AUDIENCE_STALE_BASIS' });
+  assert.equal(h.store.get('SELECT COUNT(*) n FROM audience_needs').n, 0,
+    'a late result for revoked evidence has no partial write');
+  assert.equal(h.store.get('SELECT status FROM audience_assessments WHERE id=?', assessment.id).status, 'captured');
+});
+
 test('restart retires an in-flight offline assessment and allows a newly observed batch', async t => {
   const h = audienceHarness(t), { goal, assessment } = await seeded(h);
   // Model the durable state after an offline evaluator claimed a captured packet but died
@@ -160,6 +171,32 @@ test('source revoke followed by reallow and restart cannot resurrect an accepted
   assert.equal(h.service.audience.detail(need.goal_id).watches[0].status, 'revoked');
 });
 
+test('reissued Scout monitor authority cannot revive an Audience watch from an older grant epoch', async t => {
+  let reads = 0;
+  const h = scoutHarness(t, { history: async input => ++reads === 1
+    ? { empty: false, requested_count: input.limit, received_count: 1, oldest_id: 1, messages: [message()] }
+    : noHistory(input) });
+  h.config.audience = { enabled: true, modelEnabled: false, sources: [] };
+  const campaign = await h.campaign(); await h.authorize(campaign);
+  const candidate = await h.seed(campaign), sample = await h.auditAndSeal(campaign, candidate);
+  const grant = extra => ({ campaign_id: campaign.id, revision: campaign.revision, candidate_id: candidate.id,
+    sample_id: sample.id, assessment_id: null, expires_at: new Date(Date.now() + 86400000).toISOString(),
+    purpose: 'Bounded synthetic Audience authority epoch test', max_lag_seconds: 300, ...extra });
+  const admitted = await h.command('scout.admit', grant());
+  const goal = await h.command('audience.open', { title: 'Check an authorized public source',
+    objective: 'Understand one observed question', source_ids: [admitted.source_ref] });
+  const oldWatch = h.service.audience.watches(goal.goal_id)[0];
+  const oldPolicy = oldWatch.policy_hash;
+  // Isolate Audience's authority-epoch decision from the separately tested native transport gate.
+  h.service.continuity.health = () => ({ current: true, reason: null });
+  await h.command('scout.revoke', { campaign_id: campaign.id, revision: campaign.revision, grant_id: admitted.grant_id });
+  await h.command('scout.admit', grant());
+  assert.notEqual(h.service.audience.policyHash(admitted.source_ref), oldPolicy,
+    'a newly issued monitor grant has a distinct durable authority epoch');
+  assert.deepEqual(h.service.audience.health(oldWatch), { current: false, reason: 'AUDIENCE_SOURCE_POLICY_CHANGED' },
+    'the previous watch cannot regain current status after the same source is re-admitted');
+});
+
 test('event budget advances fairly across two sources despite a noisy source', async t => {
   const h = audienceHarness(t), goal = await h.open({ source_ids: [SOURCE, SOURCE_B] });
   for (let i = 0; i < 7; i++) await h.ingest({ message_id: `noise-${i}`, text: `Noisy source item ${i}.`, source_id: SOURCE });
@@ -168,6 +205,73 @@ test('event budget advances fairly across two sources despite a noisy source', a
   assert.equal(result.events, 2, 'one event budget is applied independently per watched source');
   const detail = h.service.audience.detail(goal.goal_id);
   assert.ok(detail.exchanges.some(e => e.source_ref === SOURCE_B), 'the quiet source progresses on the first bounded pass');
+});
+
+test('packet cap rotates across more than eight authorized sources without starving the tail', async t => {
+  const h = audienceHarness(t), sources = Array.from({ length: 10 }, (_, i) => `public:audience-fairness-${i + 1}`);
+  h.config.audience.sources = sources;
+  h.config.opportunity.allowedSourceRefs = sources;
+  const goal = await h.open({ source_ids: sources });
+  for (const [i, source_id] of sources.entries())
+    await h.ingest({ message_id: `question-${i + 1}`, source_id, text: `Distinct source question ${i + 1}.` });
+  h.service.audience.reconcile({ limit: 20, event_limit: 1 });
+  const first = h.service.audience.detail(goal.goal_id);
+  assert.equal(first.exchanges.length, 8);
+  const firstSources = first.exchanges.map(e => e.source_ref);
+  assert.equal(new Set(firstSources).size, 8, 'the first packet uses distinct sources before taking a second item');
+  const capture = await h.capture(goal.goal_id);
+  const packet = h.service.audience.assessment(capture.assessment_id).packet;
+  await h.command('audience.propose', { assessment_id: capture.assessment_id, output: proposalFrom(packet) });
+  const next = h.service.audience.detail(goal.goal_id).exchanges;
+  assert.deepEqual(next.map(e => e.source_ref), sources.filter(source => !firstSources.includes(source)),
+    'the two sources beyond the packet cap become the next packet instead of being starved');
+});
+
+test('expired entries ahead of the queue cannot hide its fresh ninth exchange', async t => {
+  const h = audienceHarness(t), goal = await h.open({ source_ids: [SOURCE], max_age_seconds: 60 });
+  const eventIds = [];
+  for (let i = 0; i < 9; i++) {
+    const result = await h.ingest({ message_id: `age-${i + 1}`, text: `Separate recent question ${i + 1}.` });
+    eventIds.push(result.source_event_id);
+  }
+  h.service.audience.reconcile({ limit: 10, event_limit: 50 });
+  for (const eventId of eventIds.slice(0, 8))
+    h.store.run('UPDATE events SET created_at=? WHERE id=?', '2020-01-01T00:00:00.000Z', Number(eventId));
+  const detail = h.service.audience.detail(goal.goal_id);
+  assert.equal(detail.ready, true, 'the fresh exchange beyond eight expired rows is still selectable');
+  assert.deepEqual(detail.exchanges.map(exchange => exchange.anchor_id), ['age-9']);
+});
+
+test('malformed linked exchange is quarantined while reconciliation advances a healthy neighbour and survives restart', async t => {
+  const h = audienceHarness(t), goal = await h.open({ source_ids: [SOURCE, SOURCE_B] });
+  await h.ingest({ message_id: 'supported-question', text: 'How do I get started?' });
+  h.service.audience.reconcile({ limit: 10 });
+  const captured = await h.capture(goal.goal_id), assessment = h.service.audience.assessment(captured.assessment_id);
+  const proposed = await h.command('audience.propose', { assessment_id: assessment.id,
+    output: proposalFrom(assessment.packet) });
+  let need = h.service.audience.need(proposed.need_ids[0]);
+  await h.command('audience.review', { need_id: need.id, expected_revision: need.revision,
+    expected_basis_fingerprint: need.basis_fingerprint, decision: 'accept', note: 'One direct question supports review.' });
+  need = h.service.audience.need(need.id);
+  const work = await h.command('audience.open_work', { need_id: need.id,
+    expected_revision: need.revision, expected_basis_fingerprint: need.basis_fingerprint });
+  const exchangeId = JSON.parse(h.store.get('SELECT basis_json FROM audience_needs WHERE id=?', need.id).basis_json).exchanges[0].id;
+
+  h.store.run("UPDATE audience_exchanges SET member_ids_json=? WHERE id=?", '{corrupt', exchangeId);
+  await h.ingest({ message_id: 'source-a-after-corruption', text: 'A later item touches the damaged scope.' });
+  await h.ingest({ message_id: 'healthy-neighbour', source_id: SOURCE_B, text: 'A separate source still has a new question.' });
+  h.service.audience.reconcile({ limit: 10, event_limit: 50 });
+
+  assert.equal(h.service.audience.need(need.id).status, 'stale');
+  assert.ok(h.service.audience.detail(goal.goal_id).exchanges.some(exchange => exchange.source_ref === SOURCE_B),
+    'the healthy source progresses after the corrupt exchange is isolated');
+  assert.equal(h.service.audienceReconciliationHealth, true);
+  const linked = h.service.continuity.detail(work.thread_id).audience_scope;
+  assert.ok(linked && !linked.current, 'the previously opened work stays tied to its damaged Audience scope');
+  h.restart(); h.service.audience.reconcile({ limit: 10, event_limit: 50 });
+  assert.equal(h.service.audience.need(need.id).status, 'stale');
+  assert.ok(!h.service.continuity.detail(work.thread_id).audience_scope.current,
+    'restart does not recover authority from the malformed exchange');
 });
 
 test('cyclic reply ancestry is excluded instead of becoming a supported exchange', async t => {
@@ -179,6 +283,47 @@ test('cyclic reply ancestry is excluded instead of becoming a supported exchange
   assert.equal(detail.ready, false);
   assert.equal(detail.exchanges.length, 0);
   assert.equal(h.store.get('SELECT COUNT(*) n FROM audience_needs').n, 0);
+});
+
+test('corrupted linked need is quarantined, remains scoped, and is not resurrected on restart', async t => {
+  const h = audienceHarness(t), { packet } = await seeded(h), { id, need } = await proposeAndAccept(h, packet);
+  const work = await h.command('audience.open_work', { need_id: id, expected_revision: need.revision,
+    expected_basis_fingerprint: need.basis_fingerprint });
+  h.store.run("UPDATE audience_needs SET basis_json=? WHERE id=?", '{corrupt', id);
+  await assert.rejects(Promise.resolve().then(() => h.service.audience.need(id)), { code: 'AUDIENCE_RECORD_INVALID' });
+  h.service.audience.reconcile({ limit: 10 });
+  assert.equal(h.store.get('SELECT status FROM audience_needs WHERE id=?', id).status, 'stale');
+  assert.equal(h.store.get("SELECT COUNT(*) n FROM events WHERE kind='audience.quarantined' AND json_extract(payload_json,'$.need_id')=?", id).n, 1);
+  const scope = h.service.continuity.detail(work.thread_id).audience_scope;
+  assert.ok(scope, 'corrupt linked work keeps its narrow Audience provenance');
+  assert.equal(scope.current, false);
+  assert.ok(scope.reasons.includes('AUDIENCE_RECORD_INVALID'));
+  h.restart(); h.service.audience.reconcile({ limit: 10 });
+  assert.equal(h.store.get('SELECT status FROM audience_needs WHERE id=?', id).status, 'stale');
+  assert.equal(h.store.get("SELECT COUNT(*) n FROM events WHERE kind='audience.quarantined' AND json_extract(payload_json,'$.need_id')=?", id).n, 1,
+    'restart does not repeat quarantine or restore current authority');
+});
+
+test('a corrupt work-link basis stays blocked without aborting healthy Continuity reconciliation', async t => {
+  const h = audienceHarness(t), { packet } = await seeded(h), { id, need } = await proposeAndAccept(h, packet);
+  const linked = await h.command('audience.open_work', { need_id: id, expected_revision: need.revision,
+    expected_basis_fingerprint: need.basis_fingerprint });
+  const neighbor = await h.command('continuity.open', { title: 'Healthy independent work', objective: 'Observe a separate source',
+    success_condition: 'Preserve the separate evidence', source_ids: [SOURCE_B], max_age_seconds: 3600 });
+  h.store.run('UPDATE audience_work_links SET basis_json=? WHERE thread_id=?', '{corrupt', linked.thread_id);
+  await h.ingest({ message_id: 'neighbor-after-link-corruption', source_id: SOURCE_B, text: 'A healthy new question.' });
+  const reconciled = h.service.continuity.reconcile({ limit: 20, event_limit: 50 });
+  assert.equal(reconciled.threads, 2);
+  const scope = h.service.continuity.detail(linked.thread_id).audience_scope;
+  assert.ok(scope, 'invalid link cannot fall back to unrestricted Continuity');
+  assert.equal(scope.current, false);
+  assert.deepEqual(scope.reasons, ['AUDIENCE_RECORD_INVALID']);
+  assert.equal(h.service.audience.temporaryWorkBlock(linked.thread_id), false, 'corruption is never a reversible transport hold');
+  assert.equal(h.service.continuity.detail(neighbor.thread_id).evidence.length, 1, 'healthy neighbor advances');
+  h.restart(); h.service.audience.reconcile({ limit: 10 });
+  h.service.continuity.reconcile({ limit: 20 });
+  assert.equal(h.service.continuity.detail(linked.thread_id).audience_scope.current, false);
+  assert.equal(h.service.continuity.detail(neighbor.thread_id).evidence.length, 1);
 });
 
 test('temporary unrelated-source backlog blocks work without retiring it and restores its basis after catch-up', async t => {

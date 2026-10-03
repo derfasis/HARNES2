@@ -255,20 +255,34 @@ test('temporary identity, lease and live-health failures withhold readiness but 
 });
 
 test('monitor expiry, owner revocation and campaign revision remove durable authority', async t => {
-  const expiry = new Date(Date.now() + 1800).toISOString();
-  const { h: expired, threadId: expiredThread, grantId: expiredGrant, owner: expiredOwner } =
-    await prepareCurrentGoal(t, { closeForRestart: false, monitorExpiresAt: expiry });
+  // Freeze setup too: host load cannot consume the grant before the fixture is ready.
+  // The 10-second advance leaves checkpoint freshness and the 30-second owner lease
+  // valid, so this proves grant expiry rather than an unrelated transport failure.
+  const NativeDate = Date;
+  let clockNow = NativeDate.now(), expiredOwner;
+  globalThis.Date = class extends NativeDate {
+    constructor(...args) { super(...(args.length ? args : [clockNow])); }
+    static now() { return clockNow; }
+  };
   try {
+    const expiry = new Date(clockNow + 10000).toISOString();
+    const prepared = await prepareCurrentGoal(t, { closeForRestart: false, monitorExpiresAt: expiry });
+    const { h: expired, threadId: expiredThread, grantId: expiredGrant } = prepared;
+    expiredOwner = prepared.owner;
     assert.equal(sourceAccessReadiness(expired.service, SOURCE).current, true);
-    const waitMs = Date.parse(expiry) - Date.now() + 20;
-    if (waitMs > 0) await new Promise(resolve => setTimeout(resolve, waitMs));
+    clockNow = NativeDate.parse(expiry) - 1;
+    assert.equal(sourceAccessReadiness(expired.service, SOURCE).current, true, 'authority is current immediately before expiry');
+    clockNow += 2;
+    assert.equal(expired.service.control.processCurrent(), true, 'owner lease remains valid at grant expiry');
+    assert.equal(sourceAccessReadiness(expired.service, SOURCE).current, false, 'expiry blocks reads before maintenance');
     expired.service.scout.reconcile();
     expired.service.continuity.reconcile();
     assert.equal(expired.service.store.get('SELECT status FROM scout_grants WHERE id=?', expiredGrant).status, 'expired');
     assert.equal(sourceAccessReadiness(expired.service, SOURCE).current, false, 'expired monitor authority cannot remain current');
     assert.equal(expired.service.continuity.watches(expiredThread).find(row => row.source_ref === SOURCE).status, 'revoked');
   } finally {
-    for (const entry of expiredOwner.sourceReaders) await entry.transport.close().catch(() => {});
+    globalThis.Date = NativeDate;
+    for (const entry of expiredOwner?.sourceReaders ?? []) await entry.transport.close().catch(() => {});
   }
 
   const { h: revoked, threadId: revokedThread, grantId: revokedGrant, owner: revokedOwner } =

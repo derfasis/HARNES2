@@ -52,7 +52,7 @@ test('source health and withheld exchanges are visible; imported reasons are esc
 
 test('manual proposal cites an exact captured source fragment and includes its exchange reference', async () => {
   const h=harness(); await h.view.load(); await h.view.act('audience-goal','g1'); await h.view.act('audience-assessment','as1'); await h.view.act('audience-propose','as1');
-  await h.dialogs.at(-1).submit({ title:'Starting question', hypothesis:'People need a safe starting point.', why_now:'One question is available.', next_step:'research', reason:'The source asks directly.', unknowns:'Representativeness is unknown.' });
+  await h.dialogs.at(-1).submit({ title:'Starting question', hypothesis:'People need a safe starting point.', why_now:'One question is available.', next_step:'research', reason:'The source asks directly.', unknowns:'Representativeness is unknown.', evidence_0:'ev1' });
   const proposal=h.calls[0]; assert.equal(proposal.action,'audience.propose');
   assert.deepEqual(proposal.payload.output.needs[0].support_quotes,[{source_event_id:'ev1',quote:'How can I begin safely?'}]);
   assert.deepEqual(proposal.payload.output.needs[0].evidence_event_ids,['ev1']);

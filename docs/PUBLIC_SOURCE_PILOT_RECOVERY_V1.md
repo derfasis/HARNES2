@@ -44,7 +44,7 @@ The local fitness pilot retains ten candidates from bounded discovery; it does n
 
 Pilot records, samples, owner authority, credentials and operational helpers stay outside tracked code. The pilot has no commercial offer selected, private intake allowlist, person/contact creation or external send path enabled. Native recovery evidence may support a bounded no-tool Continuity proposal, but the model cannot accept its own proposal into memory or create owner review. Material/case/action progression remains a separate current-basis owner decision.
 
-The bounded reasoning opt-in is tied to the exact goal, provider/model, finite expiry and global daily run count, checked before provider invocation and before proposal application. Provider price remains unknown; no zero-cost receipt is invented. The owner's PC shutdown instruction is a separate local operation, conditional on a fresh native Codex five-hour quota reading at or below 10% remaining for the same account. It drains owned work, saves a consistent database backup and final decision receipt, and requests Windows shutdown without forced app termination. Invalid quota readings cannot authorize shutdown.
+The bounded reasoning opt-in is tied to the exact goal, provider/model, finite expiry and global daily run count, checked before provider invocation and before proposal application. Provider price remains unknown; no zero-cost receipt is invented. Runtime lifecycle and recovery remain independent of the owner's Codex usage quota.
 
 ## Acceptance and limits
 

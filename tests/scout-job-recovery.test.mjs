@@ -56,6 +56,19 @@ test('bounded reconciliation rotates past foreign-account work without reviving 
   const readJob = (await h.command('scout.search', { campaign_id: readCampaign.id, revision: readCampaign.revision })).jobs[0];
   h.store.run("UPDATE scout_jobs SET status='interrupted',reason='PROCESS_RESTART',owner_id=NULL WHERE id=?", readJob.job_id);
 
+  // The kill case is about bounded cursor progress, not random UUID ordering.
+  // No call or reconciliation cursor owns this newly queued job yet; give the
+  // legitimate owner-created row a deterministic high UUID for this fixture.
+  const orderedReadJobId = 'ffffffff-ffff-4fff-bfff-ffffffffffff';
+  assert.equal(h.store.get('SELECT COUNT(*) n FROM scout_calls WHERE job_id=?', readJob.job_id).n, 0,
+    'the unexecuted fixture job has no call receipt that refers to its id');
+  assert.equal(h.store.get('SELECT COUNT(*) n FROM channel_offsets WHERE cursor=?', readJob.job_id).n, 0,
+    'the unexecuted fixture job is not yet a persisted reconciliation cursor');
+  assert.equal(h.store.get('SELECT id FROM scout_jobs WHERE id=?', orderedReadJobId), undefined,
+    'the deterministic fixture id is unused');
+  h.store.run('UPDATE scout_jobs SET id=? WHERE id=?', orderedReadJobId, readJob.job_id);
+  readJob.job_id = orderedReadJobId;
+
   h.service.setTelegramAccount(OTHER_ACCOUNT);
   const foreignCampaign = await h.campaign('Foreign account queued work');
   await h.authorize(foreignCampaign, 'Synthetic other-account queue fixture');

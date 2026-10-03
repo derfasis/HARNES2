@@ -131,7 +131,7 @@ npm run import -- exports/partner-DATE.json exports/restore-new
 
 Нужны Node.js 24+, Git и uv. `npm run setup` устанавливает Node-зависимости по `package-lock.json`, получает закреплённый Hermes и устанавливает Python-зависимости по upstream `uv.lock`. Имеющиеся `.env` и `config/local.json` сохраняются.
 
-`npm run build` проверяет синтаксис собственного JavaScript, JSON и Python без импорта приложения, создания тестовых данных и запросов к модели. После явного разрешения владельца локальная offline-регрессия запускается через `npm test` и `npm run test:credentials`: временные данные, без модели и внешних подключений. Результат и границы проверки описаны в [Opportunity integration checkpoint](docs/OPPORTUNITY_INTEGRATION_CHECKPOINT.md). Live-сценарии и интерфейс этим не проверяются.
+`npm run build` проверяет синтаксис собственного JavaScript, JSON и Python без импорта приложения, создания тестовых данных и запросов к модели. Локальная offline-регрессия запускается через `npm test` и `npm run test:credentials`: временные данные, без модели и внешних подключений. Владелец разрешил необходимые проверки в `AGENTS.md`; реальные проверки модели запускаются отдельно с конечным бюджетом и не включают рабочие отправки. Результат и границы проверки описаны в [Opportunity integration checkpoint](docs/OPPORTUNITY_INTEGRATION_CHECKPOINT.md). Live-сценарии и интерфейс offline-набором не проверяются.
 
 MCP запускается командой `npm run mcp` при работающем локальном сервере. Для MCP-клиента предпочтительно указать напрямую абсолютный путь к `.venv/Scripts/python.exe` и аргумент `adapters/mcp/server.py` с абсолютным путём. Адаптер получает отдельный служебный токен и не может одобрять или отправлять сообщения.
 
