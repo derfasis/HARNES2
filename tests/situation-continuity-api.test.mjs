@@ -7,6 +7,9 @@ import { start } from '../business/server.mjs';
 import { ROOT, readJson } from '../business/config.mjs';
 import { id } from '../business/store.mjs';
 import { proposalFrom, SOURCE } from './audience-test-helpers.mjs';
+import { createAudienceView } from '../public/audience.js';
+
+const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[c]);
 
 async function serverHarness(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'harnes2-situation-api-'));
@@ -127,4 +130,75 @@ test('a fresh authenticated context and explicit request capture a focused asses
   assert.equal(app.service.config.telegram.enabled, false);
   assert.equal(app.service.config.telegram.liveSending, false);
   assert.equal(app.store.get('SELECT COUNT(*) n FROM runs').n, 0, 'capture does not run a model or create a runtime invocation');
+});
+
+test('the real UI cancel button uses the captured assessment fingerprint after source context advances', async t => {
+  const { app, origin, headers, post } = await serverHarness(t);
+  const need = await prepareAcceptedNeed(app);
+  const effects = () => Object.fromEntries(['persons','conversations','drafts','contact_permissions',
+    'delivery_attempts','approvals','audience_work_links','work_cases','work_materials','action_proposals']
+    .map(table => [table, app.store.get(`SELECT COUNT(*) n FROM ${table}`).n]));
+  const beforeEffects = effects();
+  app.service.config.audience.modelEnabled = true;
+  const api = async route => {
+    const response = await fetch(`${origin}${route}`, { headers });
+    assert.equal(response.status, 200, `${route}: ${await response.clone().text()}`);
+    return response.json();
+  };
+  const commands = [];
+  let assessmentId = null;
+  const command = async (action, payload) => {
+    commands.push({ action, payload });
+    const response = await post(action, payload);
+    assert.equal(response.status, 200, `${action}: ${await response.clone().text()}`);
+    const result = await response.json();
+    if (action === 'audience.reassess') assessmentId = result.assessment_id;
+    return result;
+  };
+  const view = createAudienceView({ api, command, esc,
+    panel:(title, body) => `<section><h2>${esc(title)}</h2>${body}</section>`,
+    button:(title, action, buttonId='') => `<button data-do="${esc(action)}" data-id="${esc(buttonId)}">${esc(title)}</button>`,
+    empty:(title, body='') => `<p>${esc(title)} ${esc(body)}</p>`,
+    field:(name, title) => `<div data-field="${esc(name)}">${esc(title)}</div>`,
+    modal:() => {}, refresh:() => {}, notify:() => {} });
+
+  await view.load();
+  await view.act('audience-goal', need.goal_id);
+  await view.act('audience-need', need.id);
+  await view.act('audience-reassessment-context', need.id);
+  await view.act('audience-reassess', need.id);
+  const reassessRequest = commands.find(call => call.action === 'audience.reassess');
+  assert.ok(reassessRequest);
+  assert.ok(assessmentId, 'UI loaded a focused assessment from the real server');
+  const captured = app.service.audience.assessment(assessmentId);
+  assert.equal(captured.status, 'captured');
+  assert.equal(captured.basis_fingerprint, captured.packet.reassessment.context_fingerprint);
+  assert.notEqual(captured.basis_fingerprint, captured.packet.reassessment.need_basis_fingerprint,
+    'the captured context fingerprint differs from the need basis');
+  app.service.config.audience.modelEnabled = false;
+
+  await app.service.command('source.ingest', { source_id:SOURCE, source_kind:'sanitized_fixture',
+    message_id:'api-root-after-capture', author_id:`author:${SOURCE}`, display_name:null,
+    thread_id:null, reply_to_id:null, version:1, operation:'upsert', text:'The source changed after this assessment was captured.',
+    created_at:'2026-01-01T00:00:00.000Z', updated_at:'2026-01-01T00:00:00.000Z' }, id(), { kind:'channel', sourceId:SOURCE });
+  const latestContext = await api(`/api/audience/needs/${need.id}/context`);
+  assert.notEqual(latestContext.context_fingerprint, captured.basis_fingerprint,
+    'the source update advanced the live context beyond the captured assessment');
+
+  await view.load();
+  assert.equal(app.service.audience.assessment(assessmentId).status, 'captured',
+    'an advanced live source head does not rewrite the pending capture before cancellation');
+  assert.match(view.render(), new RegExp(`data-do="audience-cancel-reassessment" data-id="${assessmentId}"`));
+  await view.act('audience-cancel-reassessment', assessmentId);
+  const cancel = commands.at(-1);
+  assert.deepEqual(cancel, { action:'audience.cancel_reassessment', payload:{
+    assessment_id:assessmentId, expected_basis_fingerprint:captured.basis_fingerprint } });
+  assert.equal(app.service.audience.assessment(assessmentId).status, 'interrupted');
+  assert.equal(app.store.get('SELECT COUNT(*) n FROM runs').n, 0,
+    'cancellation records the explicit operator action without invoking a model/runtime run');
+  assert.equal(app.service.config.audience.modelEnabled, false,
+    'cancel authority remains available after model execution is disabled');
+  assert.equal(app.service.config.telegram.enabled, false);
+  assert.equal(app.service.config.telegram.liveSending, false);
+  assert.deepEqual(effects(), beforeEffects, 'request and cancel create no owner approval, contact or execution');
 });

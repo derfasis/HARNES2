@@ -37,7 +37,7 @@ function harness({ modelEnabled = false, assessmentStatus = 'captured', emptyOut
   const view = createAudienceView({ api, command:async (action,payload) => {
     calls.push({ action, payload });
     if (action === 'audience.reassess') {
-      focused = { id:'as-focused', status:assessmentStatus, current:true,
+      focused = { id:'as-focused', status:assessmentStatus, current:true, basis_fingerprint:'context-fp',
         packet:{ reassessment:{ version:1, need_id:'n1', need_revision:4, need_basis_fingerprint:'basis-old', context_fingerprint:'context-fp' }, exchanges:[] },
         output:emptyOutput ? { needs:[] } : null };
       goal.assessments = [{ id:'as-focused', status:assessmentStatus, reassessment:{ version:1, need_id:'n1', need_revision:4, need_basis_fingerprint:'basis-old', context_fingerprint:'context-fp' } }];
@@ -83,13 +83,13 @@ test('enabled focused reassessment carries versioned context guards and remains 
   assert.ok(!h.calls.some(call => ['audience.review','audience.open_work','audience.refresh_work'].includes(call.action)));
 });
 
-test('focused captured or running reassessment can be canceled with its reviewed need basis', async () => {
+test('focused captured or running reassessment cancels against its frozen context basis, distinct from the need basis', async () => {
   for (const status of ['captured','running']) {
     const h = harness({ modelEnabled:true, assessmentStatus:status });
     await h.view.load(); await h.view.act('audience-goal','g1'); await h.view.act('audience-need','n1');
     await h.view.act('audience-reassessment-context','n1'); await h.view.act('audience-reassess','n1');
     await h.view.act('audience-cancel-reassessment','as-focused');
-    assert.deepEqual(h.calls.at(-1),{ action:'audience.cancel_reassessment', payload:{ assessment_id:'as-focused', expected_basis_fingerprint:'basis-old' } });
+    assert.deepEqual(h.calls.at(-1),{ action:'audience.cancel_reassessment', payload:{ assessment_id:'as-focused', expected_basis_fingerprint:'context-fp' } });
   }
 });
 

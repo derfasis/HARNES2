@@ -276,7 +276,9 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
         throw new Error('Отменить можно только ожидающий или выполняющийся пересмотр для открытой оценки.');
       }
       await command('audience.cancel_reassessment', { assessment_id: a.id,
-        expected_basis_fingerprint: target.need_basis_fingerprint });
+        // Bind cancellation to the immutable captured assessment, even when
+        // later source observations have advanced the live context.
+        expected_basis_fingerprint: a.basis_fingerprint });
       await load(); return;
     }
     if (action === 'audience-propose') {

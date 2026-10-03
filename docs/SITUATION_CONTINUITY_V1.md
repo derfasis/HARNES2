@@ -103,7 +103,7 @@ capacity refusal. Model classifications and material remain unverified.
 ## Verification status
 
 Acceptance was recorded before code; the first acceptance run failed at the
-missing API. Final local gate: **1255 Node tests, 15 Python credential-isolation
+missing API. Final local gate: **1256 Node tests, 15 Python credential-isolation
 tests, build and diff check PASS**. The build checks 196 JavaScript/JSON and nine
 Python files locally. Existing full regression and transport/authority gates are
 included, not just the focused new tests.
@@ -150,3 +150,12 @@ Private local verification artifacts stay ignored under `.cache/`; no source
 texts, credentials or native authority were exported into this document. The
 hosted exact-head gate remains to be recorded in the release handoff. Product
 usefulness is not inferred from green tests or these limited fixture checks.
+
+The final independent release review found a dashboard/API cancellation mismatch
+after the first hosted gate was green: the button submitted the remembered need's
+basis instead of the focused assessment's frozen context basis. The UI mock had
+asserted the same wrong value, while backend cancellation tests used the correct
+one. Release was withheld. The fix uses the immutable selected assessment basis;
+an actual UI-to-server roundtrip must cancel even after later source observations
+change the currently available context. Cancellation does not require the model
+to remain enabled and does not approve, revive or execute dependent work.
