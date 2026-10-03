@@ -6,15 +6,20 @@ import { id } from './store.mjs';
 import { ensure, requiredText, now, AppError } from './errors.mjs';
 import { sourceRows, sourceEvent, digest } from './source-ingestion.mjs';
 import { effectiveSourceConfig } from './scout-policy.mjs';
+import { proposalRefs, proposalBindings, previewHash, frozenProposalBasis } from './audience-proposals.mjs';
 
-export const outputSchema = readJson(path.join(ROOT, 'contracts/audience-assessment.schema.json'));
-export const validateOutput = new Ajv({ strict: true, allowUnionTypes: true }).compile(outputSchema);
+const storedOutputSchema = readJson(path.join(ROOT, 'contracts/audience-assessment.schema.json'));
+export const outputSchema = structuredClone(storedOutputSchema);
+outputSchema.properties.needs.items.required.push('proposal_version', 'context_event_ids', 'context_review');
+const validator = new Ajv({ strict: true, allowUnionTypes: true });
+export const validateOutput = validator.compile(storedOutputSchema);
+const validateModelOutput = validator.compile(outputSchema);
 const check = (ok, code, status = 409) => ensure(ok, code, status, code);
 const fields = (p, keys) => check(p && typeof p === 'object' && !Array.isArray(p)
   && Object.keys(p).every(k => keys.includes(k)), 'AUDIENCE_FIELDS_INVALID', 400);
 const parse = JSON.parse, CURSOR = 'audience-reconcile-v1', BATCH = 8, MEMBERS = 32;
 const AUTHORITY = Object.freeze({ executable: false, contact_permission: false, allowed_effects: [] });
-const allRefs = n => [...new Set([...n.evidence_event_ids, ...n.counterevidence_event_ids])];
+const allRefs = proposalRefs;
 const TEMPORARY = new Set(['AUDIENCE_SCOPE_BACKLOG','AUDIENCE_RECONCILIATION_UNPROVEN',
   'SOURCE_TRANSPORT_NOT_CURRENT','SOURCE_TRANSPORT_STALE','SOURCE_TRANSPORT_NOT_READY','SOURCE_TRANSPORT_DIRTY',
   'CONTINUITY_SOURCE_UNAVAILABLE','AUDIENCE_DISABLED']);
@@ -289,6 +294,7 @@ export class AudienceLoop {
     check(!this.store.get("SELECT id FROM audience_assessments WHERE goal_id=? AND status IN ('captured','running')", packet.id), 'AUDIENCE_ASSESSMENT_PENDING');
     check(Buffer.byteLength(JSON.stringify(packet)) <= 600000, 'AUDIENCE_PACKET_TOO_LARGE');
     packet.scope = this.basis(this.goal(packet.id), packet.exchanges);
+    packet.proposal_contract_version = 2;
     const assessmentId = id();
     packet.assessment_id = assessmentId;
     this.store.run("INSERT INTO audience_assessments VALUES(?,?,?,?,'captured','operator',NULL,NULL,?)", assessmentId, packet.id, packet.basis_fingerprint, JSON.stringify(packet), now());
@@ -311,17 +317,11 @@ export class AudienceLoop {
   propose(p, producer = 'operator') {
     this.requireEnabled(); fields(p, ['assessment_id', 'output']); const a = this.assessment(p.assessment_id);
     check(a.status === (producer === 'model' ? 'running' : 'captured'), 'AUDIENCE_ASSESSMENT_UNAVAILABLE'); this.assertAssessmentCurrent(a);
-    check(Buffer.byteLength(JSON.stringify(p.output ?? null)) <= 60000 && validateOutput(p.output), 'AUDIENCE_PROPOSAL_INVALID', 400);
+    check(Buffer.byteLength(JSON.stringify(p.output ?? null)) <= 60000 && validateOutput(p.output)
+      && (producer !== 'model' || a.packet.proposal_contract_version !== 2 || validateModelOutput(p.output)), 'AUDIENCE_PROPOSAL_INVALID', 400);
     const seen = new Set(), results = [];
     for (const output of p.output.needs) {
-      const selected = a.packet.exchanges.filter(e => output.exchange_ids.includes(e.id));
-      check(selected.length === output.exchange_ids.length, 'AUDIENCE_EVIDENCE_SCOPE');
-      const references = allRefs(output), support = new Set(selected.flatMap(e => e.evidence.map(s => s.source_event_id)));
-      check(references.every(ref => support.has(ref)) && selected.every(e => e.evidence.some(s => references.includes(s.source_event_id))), 'AUDIENCE_EVIDENCE_SCOPE');
-      const texts = new Map(selected.flatMap(e => e.evidence.map(s => [s.source_event_id, s.text])));
-      check(output.support_quotes.every(q => references.includes(q.source_event_id) && texts.get(q.source_event_id)?.includes(q.quote))
-        && references.every(ref => output.support_quotes.some(q => q.source_event_id === ref)), 'AUDIENCE_QUOTE_MISMATCH');
-      check(!output.evidence_event_ids.some(ref => output.counterevidence_event_ids.includes(ref)), 'AUDIENCE_EVIDENCE_CONTRADICTION');
+      const { selected } = proposalBindings(output, a.packet);
       const basis = this.basis(this.goal(a.goal_id), selected);
       let existing = output.need_id ? this.store.get('SELECT * FROM audience_needs WHERE id=? AND goal_id=?', output.need_id, a.goal_id) : null;
       check(!output.need_id || existing, 'AUDIENCE_NEED_SCOPE');
@@ -348,17 +348,41 @@ export class AudienceLoop {
     for (const e of a.packet.exchanges) this.store.run('UPDATE audience_exchanges SET considered_fingerprint=? WHERE id=?', e.fingerprint, e.id);
     this.record('proposed', { assessment_id: a.id, need_ids: results, producer }); return { assessment_id: a.id, need_ids: results, ...AUTHORITY };
   }
-  need(needId) {
+  need(needId, { includeWorkCase = true } = {}) {
     const row = this.store.get('SELECT n.* FROM audience_needs n JOIN audience_goals g ON g.id=n.goal_id WHERE n.id=? AND g.partner_id=?', needId, this.partnerId);
     check(row, 'AUDIENCE_NEED_NOT_FOUND', 404); let output, basis;
     try { output = parse(row.output_json); basis = parse(row.basis_json); }
     catch { throw new AppError('AUDIENCE_RECORD_INVALID', 409, 'AUDIENCE_RECORD_INVALID'); }
     check(validateOutput({ needs: [output] }) && basis?.goal_id === row.goal_id, 'AUDIENCE_RECORD_INVALID');
+    if (output.proposal_version === 2) {
+      // The durable need is a projection of an immutable assessment, not an editable
+      // authority document. Bind its text, references and selected context on read/import.
+      try {
+        const assessment = this.store.get('SELECT * FROM audience_assessments WHERE id=? AND goal_id=?', row.assessment_id, row.goal_id);
+        const packet = parse(assessment.packet_json), original = parse(assessment.output_json);
+        const { selected } = proposalBindings(output, packet);
+        check(original.needs.some(n => digest(n) === digest(output))
+          && digest(basis) === digest(frozenProposalBasis(packet, selected)), 'AUDIENCE_RECORD_INVALID');
+      } catch { throw new AppError('AUDIENCE_RECORD_INVALID', 409, 'AUDIENCE_RECORD_INVALID'); }
+    }
     const reasons = [...this.basisState(basis).reasons];
     if (row.status === 'stale' || row.status === 'rejected') reasons.push(`AUDIENCE_NEED_${row.status.toUpperCase()}`);
     const link = this.store.get('SELECT * FROM audience_work_links WHERE need_id=?', row.id);
+    let workCase = null;
+    if (includeWorkCase && link && output.material_preview) {
+      const w = this.store.get('SELECT * FROM work_cases WHERE thread_id=? AND partner_id=? ORDER BY created_at DESC LIMIT 1', link.thread_id, this.partnerId);
+      if (w) {
+        let current = false;
+        try { this.service.work.current(w); current = true; } catch { /* operator surface is fail-closed */ }
+        workCase = { id: w.id, revision: w.revision, current };
+      }
+    }
     return { id: row.id, goal_id: row.goal_id, assessment_id: row.assessment_id, status: row.status, revision: row.revision,
       ...output, current: reasons.length === 0, reasons, epistemic_status: 'unverified_interpretation',
+      context_accounting: output.proposal_version === 2 ? 'supplied_packet_only' : 'not_recorded',
+      preview_sha256: previewHash(output), linked_work_case: workCase,
+      // Model citations cannot narrow the inherited evidence/authority basis.
+      preview_basis_event_ids: output.material_preview ? allRefs(output) : [],
       basis_fingerprint: digest({ revision: row.revision, basis, output }), review_note: row.review_note,
       reviewed_at: row.reviewed_at, thread_id: link?.thread_id ?? null, ...AUTHORITY };
   }
@@ -377,7 +401,7 @@ export class AudienceLoop {
     if (!link) return null;
     let n, basis;
     try {
-      n = this.need(link.need_id);
+      n = this.need(link.need_id, { includeWorkCase: false });
       basis = parse(link.basis_json);
       check(!this.basisState(basis).reasons.includes('AUDIENCE_RECORD_INVALID'), 'AUDIENCE_RECORD_INVALID');
     }
@@ -424,13 +448,57 @@ export class AudienceLoop {
     const packet = this.service.continuity.detail(threadId);
     this.store.run('UPDATE partner_threads SET dependency_hash=? WHERE id=?', packet.dependency_hash, threadId);
     const capture = this.service.continuity.capture({ thread_id: threadId, expected_revision: packet.revision, expected_basis_fingerprint: packet.basis_fingerprint });
+    const hypothesis = start => ({ text: n.hypothesis,
+      evidence_event_ids: n.evidence_event_ids.slice(start, start + 16).length ? n.evidence_event_ids.slice(start, start + 16) : [n.evidence_event_ids[0]],
+      counterevidence_event_ids: n.counterevidence_event_ids.slice(start, start + 16),
+      ...(n.context_event_ids?.length ? { context_event_ids: n.context_event_ids.slice(start, start + 16) } : {}) });
     this.service.continuity.propose({ turn_id: capture.turn_id, output: {
       summary: { text: n.hypothesis, evidence_event_ids: n.evidence_event_ids.slice(0, 16) }, claims: [],
-      hypotheses: [{ text: n.hypothesis, evidence_event_ids: n.evidence_event_ids.slice(0, 16), counterevidence_event_ids: n.counterevidence_event_ids.slice(0, 16) }],
+      hypotheses: [hypothesis(0), ...(Math.max(n.evidence_event_ids.length, n.counterevidence_event_ids.length, n.context_event_ids?.length ?? 0) > 16 ? [hypothesis(16)] : [])],
       unknowns: n.unknowns, next: { kind: 'ask_owner', reason: `${n.why_now}\n${n.reason}`.slice(0, 2000), wake_at: null,
         owner_question: `Review this unverified interpretation before opening work: ${n.title}` } } });
     this.record(refresh ? 'work_refreshed' : 'work_opened', { need_id: n.id, thread_id: threadId, turn_id: capture.turn_id }, 'operator');
     return { thread_id: threadId, turn_id: capture.turn_id, ...AUTHORITY };
+  }
+  assertPreviewImport(p, { replay = false } = {}) {
+    this.requireEnabled(); this.service.work.enabled();
+    fields(p, ['need_id','expected_revision','expected_basis_fingerprint','case_id','expected_case_revision','expected_preview_sha256']);
+    const n = this.need(p.need_id, { includeWorkCase: false });
+    check(n.current && n.status === 'accepted' && n.revision === p.expected_revision
+      && n.basis_fingerprint === p.expected_basis_fingerprint, 'AUDIENCE_STALE_BASIS');
+    check(n.proposal_version === 2 && n.material_preview && n.preview_sha256 === p.expected_preview_sha256, 'AUDIENCE_PREVIEW_HASH_MISMATCH');
+    const row = this.service.work.get(p.case_id);
+    check(n.thread_id && row.thread_id === n.thread_id, 'AUDIENCE_PREVIEW_CASE_SCOPE');
+    this.service.work.current(row);
+    const evidence = this.service.work.packet(row).evidence.map(e => e.source_event_id);
+    check(allRefs(n).every(ref => evidence.includes(ref)), 'AUDIENCE_PREVIEW_SCOPE');
+    const prior = this.store.get(`SELECT payload_json FROM events WHERE partner_id=? AND kind='audience.preview_imported'
+      AND payload_json->>'$.need_id'=? AND payload_json->>'$.need_revision'=?
+      AND payload_json->>'$.case_id'=? AND payload_json->>'$.preview_sha256'=? ORDER BY id DESC LIMIT 1`,
+    this.partnerId, n.id, n.revision, row.id, n.preview_sha256);
+    let material = null;
+    if (prior) {
+      try {
+        material = this.service.work.material(parse(prior.payload_json).material_id);
+        check(material.case_id === row.id && material.sha256 === n.preview_sha256 && previewHash({ material_preview: material }) === material.sha256
+          && material.content === n.material_preview.content && material.title === n.material_preview.title
+          && digest(material.evidence_event_ids) === digest(allRefs(n)), 'AUDIENCE_RECORD_INVALID');
+      } catch { throw new AppError('AUDIENCE_RECORD_INVALID', 409, 'AUDIENCE_RECORD_INVALID'); }
+      // A superseded/rejected material is never silently resurrected by replay/import.
+      check(row.material_id === material.id && ['proposed','approved'].includes(material.status)
+        && material.turn_id === row.turn_id && material.basis_fingerprint === row.basis_fingerprint, 'AUDIENCE_PREVIEW_SUPERSEDED');
+    }
+    check(Number.isInteger(p.expected_case_revision) && (row.revision === p.expected_case_revision
+      || replay && material?.status === 'proposed' && row.revision === p.expected_case_revision + 1), 'WORK_REVISION_CONFLICT');
+    return { n, row, material };
+  }
+  importPreview(p) {
+    const { n, row, material } = this.assertPreviewImport(p);
+    if (material) return { need_id: n.id, case_id: row.id, material_id: material.id, sha256: material.sha256, duplicate: true, ...AUTHORITY };
+    const result = this.service.work.addMaterial(row, { ...n.material_preview, evidence_event_ids: allRefs(n) });
+    this.record('preview_imported', { need_id: n.id, need_revision: n.revision, preview_sha256: n.preview_sha256,
+      case_id: row.id, material_id: result.material_id, basis_fingerprint: row.basis_fingerprint }, 'operator');
+    return { need_id: n.id, ...result, ...AUTHORITY };
   }
   retire(goalId) {
     for (const n of this.store.all("SELECT id FROM audience_needs WHERE goal_id=? AND status IN ('proposed','accepted')", goalId)) {
@@ -507,6 +575,7 @@ export class AudienceLoop {
     if (action === 'audience.review') return this.review(p);
     if (action === 'audience.open_work') return this.openWork(p);
     if (action === 'audience.refresh_work') return this.openWork(p, true);
+    if (action === 'audience.import_preview') return this.importPreview(p);
     check(false, 'AUDIENCE_COMMAND_UNKNOWN', 400);
   }
 }

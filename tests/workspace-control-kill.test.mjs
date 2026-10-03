@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import http from 'node:http';
 import { id } from '../business/store.mjs';
 import { workspaceHarness, SOURCE } from './helpers/workspace-harness.mjs';
 import { HermesAdapter } from '../business/runtime.mjs';
@@ -110,11 +111,23 @@ test('real server composition refuses a second process on another port and serve
   const h = workspaceHarness(t); h.config.server.port = 0; h.config.scheduler.enabled = false;
   const app = await start({ config: h.config, directory: h.directory }); h.beforeCleanup.push(() => app.close());
   const base = `http://127.0.0.1:${app.server.address().port}`;
-  assert.equal((await fetch(`${base}/api/workspace`)).status, 403);
-  const { token } = await (await fetch(`${base}/api/session`)).json();
-  const response = await fetch(`${base}/api/workspace`, { headers: { 'x-partner-token': token } }); assert.equal(response.status, 200);
+  // Port 0 can legitimately allocate 6679 (or another Fetch-forbidden port) on
+  // Windows. Exercise actual loopback HTTP/auth/ownership with Node's HTTP client;
+  // browser port policy is unrelated to this server-composition kill case.
+  const get = (route, headers = {}) => new Promise((resolve, reject) => {
+    const request = http.get(`${base}${route}`, { headers }, response => {
+      let body = '';
+      response.setEncoding('utf8'); response.on('data', chunk => { body += chunk; });
+      response.on('end', () => resolve({ status: response.statusCode, json: async () => JSON.parse(body) }));
+      response.on('error', reject);
+    });
+    request.on('error', reject); request.setTimeout(5000, () => request.destroy(new Error('Loopback HTTP test timed out')));
+  });
+  assert.equal((await get('/api/workspace')).status, 403);
+  const { token } = await (await get('/api/session')).json();
+  const response = await get('/api/workspace', { 'x-partner-token': token }); assert.equal(response.status, 200);
   const state = await response.json(); assert.equal(state.control.resource_ticket_is_authority, false);
-  assert.equal((await fetch(`${base}/workspace.js`)).status, 200);
+  assert.equal((await get('/workspace.js')).status, 200);
   await assert.rejects(start({ config: h.config, directory: h.directory }), { code: 'CONTROL_PROCESS_ALREADY_OWNED' });
   const legacyConfig = structuredClone(h.config);
   legacyConfig.controlPlane.enabled = false;
@@ -123,7 +136,7 @@ test('real server composition refuses a second process on another port and serve
   await assert.rejects(start({ config: legacyConfig, directory: h.directory }).then(other => {
     h.beforeCleanup.push(() => other.close()); return other;
   }), { code: 'CONTROL_PROCESS_ALREADY_OWNED' });
-  assert.equal((await fetch(`${base}/health`)).status, 200);
+  assert.equal((await get('/health')).status, 200);
 });
 
 test('a CP-admitted private run cannot inherit legacy autopilot after CP is disabled during inference', async t => {

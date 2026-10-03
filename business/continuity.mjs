@@ -17,7 +17,7 @@ const WINDOW = 8, MAX_SOURCES = 4;
 const CURSOR = 'partner-continuity-sweep-v1';
 const AUTHORITY = Object.freeze({ executable: false, contact_permission: false, allowed_effects: [] });
 const refs = out => [...new Set([...(out?.summary.evidence_event_ids ?? []), ...(out?.claims ?? []).map(c => c.source_event_id),
-  ...(out?.hypotheses ?? []).flatMap(h => [...h.evidence_event_ids, ...h.counterevidence_event_ids])])];
+  ...(out?.hypotheses ?? []).flatMap(h => [...h.evidence_event_ids, ...h.counterevidence_event_ids, ...(h.context_event_ids ?? [])])])];
 
 export class ContinuityLoop {
   constructor(service) { this.service = service; this.store = service.store; }
@@ -78,10 +78,11 @@ export class ContinuityLoop {
       const current = new Map(sourceRows(this.service, watch.source_ref, selected.map(e => parse(e.payload_json).message_id))
         .map(e => [e.message.message_id, e]));
       const access = this.health(watch);
+      const transport = sourceTransportKind(this.service, watch.source_ref);
+      const browser = browserCheckpoint(this.service, watch.source_ref);
       // A re-read of an unchanged HTTP document confirms the existing version;
       // it is not a new message. Telegram signal age still uses its intake time.
-      const confirmation = access.current && sourceTransportKind(this.service, watch.source_ref) === 'browser'
-        ? browserCheckpoint(this.service, watch.source_ref)?.confirmed_at : null;
+      const confirmation = access.current && transport === 'browser' ? browser?.confirmed_at : null;
       for (const e of selected) {
         const m = parse(e.payload_json), latest = current.get(m.message_id);
         const reasons = [];
@@ -92,6 +93,10 @@ export class ContinuityLoop {
         if (Date.parse(freshnessAt) + row.max_age_seconds * 1000 <= Date.now()) reasons.push('CONTINUITY_EVIDENCE_EXPIRED');
         result.set(String(e.id), { source_event_id: String(e.id), source_ref: watch.source_ref, author_id: m.author_id,
           message_id: m.message_id, message_version: m.version, observed_at: e.created_at, confirmed_at: confirmation,
+          // Browser canonical dates identify captures, not platform publication. A retained
+          // checkpoint also preserves this distinction after the browser policy is removed.
+          published_at: transport === 'browser' || browser ? null : m.created_at ?? null,
+          source_updated_at: transport === 'browser' || browser ? null : m.updated_at ?? null,
           current: !reasons.length, reasons, text: typeof m.text === 'string' ? m.text.slice(0, 2000) : null,
           truncated: typeof m.text === 'string' && m.text.length > 2000 });
       }

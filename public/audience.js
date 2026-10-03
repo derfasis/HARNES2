@@ -15,7 +15,9 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
           catch { need = null; selectedNeed = null; }
           if (need && !selectedAssessment) selectedAssessment = need.assessment_id;
         } else need = null;
-        if (selectedAssessment && (goal.assessments ?? []).some(item => item.id === selectedAssessment)) {
+        // A need is the authoritative link to its assessment. Older goal
+        // summaries are intentionally bounded and may omit that assessment.
+        if (selectedAssessment) {
           assessment = await api(`/api/audience/assessments/${encodeURIComponent(selectedAssessment)}`);
         } else { assessment = null; selectedAssessment = null; }
       } else { goal = null; need = null; assessment = null; selectedGoal = selectedNeed = selectedAssessment = null; }
@@ -23,6 +25,11 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
   }
   const statusName = value => ({OPEN:'Открыта',PAUSED:'Приостановлена',open:'Открыта',active:'Активна',paused:'Приостановлена',accepted:'Принято',rejected:'Отклонено',proposed:'На рассмотрении',captured:'Собрано',stale:'Устарело',pending:'Ожидает',interrupted:'Прервано',invalid:'Невалидный вывод'})[value] ?? value ?? 'Неизвестно';
   const badge = value => `<span class="badge ${['OPEN','accepted','active'].includes(value)?'green':['rejected','PAUSED','paused','stale'].includes(value)?'red':['proposed','captured'].includes(value)?'purple':''}">${esc(statusName(value))}</span>`;
+  const sourceDate = value => {
+    if (!value) return 'неизвестно';
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? 'неизвестно' : parsed.toLocaleString('ru-RU');
+  };
   const selectedRows = (rows, type, selected) => rows.map(row => `<button class="person-card ${row.id === selected?'active':''}" data-do="audience-${type}" data-id="${esc(row.id)}">
     <strong>${esc(row.title ?? row.id)}</strong><small>${badge(row.status)} · ревизия ${esc(row.revision ?? '—')}</small>
     ${row.objective ? `<small>${esc(row.objective)}</small>` : ''}</button>`).join('');
@@ -80,10 +87,35 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
     const exchanges = n.exchange_ids ?? [];
     const quotes = n.support_quotes ?? [];
     const evidenceById = new Map((assessment?.packet?.exchanges ?? []).flatMap(x => x.evidence ?? []).map(x => [x.source_event_id, x]));
+    const exchangeById = new Map((assessment?.packet?.exchanges ?? []).map(x => [x.id, x]));
     const refs = ids => ids.map(id => {
       const e = evidenceById.get(id);
-      return `<article class="workspace-evidence"><p>${esc(e?.text ?? 'Текст не сохранён в доступном снимке.')}</p><small>${esc(id)}${e?.source_ref ? ` · ${esc(e.source_ref)}` : ''}</small></article>`;
+      return `<article class="workspace-evidence"><p>${esc(e?.text ?? 'Текст не сохранён в доступном снимке.')}</p><small>${esc(id)}${e?.source_ref ? ` · ${esc(e.source_ref)}` : ''} · опубликовано ${esc(sourceDate(e?.published_at))} · источник изменён ${esc(sourceDate(e?.source_updated_at))} · наблюдалось ${esc(sourceDate(e?.observed_at))}</small></article>`;
     }).join('') || '<p>Нет привязанных событий.</p>';
+    const contextVersion = n.proposal_version === 2;
+    const context = contextVersion ? `<section class="context-review"><h3>Контекст предоставленного снимка</h3>
+      <p class="muted tiny">Все обмены из ограниченного снимка классифицированы. Это не подтверждает полноту исходного источника.</p>
+      ${(n.context_review ?? []).map(row => {
+        const labels = { supporting:'Поддерживает', related:'Связанный контекст', counterevidence:'Контрсвидетельство', uncertain:'Неопределённый контекст', unrelated:'Не относится' };
+        const exchange = exchangeById.get(row.exchange_id);
+        const selected = row.evidence_event_ids ?? [];
+        return `<article class="workspace-evidence"><strong>${esc(labels[row.classification] ?? row.classification ?? 'Классификация не указана')} · обмен ${esc(row.exchange_id ?? '—')}</strong>
+          ${exchange ? `<p>${esc(exchange.source_ref ?? '')} · ${exchange.current === true ? 'был актуален при сборе' : 'требовал сверки при сборе'}</p>` : '<p>Обмен отсутствует в доступном снимке.</p>'}
+          <p>${esc(row.reason ?? 'Обоснование не указано')}</p>
+          ${selected.length ? selected.map(id => { const e = evidenceById.get(id); return `<blockquote>${esc(e?.text ?? 'Выбранная цитата недоступна в снимке.')}<small> · событие ${esc(id)}</small></blockquote>`; }).join('') : '<small>Выбранные цитаты: нет.</small>'}</article>`;
+      }).join('') || '<p>Классификации контекста не сохранены.</p>'}</section>`
+      : '<div class="section-note">Историческое предложение версии 1: в записи нет зафиксированной проверки полного контекста или предпросмотра материала.</div>';
+    const preview = contextVersion && n.material_preview ? `<section class="material-preview"><h3>Предпросмотр предлагаемого материала</h3>
+      <p><strong>${esc(n.material_preview.title ?? 'Без названия')}</strong></p>
+      <pre class="workspace-pre">${esc(n.material_preview.content ?? '')}</pre>
+      <p><strong>SHA-256:</strong> <code>${esc(n.preview_sha256 ?? 'не указан сервером')}</code></p>
+      <p class="muted tiny">Это точный предпросмотр для рассмотрения, ещё не проверен владельцем и не является действием или отправкой.</p>
+      ${(n.material_preview.evidence_event_ids ?? []).length ? `<p><strong>Цитаты материала:</strong> ${esc(n.material_preview.evidence_event_ids.join(', '))}</p>` : '<p>Цитаты материала не указаны.</p>'}
+      <p><strong>Полное основание материала:</strong> ${esc((n.preview_basis_event_ids ?? []).join(', ') || 'не подтверждено сервером')}. Связанный контекст сохраняется независимо от списка цитат модели.</p>
+      ${n.linked_work_case?.id ? `<p><strong>Связанное дело Work:</strong> ${esc(n.linked_work_case.id)} · ревизия ${esc(n.linked_work_case.revision ?? '—')} · ${n.linked_work_case.current === true ? 'актуально' : 'не подтверждено'}</p>` : '<p>Дело Work не связано.</p>'}
+      <p class="muted tiny">Импорт добавит точный текст как предложенный материал в открытое дело Work. Он всё ещё требует проверки материала в Work и отдельного разрешения Action.</p>
+      ${current && accepted && n.linked_work_case?.current === true && n.linked_work_case?.id && n.preview_sha256 ? button('Импортировать предпросмотр в дело Work', 'audience-import-preview', n.id, 'secondary') : ''}</section>`
+      : contextVersion ? '<section class="material-preview"><h3>Предпросмотр материала</h3><p>Предпросмотр не сохранён.</p></section>' : '';
     return panel(n.title ?? 'Потребность', `<p>${badge(n.status)} · ревизия ${esc(n.revision ?? '—')} · ${current ? 'основание актуально' : 'основание неактуально'}</p>
       <p><strong>Эпистемический статус:</strong> ${esc(n.epistemic_status ?? 'не указан')}</p>
       <p><strong>Гипотеза:</strong> ${esc(n.hypothesis ?? '')}</p><p><strong>Почему сейчас:</strong> ${esc(n.why_now ?? 'Не указано')}</p>
@@ -91,7 +123,9 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
       <p><strong>Неизвестно:</strong> ${esc((n.unknowns ?? []).join('; ') || 'Не указано')}</p>
       <p><strong>Точные цитаты-основания:</strong></p>${quotes.map(q => `<blockquote>${esc(q.quote)}<small> · событие ${esc(q.source_event_id)}</small></blockquote>`).join('') || '<p>Цитаты отсутствуют.</p>'}
       <p><strong>Поддерживающие события:</strong></p>${refs(ev)}<p><strong>Контрсвидетельства:</strong></p>${refs(counter)}<p><strong>Связанные обмены:</strong> ${esc(exchanges.join(', ') || 'нет ссылок')}</p>
-      <p><strong>Актуальность:</strong> ${current ? 'текущая по сохранённой проверке' : esc((n.reasons ?? []).join('; ') || 'не подтверждена')}</p>
+      ${context}
+      ${preview}
+      <p><strong>Актуальность основания:</strong> ${current ? 'ссылки и основание актуальны по сохранённой проверке; существование нерешённой проблемы этим не подтверждается' : esc((n.reasons ?? []).join('; ') || 'не подтверждена')}</p>
       <p class="muted tiny">Это гипотеза для рассмотрения. Принятие её не предоставляет разрешение на контакт или отправку. Для Continuity должна быть включена отдельная конфигурация.</p>
       <div class="actions">${current && n.status === 'proposed' ? button('Принять гипотезу', 'audience-accept', n.id, 'primary') : ''}
       ${['proposed','stale'].includes(n.status) ? button('Отклонить', 'audience-reject', n.id, 'danger') : ''}
@@ -103,7 +137,7 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
     const evidenceCount = exchanges.reduce((n, x) => n + (x.evidence?.length ?? 0), 0);
     return panel('Основание сбора', `<p>Состояние: ${badge(a.status)} · ID ${esc(a.id ?? '')}</p>
       ${packet ? `<p>Актуальность: ${a.current === true ? 'текущая' : a.current === false ? 'устарела' : 'не указана'}</p>
-        <p><strong>Обмены (${exchanges.length}), свидетельства (${evidenceCount}):</strong></p>${exchanges.map(x => `<article class="workspace-evidence"><strong>Обмен ${esc(x.id)} · ${esc(x.source_ref)}</strong><p>${x.current === true ? 'Текущий' : 'Требует сверки'}${x.reasons?.length ? ` · ${esc(x.reasons.join('; '))}` : ''}</p>${(x.evidence ?? []).map(e => `<p>${esc(e.text ?? 'Свидетельство без текста')}<small>${esc(e.source_event_id ?? '')}${e.message_version ? ` · версия ${esc(e.message_version)}` : ''}${e.observed_at ? ` · наблюдалось ${esc(new Date(e.observed_at).toLocaleString('ru-RU'))}` : ''}</small></p>`).join('')}</article>`).join('') || '<p>Свидетельства не приложены.</p>'}
+        <p><strong>Обмены (${exchanges.length}), свидетельства (${evidenceCount}):</strong></p>${exchanges.map(x => `<article class="workspace-evidence"><strong>Обмен ${esc(x.id)} · ${esc(x.source_ref)}</strong><p>${x.current === true ? 'Текущий' : 'Требует сверки'}${x.reasons?.length ? ` · ${esc(x.reasons.join('; '))}` : ''}</p>${(x.evidence ?? []).map(e => `<p>${esc(e.text ?? 'Свидетельство без текста')}<small>${esc(e.source_event_id ?? '')}${e.message_version ? ` · версия ${esc(e.message_version)}` : ''} · опубликовано ${esc(sourceDate(e.published_at))} · источник изменён ${esc(sourceDate(e.source_updated_at))} · наблюдалось ${esc(sourceDate(e.observed_at))}${e.confirmed_at ? ` · Browser подтвердил ${esc(sourceDate(e.confirmed_at))}` : ''}</small></p>`).join('')}</article>`).join('') || '<p>Свидетельства не приложены.</p>'}
         ${packet.unknowns?.length ? `<p><strong>Неизвестно:</strong> ${esc(packet.unknowns.join('; '))}</p>` : ''}` : '<p>Снимок основания не возвращён.</p>'}
       ${a.output ? `<details><summary>Сохранённое предложение</summary><pre class="workspace-pre">${esc(JSON.stringify(a.output, null, 2))}</pre></details>` : ''}
       <div class="actions">${a.status === 'captured' && a.current === true ? button('Внести гипотезу вручную', 'audience-propose', a.id, 'primary') : ''}</div>`);
@@ -182,6 +216,17 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
       const r = await command(action === 'audience-refresh-work' ? 'audience.refresh_work' : 'audience.open_work',
         { need_id: n.id, expected_revision: n.revision, expected_basis_fingerprint: n.basis_fingerprint });
       if (r.thread_id) notify(`Предложение Continuity для ветки ${r.thread_id} сохранено. Проверьте его в разделе «Исследования»; дело Workspace само не открыто.`);
+      await load(); return;
+    }
+    if (action === 'audience-import-preview') {
+      const n = need;
+      const linked = n.linked_work_case;
+      if (n.id !== id || n.status !== 'accepted' || n.current !== true || !linked?.id || linked.current !== true || !n.preview_sha256) {
+        throw new Error('Предпросмотр можно импортировать только для принятой актуальной гипотезы и актуального связанного дела Work. Обновите данные и проверьте снова.');
+      }
+      await command('audience.import_preview', { need_id: n.id, expected_revision: n.revision,
+        expected_basis_fingerprint: n.basis_fingerprint, case_id: linked.id,
+        expected_case_revision: linked.revision, expected_preview_sha256: n.preview_sha256 });
       await load(); return;
     }
     throw new Error(`Неизвестное действие Audience Intelligence: ${action}`);

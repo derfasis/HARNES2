@@ -131,6 +131,9 @@ export class BusinessService {
         'Источник требует transactional Telegram intake', 409, 'SOURCE_TRANSPORT_INGEST_REQUIRED');
     }
     const previous = this.store.get('SELECT * FROM command_receipts WHERE id=?', requestId);
+    // A receipt acknowledges an earlier import; it cannot authorize use after the
+    // selected context, review, case or source authority has changed.
+    if (action === 'audience.import_preview') this.audience.assertPreviewImport(p, { replay: previous?.fingerprint === fingerprint });
     if (previous) { ensure(previous.fingerprint === fingerprint, 'request_id использован для другой операции', 409); return JSON.parse(previous.result_json); }
     const agentActions = new Set(['draft.create','fact.propose','lesson.propose','task.propose','capability.propose', ...ENGAGEMENT_AGENT_ACTIONS]);
     ensure((actor.kind === 'operator' && action !== 'discovery.observe')

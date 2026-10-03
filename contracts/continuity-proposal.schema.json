@@ -14,7 +14,7 @@
       "required":["source_event_id","quote"],"properties":{"source_event_id":{"type":"string","pattern":"^[1-9][0-9]*$","maxLength":20},"quote":{"$ref":"#/$defs/text"}}}},
     "hypotheses":{"type":"array","maxItems":12,"items":{"type":"object","additionalProperties":false,
       "required":["text","evidence_event_ids","counterevidence_event_ids"],"properties":{"text":{"$ref":"#/$defs/text"},
-        "evidence_event_ids":{"type":"array","$ref":"#/$defs/refs","minItems":1},"counterevidence_event_ids":{"$ref":"#/$defs/refs"}}}},
+        "evidence_event_ids":{"type":"array","$ref":"#/$defs/refs","minItems":1},"counterevidence_event_ids":{"$ref":"#/$defs/refs"},"context_event_ids":{"$ref":"#/$defs/refs"}}}},
     "unknowns":{"type":"array","minItems":1,"maxItems":12,"items":{"$ref":"#/$defs/text"}},
     "next":{"type":"object","additionalProperties":false,"required":["kind","reason","wake_at","owner_question"],
       "properties":{"kind":{"enum":["observe","ask_owner","close"]},"reason":{"$ref":"#/$defs/text"},

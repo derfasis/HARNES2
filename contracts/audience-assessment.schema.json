@@ -11,12 +11,31 @@
       "type":"object","additionalProperties":false,
       "required":["need_id","title","hypothesis","why_now","exchange_ids","evidence_event_ids","counterevidence_event_ids","support_quotes","next_step","reason","unknowns"],
       "properties":{
+        "proposal_version":{"const":2},
         "need_id":{"type":["string","null"],"minLength":1,"maxLength":36},
         "title":{"type":"string","minLength":1,"maxLength":200,"pattern":"\\S"},
         "hypothesis":{"$ref":"#/$defs/text"},"why_now":{"$ref":"#/$defs/text"},
         "exchange_ids":{"$ref":"#/$defs/ids"},
         "evidence_event_ids":{"type":"array","$ref":"#/$defs/refs","minItems":1},
         "counterevidence_event_ids":{"$ref":"#/$defs/refs"},
+        "context_event_ids":{"$ref":"#/$defs/refs"},
+        "context_review":{"type":"array","minItems":1,"maxItems":8,"items":{
+          "type":"object","additionalProperties":false,
+          "required":["exchange_id","classification","evidence_event_ids","reason"],
+          "properties":{
+            "exchange_id":{"type":"string","minLength":1,"maxLength":36},
+            "classification":{"enum":["supporting","related","counterevidence","uncertain","unrelated"]},
+            "evidence_event_ids":{"type":"array","$ref":"#/$defs/refs","minItems":1},
+            "reason":{"$ref":"#/$defs/text"}
+          }
+        }},
+        "material_preview":{"type":"object","additionalProperties":false,
+          "required":["title","content","evidence_event_ids"],"properties":{
+            "title":{"type":"string","minLength":1,"maxLength":200,"pattern":"\\S"},
+            "content":{"type":"string","minLength":1,"maxLength":8000,"pattern":"\\S"},
+            "evidence_event_ids":{"type":"array","$ref":"#/$defs/refs","minItems":1}
+          }
+        },
         "support_quotes":{"type":"array","minItems":1,"maxItems":32,"items":{
           "type":"object","additionalProperties":false,"required":["source_event_id","quote"],"properties":{
             "source_event_id":{"type":"string","pattern":"^[1-9][0-9]*$","maxLength":20},
@@ -26,7 +45,15 @@
         "next_step":{"enum":["observe","research","prepare_material"]},
         "reason":{"$ref":"#/$defs/text"},
         "unknowns":{"type":"array","minItems":1,"maxItems":8,"items":{"$ref":"#/$defs/text"}}
-      }
+      },
+      "dependencies":{
+        "context_event_ids":["proposal_version"],"context_review":["proposal_version"],"material_preview":["proposal_version"],
+        "proposal_version":["context_event_ids","context_review"]
+      },
+      "allOf":[{
+        "if":{"required":["proposal_version"],"properties":{"proposal_version":{"const":2},"next_step":{"const":"prepare_material"}}},
+        "then":{"properties":{"material_preview":{}},"required":["material_preview"]}
+      }]
     }}
   }
 }

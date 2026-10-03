@@ -25,7 +25,7 @@ const fields = (p, keys) => check(p && typeof p === 'object' && !Array.isArray(p
   && Object.keys(p).every(k => keys.includes(k)), 'ACTION_FIELDS_INVALID', 400);
 const TERMINAL = ['revoked','rejected','stale','no_action'];
 const refs = o => [...new Set([...o.summary.evidence_event_ids, ...o.claims.map(c => c.source_event_id),
-  ...o.hypotheses.flatMap(h => [...h.evidence_event_ids, ...h.counterevidence_event_ids])])];
+  ...o.hypotheses.flatMap(h => [...h.evidence_event_ids, ...h.counterevidence_event_ids, ...(h.context_event_ids ?? [])])])];
 export class ActionLoop {
   constructor(service) { this.service = service; this.db = service.store; }
   get partnerId() { return this.service.config.partnerId; }
