@@ -1,0 +1,2 @@
+# Historical mixed line endings are immutable test bytes, not source whitespace.
+tests/fixtures/deployed-011-source-scout.sql -text -diff -merge

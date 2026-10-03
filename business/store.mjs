@@ -17,18 +17,32 @@ import { AUDIENCE_TABLES } from './audience-tables.mjs';
 export const id = () => randomUUID();
 export const hash = value => createHash('sha256').update(value).digest('hex');
 const LEGACY_MIGRATION_CHECKSUMS = new Map([
-  ['008-outcome-candidates.sql', new Set([
-    '9bf883d940a6a174c88a1e68ecde384966b14632813f616322beafbae154498e',
-    'a255f1b438928fd000279ed19b87b57ba3881512d32d613f292e99ecae640a64',
-  ])],
+  ['008-outcome-candidates.sql', {
+    historical: new Set([
+      '9bf883d940a6a174c88a1e68ecde384966b14632813f616322beafbae154498e',
+      'a255f1b438928fd000279ed19b87b57ba3881512d32d613f292e99ecae640a64',
+    ]),
+    published: new Set([
+      '5b12514a28dcf5a62e2b4996b301b4e1a3cf1c79fa171143c1084eea0c27a37e',
+      'a570b569340c8b9f93d3b179655d3fc9170f75f3c023d71c1dda71dac2d29049',
+    ]),
+  }],
+  // The deployed Scout database executed mixed LF/CRLF bytes. The SQL is identical
+  // to the immutable published blob; only these three proven encodings qualify.
+  // Preserve the receipt, never normalize arbitrary applied migrations.
+  ['011-source-scout.sql', {
+    historical: new Set(['9d13b835d8e0788a7d8c1272dd78d652a934f6a0342b8926c97cf84556eefa04']),
+    published: new Set([
+      'd9eee200ae3e9075cdd6d08addc0c34abaa9e97a039398bd30bf35e8abbf286e',
+      '045478ba2f61a237f9f1da2502c1404d808aed450202306ab55be97da0d10da5',
+    ]),
+  }],
 ]);
 export function migrationChecksumMatches(version, recordedChecksum, currentChecksum) {
-  return recordedChecksum === currentChecksum || version === '008-outcome-candidates.sql'
-    && ['5b12514a28dcf5a62e2b4996b301b4e1a3cf1c79fa171143c1084eea0c27a37e',
-      'a570b569340c8b9f93d3b179655d3fc9170f75f3c023d71c1dda71dac2d29049'].includes(currentChecksum)
-    && (LEGACY_MIGRATION_CHECKSUMS.get(version)?.has(recordedChecksum) === true
-      || ['5b12514a28dcf5a62e2b4996b301b4e1a3cf1c79fa171143c1084eea0c27a37e',
-        'a570b569340c8b9f93d3b179655d3fc9170f75f3c023d71c1dda71dac2d29049'].includes(recordedChecksum));
+  if (recordedChecksum === currentChecksum) return true;
+  const pinned = LEGACY_MIGRATION_CHECKSUMS.get(version);
+  return pinned?.published.has(currentChecksum) === true
+    && (pinned.published.has(recordedChecksum) || pinned.historical.has(recordedChecksum));
 }
 export const TABLES = ['partners','persons','channel_identities','conversations','messages','facts','tasks','runs','drafts','draft_versions','approvals','delivery_attempts','outcome_events','lessons','capability_proposals','skill_versions','events','command_receipts','channel_offsets','tool_calls',...ENGAGEMENT_TABLES,...DISCOVERY_TABLES,...CONTINUITY_TABLES,...EXECUTIVE_TABLES,...ACTION_TABLES,...OUTCOME_TABLES,...WORK_TABLES,...CONTROL_TABLES,...SCOUT_TABLES,...AUDIENCE_TABLES];
 export class Store {

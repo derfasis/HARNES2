@@ -163,7 +163,8 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // pre-release 008 receipt, only against the unchanged published 008 SQL.
     // All other applied-migration checks remain strict; 009 is additive.
     // Actual old database upgrade/import: outcome-transfer-kill.test.mjs.
-    "business/store.mjs": "0d3892fda6a23b8e455a9e4247e2da5f55c31285",
+    // Narrow deployed 011 encoding compatibility; immutable fixture + real upgrade/restart tests.
+    "business/store.mjs": "3da374d9ba1b4f76d730c49828556b38ec50624c",
     "adapters/hermes/credentials.py": "2797bd89081eaf4a950178cec3d637015ee8f45f",
     "adapters/hermes/runner.py": "e631237829d9b7a4521799b4a19c4c500b33f5aa",
     // Deliberate v0 extension: existing worker, no-tool envelope tested in opportunity-runtime.test.mjs.
