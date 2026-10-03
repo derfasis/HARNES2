@@ -14,6 +14,7 @@ import { readJson, ROOT } from '../business/config.mjs';
 import { Store, hash, id, migrationChecksumMatches } from '../business/store.mjs';
 import { WORK_TABLES, CONTROL_TABLES } from '../business/work-tables.mjs';
 import { SCOUT_TABLES } from '../business/scout-tables.mjs';
+import { AUDIENCE_TABLES } from '../business/audience-tables.mjs';
 
 const legacyCandidateColumns = ['basis','conversation_id','created_at','decision_id','detector','detector_version','draft_id',
   'engagement_id','evidence_json','id','kind','observed_at','outcome_id','partner_id','resolution_note','revision','source_message_id','status','updated_at'];
@@ -140,7 +141,7 @@ function managedObservation(h, cid, label, offsetHours) {
 
 function alterAs008(bundle, { withoutCoverage = false } = {}) {
   bundle.migrations = bundle.migrations.slice(0, 8);
-  for (const table of [...WORK_TABLES, ...CONTROL_TABLES, ...SCOUT_TABLES]) delete bundle.tables[table];
+  for (const table of [...WORK_TABLES, ...CONTROL_TABLES, ...SCOUT_TABLES, ...AUDIENCE_TABLES]) delete bundle.tables[table];
   for (const row of bundle.tables.messages) { delete row.occurred_at; delete row.time_basis; }
   bundle.tables.outcome_candidates = bundle.tables.outcome_candidates.map(row =>
     Object.fromEntries(legacyCandidateColumns.map(key => [key, row[key]])));

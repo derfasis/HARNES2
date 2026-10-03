@@ -204,6 +204,9 @@ export class WorkCore {
             this.db.run('UPDATE work_expectations SET status=?,reason=?,cursor=?,observations_json=?,updated_at=? WHERE id=?', status, reason, nextCursor, JSON.stringify(observations.slice(-20)), now(), e.id);
           }
           if (row.status === 'open') {
+            // Scoped audience backlog/outage withholds use now; it does not permanently
+            // destroy an unchanged approved material. current() still blocks every effect.
+            if (this.service.audience?.temporaryWorkBlock(row.thread_id)) continue;
             try { this.current(row); } catch (error) {
               if (!(error instanceof AppError)) throw error;
               this.db.run("UPDATE work_materials SET status='stale' WHERE case_id=? AND status IN ('approved','proposed')", row.id);

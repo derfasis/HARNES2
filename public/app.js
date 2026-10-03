@@ -11,7 +11,7 @@ const panel = (title,content,action='') => `<section class="panel"><div class="p
 let token='',state=null,tab='overview',selected=null,detail=null;
 let reviewFilter='pending',reviewOffset=0,reviewDetail=null;
 const pending = new Map();
-let researchView = null, actionsView = null, outcomesView = null, workspaceView = null, scoutView = null;
+let researchView = null, actionsView = null, outcomesView = null, workspaceView = null, scoutView = null, audienceView = null;
 async function api(route,body) {
   const response = await fetch(route,{method:body === undefined?'GET':'POST',headers:{'x-partner-token':token,...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});
   const data = await response.json(); if(!response.ok) throw new Error(data.error ?? 'Операция не завершена'); return data;
@@ -47,13 +47,17 @@ async function refresh() {
     scoutView ??= (await import('./scout.js')).createScoutView({ api, command, esc, modal, refresh });
     await scoutView.load();
   }
+  if(tab==='audience'){
+    audienceView ??= (await import('./audience.js')).createAudienceView({ api, command, esc, panel, button, empty, field, modal, refresh, notify });
+    await audienceView.load();
+  }
   $('#model-status').textContent=state.runtime.ready?'Модель подключена':'Ожидает подключения ИИ';
   $('#model-status').className=`pill${state.runtime.ready?' ready':''}`;render();
 }
 function render(){
-  const titles={overview:'Обзор',people:'Люди и диалоги',tasks:'Задачи',discovery:'Discovery',research:'Исследования',actions:'Действия',outcomes:'Результаты',scout:'Источники',workspace:'Partner Workspace',experience:'Память и опыт',capabilities:'Способности',runs:'История работы',settings:'Подключения'};
+  const titles={overview:'Обзор',people:'Люди и диалоги',tasks:'Задачи',discovery:'Discovery',research:'Исследования',actions:'Действия',outcomes:'Результаты',scout:'Источники',workspace:'Partner Workspace',audience:'Audience Intelligence',experience:'Память и опыт',capabilities:'Способности',runs:'История работы',settings:'Подключения'};
   $('#page-title').textContent=titles[tab];document.querySelectorAll('[data-tab]').forEach(x=>x.classList.toggle('active',x.dataset.tab===tab));
-  $('#content').innerHTML=({overview:overview,people:people,tasks:tasks,discovery:discoveryTab,research:()=>researchView.render(),actions:()=>actionsView.render(),outcomes:()=>outcomesView.render(),scout:()=>scoutView.render(),workspace:()=>workspaceView.render(),experience:experience,capabilities:capabilities,runs:runs,settings:settings}[tab])();
+  $('#content').innerHTML=({overview:overview,people:people,tasks:tasks,discovery:discoveryTab,research:()=>researchView.render(),actions:()=>actionsView.render(),outcomes:()=>outcomesView.render(),scout:()=>scoutView.render(),workspace:()=>workspaceView.render(),audience:()=>audienceView.render(),experience:experience,capabilities:capabilities,runs:runs,settings:settings}[tab])();
   if(tab==='workspace')workspaceView.hydrate($('#content'));
 }
 function overview(){
@@ -297,6 +301,7 @@ const convOptions=()=>[['','Общая работа партнёра'],...state.
 const convPayload=()=>({conversation_id:selected});
 async function act(action,itemId,extra){
   if(action.startsWith('scout-')){await scoutView.act(action,itemId);render();return;}
+  if(action.startsWith('audience-')){await audienceView.act(action,itemId);render();return;}
   if(action.startsWith('workspace-')){
     await workspaceView.act(action,itemId);
     if(['workspace-case-open','workspace-case-list','workspace-wake-local','workspace-goal-review','workspace-goal-capture','workspace-goal-open-case'].includes(action))render();

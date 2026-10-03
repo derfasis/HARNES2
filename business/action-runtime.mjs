@@ -56,6 +56,8 @@ export class ActionRuntime {
       if ((row.verify_requested || row.status === 'verifying') && attempt && attempt.status !== 'prepared') return { row, attempt, mode: 'verify' };
       if (row.status !== 'authorized' || !this.ready() || this.service.config.actions?.enabled !== true) continue;
       const grant = db.get("SELECT * FROM action_grants WHERE action_id=? AND status='active'", row.id);
+      if (this.service.audience?.temporaryWorkBlock(row.thread_id)
+        && grant && Date.parse(grant.expires_at) > Date.now()) continue;
       try { a.assertGrant(row, grant); }
       catch (e) { if (!(e instanceof AppError)) throw e; a.retire(row, 'stale', e.code); continue; }
       let prepared = db.get('SELECT * FROM action_attempts WHERE grant_id=?', grant.id);
@@ -117,6 +119,8 @@ export class ActionRuntime {
         // Another process may already have claimed this prepared attempt.
         if (db.get('SELECT status FROM action_attempts WHERE id=?', work.attempt.id)?.status !== 'prepared') return false;
         if (this.stopped || !this.ready()) return false; // Hold prepared work; a busy pass is not revocation.
+        if (this.service.audience?.temporaryWorkBlock(row.thread_id)
+          && grant?.status === 'active' && Date.parse(grant.expires_at) > Date.now()) return false;
         try { a.assertGrant(row, grant); }
         catch (e) { if (!(e instanceof AppError)) throw e; a.retire(row, 'stale', e.code); return false; }
         db.run("UPDATE action_grants SET status='consumed',updated_at=? WHERE id=?", now(), grant.id);

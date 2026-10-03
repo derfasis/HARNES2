@@ -18,6 +18,7 @@ import { ACTION_TABLES } from '../business/action-tables.mjs';
 import { OUTCOME_TABLES } from '../business/outcome-tables.mjs';
 import { WORK_TABLES, CONTROL_TABLES } from '../business/work-tables.mjs';
 import { SCOUT_TABLES } from '../business/scout-tables.mjs';
+import { AUDIENCE_TABLES } from '../business/audience-tables.mjs';
 import { spawnSync } from 'node:child_process';
 import { start } from '../business/server.mjs';
 
@@ -267,7 +268,7 @@ for (const legacy of [false,true]) test(`${legacy ? 'v6' : 'v7'} transfer cannot
   const h = harness(t), a = await h.propose(await h.accepted()); await h.grant(a);
   const bundle = exportPartner(h.store);
   if (legacy) {
-    for (const table of [...ACTION_TABLES, ...OUTCOME_TABLES, ...WORK_TABLES, ...CONTROL_TABLES, ...SCOUT_TABLES]) delete bundle.tables[table];
+    for (const table of [...ACTION_TABLES, ...OUTCOME_TABLES, ...WORK_TABLES, ...CONTROL_TABLES, ...SCOUT_TABLES, ...AUDIENCE_TABLES]) delete bundle.tables[table];
     for (const row of bundle.tables.messages) { delete row.occurred_at; delete row.time_basis; }
     bundle.migrations = bundle.migrations.slice(0,6); bundle.tables_sha256 = hash(JSON.stringify(bundle.tables));
   }

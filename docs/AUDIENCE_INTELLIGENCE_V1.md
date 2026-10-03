@@ -1,0 +1,39 @@
+# Audience Intelligence v1
+
+Goal → authorized public sources → bounded exchange projection → evidence-backed need hypothesis → explicit owner review → scoped Continuity proposal → existing Workspace material/action/recovery.
+
+This branch is stacked on the verified Workspace/Scout/pilot branches; canonical main is not modified. It introduces domain records only and reuses SQLite, AJV, the normalized source log, Hermes no-tools reasoning, Control Plane admission and the existing operator surface. No new parser, vector database or workflow engine is required. Graphiti and LangGraph were considered as generic donors; neither replaces HARNES source provenance, explicit authority, or version-bound work state.
+
+Source facts and model hypotheses remain separate. A supported single question may matter; recurrence is an unverified interpretation requiring distinct exchanges, never a count of supposedly real people. Script preprocessing groups explicit reply ancestry and suppresses exact duplicate content within a reasoning batch. It does not make relevance decisions using a fitness keyword allowlist.
+
+Defaults remain disabled, including model billing and outbound. Goal enrollment uses existing source authority; creating a goal grants no ability to read a new source. Accepted needs grant neither identity/contact nor action authority. Opening work creates a proposed Continuity turn and still requires its explicit review before a Workspace case can open. Existing material review and Action grants remain mandatory.
+
+Bounded reconciliation uses durable goal/source cursors. Per-source capacity and incomplete ancestry are visible uncertainty. Historical hypotheses remain stored, but edit/delete/revoke/expiry, pause, interrupted inference and relevant new replies withhold current use. Unrelated source messages cannot evict support or invalidate a scope-bound case. Pending ingestion within a selected source withholds use until the bounded projection has caught up; unknown membership is never treated as irrelevant.
+
+Acceptance targets: offline end-to-end real work case; no identity/outbound/contact effects; forged scope refusal; selected anchor edit/delete/revoke after restart; unrelated media isolation; late inference; no automatic retry of captured/interrupted packets; quiet-source fairness; transfer authority loss; owner actor checks before receipt replay. Tests are added before implementation; execution depends on the owner's current AGENTS authorization.
+
+## Operator path
+
+Enable `audience.enabled` explicitly in local configuration; `modelEnabled` stays false for offline/manual work. Sources must already have owner admission in existing source configuration or durable Scout monitor grants. Open the Audience tab, create a title/objective with selected source IDs, and let the existing source scheduler reconcile them. A goal alone does not join a Telegram group or grant monitoring.
+
+Capture a bounded packet and propose a need using its exact exchange IDs, evidence IDs and quotes. Review the need revision. Opening work stages a Continuity proposal; separately review that proposal in Research and open its existing Workspace case. Material preparation, material approval, local Action grant, durable receipt, independent verification and outcome observation keep their existing owners and contracts.
+
+For automatic no-tools reasoning, explicitly opt in to `audience.modelEnabled` with Control Plane enabled, existing public `opportunity.automatic` enabled, liveSending false, and an explicitly configured model/budget. Source reading, public reasoning and private/work planes keep independent clocks. Public reasoning rotates by durable domain name and packet source selection rotates across the enrolled sources. Pricing or delivery unknown is never success. No paid model calls are included in this implementation pass.
+
+## Durability and limits
+
+Migration 012 adds goals, watches, exchanges, assessments, needs and work links; historical migrations are untouched. Canonical events own text/tombstones, exchange state owns bounded membership/version projection, needs own unverified model output, and the immutable assessment packet records what the producer saw. Restart interrupts a running assessment; it does not buy another attempt. A failed packet is considered, with new evidence able to progress. Transfer keeps historical work links but revokes watches and stales interpretations, preventing a transferred case from falling back to a broader generic scope.
+
+Up to 20 sources per goal, 8 exchanges per packet, 32 messages per exchange, 100 retained exchanges per source and 100 needs per goal. Unreferenced exchange projections may be retired at capacity; canonical events are preserved. If every retained scope is referenced, admission reports source capacity instead of pretending the source is fully understood. Very large threads and missing/cyclic/opaque necessary ancestry remain unsupported. Distinct unthreaded posts are separate observations; inferred or fuzzy cross-platform conversation grouping is deferred.
+
+Existing Continuity, Executive, Action, Outcome and Work state machines stay authoritative. Opt-in work links replace only the whole-source attention dependency for the explicitly selected audience case. Catch-up or a transport outage withholds use without retiring unchanged work; edits, deletes, authority changes, source-policy changes, goal pauses and need revisions retire dependent use. All effect paths still recheck current basis, explicit grants, expiry, revocation and capability boundaries.
+
+## Verification handoff
+
+Implementation-pass checks: `npm run build` and `git diff --check` passed. The build checks JS/JSON and Python syntax; it does not exercise SQLite migrations, AJV schemas, APIs, scheduling or live behavior. The owner supplied an AGENTS instruction prohibiting tests/model calls; clarification was requested and remained pending. Accordingly, acceptance/kill/UI/transfer tests were written but not executed. No full regression, hosted CI or real model conformance result is claimed. Do not merge on the strength of compilation alone.
+
+Static adversarial review found and corrected reply cycles/reparented ancestry, partial multi-need model writes, first-pass health being assumed current, retry starvation after interrupted packets, unstable numeric domain rotation, and transient catch-up retiring existing materials or grants from independent work/action timers. Corrupt need/assessment rows fail closed and are quarantined during reconciliation; an invalid linked need cannot make its thread silently fall back to generic Continuity. These corrections still require executable verification.
+
+Next authorized validation: `node --test tests/audience-acceptance.test.mjs tests/audience-ui.test.mjs tests/audience-transfer.test.mjs`, existing convergence/recovery checks, then `npm test`, `npm run test:credentials`, `npm run build`, and `git diff --check`. Review guard-removal mutations before live use, especially pending reply membership, authority epoch, exact quote matching, owner receipt replay, transient grant holding and imported scope retention. A finite real no-tools model conformance call and read-only pilot are separate opt-ins; compilation and synthetic proposals cannot demonstrate audience relevance or material usefulness.
+
+Remaining limitations: explicit reply ancestry only; bounded threads/source/need capacity; exact in-packet content dedupe (no reliable fuzzy forwarding detection or proof of independent people); rejected needs are terminal (create a new explicit hypothesis instead of silently reopening them); refreshing a linked case to a different source set requires new work; interrupted packets are not automatically purchased again. None of these limits authorize contacting an observed author.

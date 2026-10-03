@@ -153,6 +153,12 @@ export function loadConfig() {
   if (typeof cfg.engagement?.enabled !== 'boolean') throw new Error('Invalid engagement.enabled');
   if (typeof cfg.continuity?.enabled !== 'boolean' || typeof cfg.continuity?.modelEnabled !== 'boolean'
     || cfg.continuity.modelEnabled && !cfg.continuity.enabled) throw new Error('Invalid continuity configuration');
+  if (['enabled','modelEnabled'].some(k => typeof cfg.audience?.[k] !== 'boolean')
+    || cfg.audience.modelEnabled && !cfg.audience.enabled
+    || !Number.isInteger(cfg.audience.maxSources) || cfg.audience.maxSources < 1 || cfg.audience.maxSources > 20
+    || !Number.isInteger(cfg.audience.maxExchangesPerSource) || cfg.audience.maxExchangesPerSource < 1 || cfg.audience.maxExchangesPerSource > 100
+    || !Number.isInteger(cfg.audience.maxRunsPerDay) || cfg.audience.maxRunsPerDay < 1 || cfg.audience.maxRunsPerDay > 30)
+    throw new Error('Invalid audience configuration');
   if (['enabled','modelEnabled','autoPlan'].some(k => typeof cfg.executive?.[k] !== 'boolean')
     || cfg.executive.enabled && !cfg.continuity.enabled || cfg.executive.modelEnabled && !cfg.executive.enabled
     || cfg.executive.autoPlan && !cfg.executive.modelEnabled || !Number.isInteger(cfg.executive.maxModelRunsPerDay)
@@ -173,6 +179,8 @@ export function loadConfig() {
   // requires Control Plane admission; live sending remains refused before anything connects.
   validateControl(cfg);
   validateScout(cfg);
+  if (cfg.audience.modelEnabled && (cfg.opportunity.automatic !== true || cfg.controlPlane.enabled !== true
+    || cfg.telegram.liveSending !== false)) throw new Error('Audience model reasoning requires automatic public reasoning behind Control Plane admission with live sending off.');
   checkAutomaticPrerequisite(cfg);
   return cfg;
 }

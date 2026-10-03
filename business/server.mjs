@@ -20,7 +20,7 @@ import { AppError, ensure, requiredText } from './errors.mjs';
 import { validateControl } from './control-plane.mjs';
 import { validateScout } from './scout-policy.mjs';
 
-const publicFiles = new Map([['/', ['index.html','text/html; charset=utf-8']], ['/app.js',['app.js','text/javascript; charset=utf-8']], ['/research.js',['research.js','text/javascript; charset=utf-8']], ['/actions.js',['actions.js','text/javascript; charset=utf-8']], ['/outcomes.js',['outcomes.js','text/javascript; charset=utf-8']], ['/workspace.js',['workspace.js','text/javascript; charset=utf-8']], ['/scout.js',['scout.js','text/javascript; charset=utf-8']], ['/styles.css',['styles.css','text/css; charset=utf-8']], ['/favicon.svg',['favicon.svg','image/svg+xml']]]);
+const publicFiles = new Map([['/', ['index.html','text/html; charset=utf-8']], ['/app.js',['app.js','text/javascript; charset=utf-8']], ['/research.js',['research.js','text/javascript; charset=utf-8']], ['/actions.js',['actions.js','text/javascript; charset=utf-8']], ['/outcomes.js',['outcomes.js','text/javascript; charset=utf-8']], ['/workspace.js',['workspace.js','text/javascript; charset=utf-8']], ['/scout.js',['scout.js','text/javascript; charset=utf-8']], ['/audience.js',['audience.js','text/javascript; charset=utf-8']], ['/styles.css',['styles.css','text/css; charset=utf-8']], ['/favicon.svg',['favicon.svg','image/svg+xml']]]);
 const validateCommand = new Ajv().compile(readJson(path.join(ROOT,'contracts/command.schema.json')));
 const tokenEquals = (a,b) => typeof a === 'string' && Buffer.byteLength(a) === Buffer.byteLength(b) && timingSafeEqual(Buffer.from(a),Buffer.from(b));
 async function readBody(req) {
@@ -160,6 +160,26 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
       if (req.method === 'GET' && url.pathname === '/api/scout') {
         ensure([...url.searchParams].length===0,'Invalid scout query',400);
         return send(200,service.scout.snapshot());
+      }
+      if (req.method === 'GET' && url.pathname.startsWith('/api/audience')) {
+        ensure(url.pathname === '/api/audience' || url.pathname.startsWith('/api/audience/'), 'Invalid audience route', 404);
+        if (url.pathname === '/api/audience') {
+          ensure([...url.searchParams.keys()].every(k => ['limit','cursor'].includes(k))
+            && [...url.searchParams.keys()].every(k => url.searchParams.getAll(k).length === 1), 'Invalid audience query', 400);
+          const rawLimit = url.searchParams.get('limit');
+          if (rawLimit !== null) ensure(/^[0-9]{1,2}$/.test(rawLimit) && Number(rawLimit) >= 1 && Number(rawLimit) <= 50, 'Invalid audience limit', 400);
+          const cursor = url.searchParams.get('cursor') ?? '';
+          ensure(cursor === '' || CURSOR_ID.test(cursor), 'Invalid audience cursor', 400);
+          return send(200, service.audience.list({ limit: Number(rawLimit ?? 20), cursor }));
+        }
+        ensure([...url.searchParams].length === 0, 'Invalid audience query', 400);
+        const needMatch = /^\/api\/audience\/needs\/([0-9a-f-]{36})$/.exec(url.pathname);
+        if (needMatch) return send(200, service.audience.need(needMatch[1]));
+        const assessmentMatch = /^\/api\/audience\/assessments\/([0-9a-f-]{36})$/.exec(url.pathname);
+        if (assessmentMatch) return send(200, service.audience.assessment(assessmentMatch[1]));
+        const goalMatch = /^\/api\/audience\/([^/]+)$/.exec(url.pathname);
+        ensure(goalMatch && CURSOR_ID.test(goalMatch[1]), 'Invalid audience goal ID', 400);
+        return send(200, service.audience.detail(decodeURIComponent(goalMatch[1])));
       }
       if (req.method === 'GET' && url.pathname.startsWith('/api/scout/campaigns/')) {
         ensure(/^\/api\/scout\/campaigns\/[a-f0-9-]{36}$/.test(url.pathname)&&[...url.searchParams].length===0,'Invalid scout campaign',400);

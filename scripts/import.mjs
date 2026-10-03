@@ -11,6 +11,7 @@ import { EXECUTIVE_TABLES } from '../business/executive-tables.mjs';
 import { OUTCOME_TABLES } from '../business/outcome-tables.mjs';
 import { WORK_TABLES, CONTROL_TABLES } from '../business/work-tables.mjs';
 import { SCOUT_TABLES } from '../business/scout-tables.mjs';
+import { AUDIENCE_TABLES } from '../business/audience-tables.mjs';
 import { BusinessService } from '../business/service.mjs';
 
 const [source,destinationArg] = process.argv.slice(2);
@@ -22,7 +23,7 @@ if (fs.existsSync(destination)) throw new Error('Destination already exists. Cho
 if (bundle.format !== 'digital-ai-partner' || bundle.schema_version !== 1 || !bundle.tables) throw new Error('Unsupported bundle');
 const migrationCount = Array.isArray(bundle.migrations) ? bundle.migrations.length : -1;
 const without = (...groups) => {
-  const excluded = new Set([...groups.flat(),...SCOUT_TABLES]);
+  const excluded = new Set([...groups.flat(),...SCOUT_TABLES,...AUDIENCE_TABLES]);
   return TABLES.filter(table => !excluded.has(table));
 };
 // These are historical export catalogues. Deriving them from the current list alone silently
@@ -37,7 +38,8 @@ const inputCatalogues = new Map([
   [8, without(WORK_TABLES, CONTROL_TABLES)],
   [9, without(WORK_TABLES, CONTROL_TABLES)],
   [10, without()],
-  [11, TABLES],
+  [11, TABLES.filter(table => !AUDIENCE_TABLES.includes(table))],
+  [12, TABLES],
 ]);
 const inputTables = inputCatalogues.get(migrationCount);
 if (!inputTables) throw new Error('Migration version differs');
@@ -284,6 +286,12 @@ try {
       store.run("UPDATE scout_assessments SET status='stale' WHERE status IN ('proposed','approved')");
       store.run("UPDATE scout_calls SET status='unknown',reason='TRANSFER_READ_UNKNOWN' WHERE status='started'");
       store.run("DELETE FROM channel_offsets WHERE channel IN ('scout-monitor-v1','telegram-source-start-v1')");
+    }
+    if (migrationCount >= 12) {
+      store.run("UPDATE audience_watches SET status='revoked',reason='TRANSFER_AUTHORITY_REQUIRES_REVIEW' WHERE status='active'");
+      store.run("UPDATE audience_assessments SET status=CASE WHEN status='running' THEN 'interrupted' WHEN status IN ('captured','proposed') THEN 'stale' ELSE status END");
+      store.run("UPDATE audience_needs SET status='stale',updated_at=? WHERE status IN ('proposed','accepted')", new Date().toISOString());
+      store.run("DELETE FROM channel_offsets WHERE channel IN ('audience-reason-v1','public-reason-domain-v1')");
     }
     // Observation cursors are local recovery progress, not transferable evidence.
     // Replaying committed intents is idempotent and never repeats a send.

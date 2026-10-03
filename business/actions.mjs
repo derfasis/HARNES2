@@ -239,6 +239,11 @@ export class ActionLoop {
       const rows = this.page('action-maintenance-v1', "status NOT IN ('revoked','rejected','stale','no_action')");
       for (const row of rows) {
         this.advance('action-maintenance-v1', row);
+        const activeGrant = this.db.get("SELECT expires_at FROM action_grants WHERE action_id=? AND status='active'", row.id);
+        // Readiness is withheld during scoped catch-up, without retiring an unchanged
+        // proposal. Grant expiry/revocation and current() at dispatch remain mandatory.
+        if (this.service.audience?.temporaryWorkBlock(row.thread_id)
+          && (!activeGrant || Date.parse(activeGrant.expires_at) > Date.now())) continue;
         try { this.current(row); }
         catch (e) {
           if (!(e instanceof AppError)) throw e;

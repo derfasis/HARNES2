@@ -17,6 +17,7 @@ export async function processWork(service, runtime) {
       const requests = db.all("SELECT * FROM work_material_requests WHERE status='pending' AND case_id IN (SELECT id FROM work_cases WHERE partner_id=?) ORDER BY created_at,id LIMIT 20", service.config.partnerId);
       for (const request of requests) {
         const row = service.work.get(request.case_id);
+        if (service.audience?.temporaryWorkBlock(row.thread_id)) continue;
         let sourcePacket;
         try {
           service.work.current(row);

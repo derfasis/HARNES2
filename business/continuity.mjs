@@ -100,24 +100,30 @@ export class ContinuityLoop {
   }
   detail(threadId) {
     const row = this.thread(threadId), watches = this.watches(row.id);
+    // Opt-in owner-selected audience exchange. Generic continuity keeps its whole-source contract.
+    const audienceScope = this.service.audience?.workScope(row.id) ?? null;
     const observations = this.store.all('SELECT * FROM partner_observations WHERE thread_id=? ORDER BY source_ref,source_event_id', row.id);
     const memoryRow = row.memory_turn_id ? this.store.get('SELECT id,output_json FROM partner_turns WHERE id=? AND thread_id=? AND status=?', row.memory_turn_id, row.id, 'accepted') : null;
     const memoryOutput = memoryRow ? parse(memoryRow.output_json) : null;
     const states = this.evidenceStates(row, watches, [...new Set([...observations.map(o => String(o.source_event_id)), ...refs(memoryOutput)])]);
     const businessCurrent = row.business_basis === this.businessBasis() && row.pause_reason !== 'CONTINUITY_BUSINESS_BASIS_CHANGED';
-    const memoryCurrent = !!memoryRow && row.status !== 'CLOSED' && businessCurrent && refs(memoryOutput).every(ref => states.get(ref)?.current === true);
+    const memoryCurrent = !!memoryRow && row.status !== 'CLOSED' && businessCurrent
+      && (!audienceScope || audienceScope.current) && refs(memoryOutput).every(ref => states.get(ref)?.current === true);
     const memory = memoryRow ? { turn_id: memoryRow.id, epistemic_status: 'unverified_interpretation', current: memoryCurrent,
       content: memoryCurrent ? memoryOutput : null, reasons: memoryCurrent ? [] : ['CONTINUITY_MEMORY_STALE'] } : null;
-    const evidence = observations.map(o => ({ ...states.get(String(o.source_event_id)), origin: o.origin })).filter(e => e.current === true);
+    const evidence = observations.filter(o => !audienceScope || audienceScope.evidence_event_ids.includes(String(o.source_event_id)))
+      .map(o => ({ ...states.get(String(o.source_event_id)), origin: o.origin })).filter(e => e.current === true);
     const windowIds = new Set(evidence.map(e => e.source_event_id));
     const memoryEvidence = memoryCurrent ? refs(memoryOutput).filter(ref => !windowIds.has(ref))
       .map(ref => ({ ...states.get(ref), origin: 'accepted_memory_support' })) : [];
     const watchStates = watches.map(w => ({ ...w, health: this.health(w), head: this.head(w.source_ref) }));
-    const backlog = watchStates.some(w => w.status === 'active' && w.health.current && w.head > w.cursor);
+    const backlog = audienceScope ? audienceScope.reasons.includes('AUDIENCE_SCOPE_BACKLOG')
+      : watchStates.some(w => w.status === 'active' && w.health.current && w.head > w.cursor);
     const dependency = { businessCurrent, watches: watchStates.map(w => [w.source_ref, w.status, w.health]),
-      evidence: [...states.values()].map(e => [e.source_event_id, e.current, e.reasons]) };
+      evidence: [...states.values()].map(e => [e.source_event_id, e.current, e.reasons]),
+      ...(audienceScope ? { audience: audienceScope } : {}) };
     const basis = { revision: row.revision, business_basis: row.business_basis, dependency,
-      watches: watchStates.map(w => [w.source_ref, w.policy_hash, w.cursor, w.head]), memory_turn_id: row.memory_turn_id };
+      watches: watchStates.map(w => audienceScope ? [w.source_ref, w.policy_hash] : [w.source_ref, w.policy_hash, w.cursor, w.head]), memory_turn_id: row.memory_turn_id };
     const operatorNotes = this.store.all(`SELECT id,created_at,payload_json FROM events WHERE partner_id=? AND kind='continuity.owner_note'
       AND actor='operator' AND payload_json->>'$.thread_id'=? ORDER BY id DESC LIMIT 5`, this.partnerId, row.id)
       .map(e => ({ id: String(e.id), text: parse(e.payload_json).text, recorded_at: e.created_at, kind: 'operator_guidance_not_source_fact' })).reverse();
@@ -128,7 +134,9 @@ export class ContinuityLoop {
       wake_at: row.wake_at, watches: watchStates, evidence, memory_evidence: memoryEvidence, memory, backlog, operator_notes: operatorNotes, latest_turn: latestTurn,
       coverage: { recent_items_per_source: WINDOW, selection: 'bounded_recent_window_not_complete_history', max_memory_refs: 32, max_operator_notes: 5 },
       dependency_hash: digest(dependency), basis_fingerprint: digest(basis),
-      ready: row.status === 'OPEN' && businessCurrent && !backlog && evidence.length + memoryEvidence.length > 0,
+      ready: row.status === 'OPEN' && businessCurrent && (!audienceScope || audienceScope.current)
+        && !backlog && evidence.length + memoryEvidence.length > 0,
+      ...(audienceScope ? { audience_scope: audienceScope } : {}),
       ...AUTHORITY };
   }
   list({ limit = 20, cursor = '' } = {}) {
@@ -304,10 +312,14 @@ export class ContinuityLoop {
           if (!health.current || this.service.config.continuity?.enabled !== true || this.thread(row.id).status !== 'OPEN') continue;
           const incoming = this.store.all(`SELECT id FROM events WHERE partner_id=? AND kind='source.message' AND actor='system'
             AND payload_json->>'$.source_id'=? AND id>? ORDER BY id LIMIT ?`, this.partnerId, watch.source_ref, watch.cursor, eventLimit);
-          for (const event of incoming) { this.observe(row.id, watch.source_ref, event.id, 'watched_change'); events++; }
+          const scoped = this.service.audience?.workScope(row.id);
+          for (const event of incoming) {
+            if (!scoped) this.observe(row.id, watch.source_ref, event.id, 'watched_change');
+            events++;
+          }
           if (incoming.length) {
             this.store.run('UPDATE partner_watches SET cursor=? WHERE thread_id=? AND source_ref=?', incoming.at(-1).id, row.id, watch.source_ref);
-            reasons.push('evidence_changed');
+            if (!scoped) reasons.push('evidence_changed');
           }
         }
         if (this.service.config.continuity?.enabled === true && this.thread(row.id).status === 'OPEN'
@@ -315,9 +327,10 @@ export class ContinuityLoop {
           this.store.run('UPDATE partner_threads SET wake_at=NULL WHERE id=?', row.id); reasons.push('deadline');
         }
         const state = this.detail(row.id);
-        if (state.dependency_hash !== row.dependency_hash) reasons.push('evidence_state_changed');
+        const temporarilyBlocked = this.service.audience?.temporaryWorkBlock(row.id) === true;
+        if (state.dependency_hash !== row.dependency_hash && !temporarilyBlocked) reasons.push('evidence_state_changed');
         if (reasons.length) this.changed(row, [...new Set(reasons)]);
-        this.store.run('UPDATE partner_threads SET dependency_hash=? WHERE id=?', state.dependency_hash, row.id);
+        if (!temporarilyBlocked) this.store.run('UPDATE partner_threads SET dependency_hash=? WHERE id=?', state.dependency_hash, row.id);
       }
       this.store.run(`INSERT INTO channel_offsets VALUES(?,?,?) ON CONFLICT(channel,account_id) DO UPDATE SET cursor=excluded.cursor`,
         CURSOR, this.partnerId, rows.at(-1)?.id ?? '');

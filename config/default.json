@@ -64,6 +64,13 @@
     "enabled": false,
     "modelEnabled": false
   },
+  "audience": {
+    "enabled": false,
+    "modelEnabled": false,
+    "maxSources": 20,
+    "maxExchangesPerSource": 100,
+    "maxRunsPerDay": 5
+  },
   "discovery": {
     "enabled": false,
     "maxEvidence": 20,

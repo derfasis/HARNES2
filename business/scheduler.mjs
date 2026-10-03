@@ -17,6 +17,7 @@ import { processScoutAssessment } from './scout-reasoning.mjs';
 import { effectiveSourceConfig } from './scout-policy.mjs';
 import { reconcileTelegramReaders } from './sources/telegram-source-registry.mjs';
 import { dueTelegramSources } from './telegram-monitoring.mjs';
+import { processAudienceAssessment } from './audience-reasoning.mjs';
 
 export class Scheduler {
   constructor(service, runtime, telegram, sourceReaders = []) { this.sourceReaders = sourceReaders; this.service = service; this.runtime = runtime; this.telegram = telegram; this.scoutRuntime = new ScoutRuntime(service,telegram); this.busy = false; this.reasonBusy = false; this.stopped = false; this.lastReason = null; this.sourceReadReason = null; this.activeRun = null; this.readersAbsentReported = false; this.sourceReadersState = null; this.browserPolls = new Map(); this.sourceReadFailures = new Map();
@@ -25,7 +26,7 @@ export class Scheduler {
     // start told the operator the partner was broken when the only true thing was that it had not
     // looked yet. `null` is that third answer, and reasoning treats it exactly like `false`: not
     // established is not healthy, and the model still does not run.
-    this.continuityHealthy = null; this.executiveHealthy = null; this.actionHealthy = null;
+    this.continuityHealthy = null; this.executiveHealthy = null; this.actionHealthy = null; this.audienceHealthy = null;
     this.actionRuntime = new ActionRuntime(service, { ready: () => !this.stopped && !this.busy
       && (!service.control.enabled || !service.control.stopped && service.control.processCurrent())
       && this.continuityHealthy === true && this.executiveHealthy === true && this.actionHealthy === true }); }
@@ -70,7 +71,7 @@ export class Scheduler {
   // `reason_busy` is reported beside `busy` rather than inside it: the two loops are independent,
   // and an operator looking at one long-running tick must be able to tell whether the eyes or the
   // head is the thing that is working.
-  status() { return { enabled: this.service.config.scheduler.enabled, control: this.service.control.status(), workspace: this.workState ?? { disposition: 'not_run' }, scout: this.scoutRuntime.state, scout_reasoning: this.scoutReasonState ?? { disposition: 'not_run' }, private: this.privateState ?? { disposition: 'not_run' }, busy: this.busy, reason_busy: this.reasonBusy, action_busy: this.actionRuntime.busy, actions: this.actionState ?? { disposition: 'not_run' }, active_run: this.activeRun, reason: this.lastReason, model: runtimeReadiness(this.service.config), source_readers: this.sourceReadersState, continuity: this.continuityState ?? { disposition: 'not_run' }, executive: this.executiveState ?? { disposition: 'not_run' }, outcomes: this.outcomesState ?? { disposition: 'not_run' } }; }
+  status() { return { enabled: this.service.config.scheduler.enabled, control: this.service.control.status(), workspace: this.workState ?? { disposition: 'not_run' }, scout: this.scoutRuntime.state, scout_reasoning: this.scoutReasonState ?? { disposition: 'not_run' }, private: this.privateState ?? { disposition: 'not_run' }, busy: this.busy, reason_busy: this.reasonBusy, action_busy: this.actionRuntime.busy, actions: this.actionState ?? { disposition: 'not_run' }, active_run: this.activeRun, reason: this.lastReason, model: runtimeReadiness(this.service.config), source_readers: this.sourceReadersState, continuity: this.continuityState ?? { disposition: 'not_run' }, audience: this.audienceState ?? { disposition: 'not_run' }, executive: this.executiveState ?? { disposition: 'not_run' }, outcomes: this.outcomesState ?? { disposition: 'not_run' } }; }
   // The source loop. Poll, checkpoint, retire, discover. No model call anywhere in it.
   async sourceTick() {
     if (this.busy || this.stopped || !this.service.config.scheduler.enabled) return;
@@ -125,18 +126,26 @@ export class Scheduler {
           }
           catch { this.outcomesState = { disposition: 'reconcile_failed' }; }
         }
-        this.continuityHealthy = null;
-        try {
-          await this.service.exclusive(() => this.service.continuity.reconcile());
-          this.continuityHealthy = true;
-          // A reconciliation that recovers clears its own failure. The state used to be written
-          // only on the way down, so one transient fault pinned the partner to
-          // `reconciliation_failed` for the rest of the process even though every later pass
-          // succeeded — an operator reading status() was told the partner was broken when the
-          // only thing that had happened was that it had recovered.
-          if (this.continuityState?.disposition === 'reconciliation_failed') this.continuityState = { disposition: 'reconciled' };
-        }
-        catch { this.continuityHealthy = false; this.continuityState = { disposition: 'reconciliation_failed' }; }
+      this.audienceHealthy = null;
+      this.service.audienceReconciliationHealth = null;
+      try {
+        await this.service.exclusive(() => this.service.audience.reconcile());
+        this.audienceHealthy = true;
+        this.service.audienceReconciliationHealth = true;
+        if (this.audienceState?.disposition === 'reconciliation_failed') this.audienceState = { disposition: 'reconciled' };
+      } catch { this.audienceHealthy = false; this.service.audienceReconciliationHealth = false; this.audienceState = { disposition: 'reconciliation_failed' }; }
+      this.continuityHealthy = null;
+      try {
+        await this.service.exclusive(() => this.service.continuity.reconcile());
+        this.continuityHealthy = true;
+        // A reconciliation that recovers clears its own failure. The state used to be written
+        // only on the way down, so one transient fault pinned the partner to
+        // `reconciliation_failed` for the rest of the process even though every later pass
+        // succeeded — an operator reading status() was told the partner was broken when the
+        // only thing that had happened was that it had recovered.
+        if (this.continuityState?.disposition === 'reconciliation_failed') this.continuityState = { disposition: 'reconciled' };
+      }
+      catch { this.continuityHealthy = false; this.continuityState = { disposition: 'reconciliation_failed' }; }
       this.executiveHealthy = null;
       try {
         await this.service.exclusive(() => this.service.executive.reconcile());
@@ -344,6 +353,10 @@ export class Scheduler {
     this.reasonBusy = true;
     try {
       const cfg = this.service.config;
+      if (cfg.audience?.enabled === true && cfg.audience?.modelEnabled === true) {
+        await this.audienceReasonTick();
+        return;
+      }
       // Read what the source loop last established rather than re-deriving it. A reconciliation
       // that is failing withholds derived work — that is the fail-closed direction, and it is the
       // reason this reads a flag instead of calling reconcile() a second time and hoping.
@@ -378,6 +391,52 @@ export class Scheduler {
       // source loop that wrote it, so the two loops can no longer overwrite each other.
       this.lastReason = this.sourceReadReason ?? result.disposition;
     } finally { this.reasonBusy = false; }
+  }
+  async audienceReasonTick() {
+    const cfg = this.service.config;
+    if (cfg.audience?.modelEnabled === true && this.audienceHealthy !== true)
+      this.audienceState = { disposition: this.audienceHealthy === false ? 'reconciliation_failed' : 'waiting_reconciliation' };
+    // Audience, continuity, executive and opportunity share one public inference slot. Persist
+    // the cursor so restart does not repeatedly favor whichever domain sorts first.
+    const ring = ['continuity', 'audience', 'executive', 'opportunity'];
+    const eligible = new Set([
+      ...(cfg.continuity?.enabled === true && cfg.opportunity?.automatic === true && this.continuityHealthy === true ? ['continuity'] : []),
+      ...(cfg.audience?.modelEnabled === true && this.audienceHealthy === true ? ['audience'] : []),
+      ...(cfg.executive?.enabled === true && this.executiveHealthy === true ? ['executive'] : []),
+      ...(cfg.opportunity?.automatic === true && this.continuityHealthy === true ? ['opportunity'] : []),
+    ]);
+    if (!eligible.size) {
+      if (cfg.audience?.modelEnabled !== true) this.audienceState = { disposition: 'disabled' };
+      else if (this.audienceHealthy === true) this.audienceState = { disposition: 'waiting_domain_health' };
+      return;
+    }
+    const cursorKey = 'public-reason-domain-v1';
+    const saved = this.service.store.get('SELECT cursor FROM channel_offsets WHERE channel=? AND account_id=?', cursorKey, cfg.partnerId)?.cursor ?? '';
+    const savedIndex = ring.indexOf(saved);
+    const domain = Array.from({ length: ring.length }, (_, offset) => ring[(savedIndex + offset + 1) % ring.length])
+      .find(name => eligible.has(name));
+    await this.service.exclusive(() => this.service.store.transaction(() => this.service.store.run(
+      'INSERT INTO channel_offsets VALUES(?,?,?) ON CONFLICT(channel,account_id) DO UPDATE SET cursor=excluded.cursor',
+      cursorKey, cfg.partnerId, domain)));
+    if (domain === 'audience') {
+      try { this.audienceState = await processAudienceAssessment(this.service, this.runtime); }
+      catch { this.audienceState = { disposition: 'reasoning_failed' }; }
+    } else if (domain === 'continuity') {
+      try { this.continuityState = await processContinuity(this.service, this.runtime); }
+      catch { this.continuityState = { disposition: 'reasoning_failed' }; }
+    } else if (domain === 'executive') {
+      try { this.executiveState = await processExecutive(this.service, this.runtime); }
+      catch { this.executiveState = { disposition: 'processing_failed' }; }
+    } else {
+      try {
+        const result = await processSourceOpportunity(this.service, this.runtime);
+        this.lastReason = this.sourceReadReason ?? result.disposition;
+      } catch { this.lastReason = this.sourceReadReason ?? 'reasoning_failed'; }
+    }
+    if (this.actionHealthy === true && this.executiveHealthy === true) {
+      try { this.actionPlanState = await processActionPlan(this.service, this.runtime); }
+      catch { this.actionPlanState = { disposition: 'processing_failed' }; }
+    }
   }
   async privateTick() {
     if (this.privateBusy || this.stopped || !this.service.config.scheduler.enabled) return;

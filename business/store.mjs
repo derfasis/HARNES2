@@ -12,6 +12,7 @@ import { EXECUTIVE_TABLES } from './executive-tables.mjs';
 import { OUTCOME_TABLES } from './outcome-tables.mjs';
 import { WORK_TABLES, CONTROL_TABLES } from './work-tables.mjs';
 import { SCOUT_TABLES } from './scout-tables.mjs';
+import { AUDIENCE_TABLES } from './audience-tables.mjs';
 
 export const id = () => randomUUID();
 export const hash = value => createHash('sha256').update(value).digest('hex');
@@ -29,7 +30,7 @@ export function migrationChecksumMatches(version, recordedChecksum, currentCheck
       || ['5b12514a28dcf5a62e2b4996b301b4e1a3cf1c79fa171143c1084eea0c27a37e',
         'a570b569340c8b9f93d3b179655d3fc9170f75f3c023d71c1dda71dac2d29049'].includes(recordedChecksum));
 }
-export const TABLES = ['partners','persons','channel_identities','conversations','messages','facts','tasks','runs','drafts','draft_versions','approvals','delivery_attempts','outcome_events','lessons','capability_proposals','skill_versions','events','command_receipts','channel_offsets','tool_calls',...ENGAGEMENT_TABLES,...DISCOVERY_TABLES,...CONTINUITY_TABLES,...EXECUTIVE_TABLES,...ACTION_TABLES,...OUTCOME_TABLES,...WORK_TABLES,...CONTROL_TABLES,...SCOUT_TABLES];
+export const TABLES = ['partners','persons','channel_identities','conversations','messages','facts','tasks','runs','drafts','draft_versions','approvals','delivery_attempts','outcome_events','lessons','capability_proposals','skill_versions','events','command_receipts','channel_offsets','tool_calls',...ENGAGEMENT_TABLES,...DISCOVERY_TABLES,...CONTINUITY_TABLES,...EXECUTIVE_TABLES,...ACTION_TABLES,...OUTCOME_TABLES,...WORK_TABLES,...CONTROL_TABLES,...SCOUT_TABLES,...AUDIENCE_TABLES];
 export class Store {
   constructor(directory = DATA) {
     this.directory = path.resolve(directory);
@@ -61,6 +62,7 @@ export class Store {
     this.transaction(() => {
       this.run("UPDATE scout_calls SET status='unknown',reason='PROCESS_RESTART',finished_at=? WHERE status='started'", now());
       this.run("UPDATE scout_jobs SET status='interrupted',reason='PROCESS_RESTART',owner_id=NULL,updated_at=? WHERE status='running'", now());
+      this.run("UPDATE audience_assessments SET status='interrupted' WHERE status='running'");
       this.run("UPDATE control_tickets SET status='interrupted',reason='PROCESS_RESTART',finished_at=? WHERE status IN ('reserved','running')", now());
       this.run("UPDATE work_material_requests SET status='interrupted',reason='PROCESS_RESTART',finished_at=? WHERE status='running'", now());
       this.run(`INSERT INTO events(partner_id,conversation_id,kind,actor,payload_json,created_at)
