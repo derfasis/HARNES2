@@ -34,10 +34,56 @@ function conflictCheck(ok, kind, detailFactory) {
 function publishConflict(service, record) {
   if (!record) return;
   try {
+    const diagnostic=record.diagnostic_version===1 ? {
+      diagnostic_version:1,page:record.page,comparison:record.comparison,
+      // This runs after the failed page's transaction has rolled back. Never
+      // describe tentative writes as canonical evidence of the conflict.
+      durable_targets:durableConflictTargets(service,record),
+    } : {};
     service.store.event(service.config.partnerId, null, 'source.telegram.integrity_conflict', 'system', {
       source_id: record.source_id ?? null, conflict_kind: record.conflict_kind,
-      message_id: record.message_id ?? null, pts: record.pts ?? null, edit_date: record.edit_date ?? null });
+      message_id: record.message_id ?? null, pts: record.pts ?? null, edit_date: record.edit_date ?? null,
+      ...diagnostic });
   } catch { /* Evidence must never change what the pipeline accepts. */ }
+}
+const CONFLICT_TARGET_SAMPLE=16;
+function updateTargetIds(u) {
+  return u.message ? [u.message.id] : u.message_ids ?? [];
+}
+function structuralUpdate(u) {
+  const ids=[...updateTargetIds(u)].sort((a,b)=>a-b);
+  return {kind:u.kind,pts:u.pts,pts_count:u.pts_count,target_count:ids.length,
+    target_set_sha256:digest(ids),target_ids_sample:ids.slice(0,CONFLICT_TARGET_SAMPLE)};
+}
+function deleteConflictDiagnostic(p,s,page,native,recovered) {
+  const a=new Set(updateTargetIds(native)),b=new Set(updateTargetIds(recovered));
+  const intersection=[...a].filter(id=>b.has(id)).length;
+  const relationship=intersection===a.size && intersection===b.size ? 'equal'
+    : intersection===0 ? 'disjoint' : intersection===a.size ? 'native_subset'
+    : intersection===b.size ? 'recovered_subset' : 'overlap';
+  return {source_id:p.sourceId,pts:recovered.pts,diagnostic_version:1,
+    page:{contract_version:page.contract_version,from_pts:page.from_pts,to_pts:page.to_pts,
+      cursor_before:s.pts,kind:page.kind,final:page.final,native_update_count:page.updates.length,
+      recovered_update_count:page.recovered_updates.length,snapshot_count:page.snapshots.length},
+    comparison:{native:structuralUpdate(native),recovered:structuralUpdate(recovered),
+      relationship,intersection_count:intersection}};
+}
+function durableConflictTargets(service,record) {
+  const native=record.comparison.native.target_ids_sample,recovered=record.comparison.recovered.target_ids_sample;
+  // Reserve half of the slots for each lane before filling spare slots. Sorting
+  // a whole union first can hide every recovered target behind smaller native IDs.
+  const ids=[...new Set([...native.slice(0,CONFLICT_TARGET_SAMPLE/2),
+    ...recovered.slice(0,CONFLICT_TARGET_SAMPLE/2),...native,...recovered])].slice(0,CONFLICT_TARGET_SAMPLE);
+  const rows=new Map(sourceRows(service,record.source_id,ids.map(id=>`message:${id}`))
+    .map(r=>[r.message.message_id,r]));
+  return ids.map(id=>{
+    const messageId=`message:${id}`,row=rows.get(messageId),m=row?.message;
+    const tombstone=service.store.get(`SELECT id FROM events WHERE partner_id=? AND kind=? AND actor='system'
+      AND json_extract(payload_json,'$.source_id')=? AND json_extract(payload_json,'$.message_id')=? LIMIT 1`,
+    service.config.partnerId,TOMBSTONE,record.source_id,messageId);
+    return {message_id:messageId,source_event_id:row?.event_id??null,
+      operation:m?.operation??null,version:m?.version??null,tombstoned:!!tombstone};
+  });
 }
 
 export const TELEGRAM_COUNTERLESS = 'telegram-reconciliation-v2';
@@ -321,7 +367,7 @@ function reconcile(service,p,s,page) {
       // id sets prove it is one event, not two deletions.
       conflictCheck(samePtsPositive.kind==='delete' && samePtsPositive.message_ids.length===u.message_ids.length
         && [...samePtsPositive.message_ids].sort((a,b)=>a-b).join()===u.message_ids.slice().sort((a,b)=>a-b).join(),
-        'same_pts_delete_mismatch',()=>({source_id:p.sourceId,pts:u.pts}));
+        'same_pts_delete_mismatch',()=>deleteConflictDiagnostic(p,s,page,samePtsPositive,u));
     }
     for(const id of u.message ? [u.message.id] : u.message_ids) {
       check(!targets.has(`${u.pts}:${id}`),'TELEGRAM_PTS_COLLISION');targets.add(`${u.pts}:${id}`);
