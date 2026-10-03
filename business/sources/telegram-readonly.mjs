@@ -66,6 +66,10 @@ function policy(service, sourceId) {
   const matches = all.filter(s => s.sourceId === sourceId);
   check(matches.length === 1, 'TELEGRAM_SOURCE_NOT_CONFIGURED');
   const p = matches[0];
+  // Durable permission is visible during startup/disable; transport execution is
+  // independently admitted. A retained Scout reader cannot bypass the switch.
+  const dynamic=!(service.config.opportunity?.telegramSources??[]).some(s=>s.sourceId===sourceId);
+  check(!dynamic||service.scout?.enabled===true,'TELEGRAM_MONITOR_DISABLED');
   fields(p, ['sourceId','accountId','channelId','sourceKind','processingBasis','maxLagSeconds']);
   check(numericId(p.accountId) && numericId(p.channelId) && p.sourceId === `telegram:channel:${p.channelId}`
     && sourceAllowlist(service).includes(p.sourceId), 'TELEGRAM_SOURCE_SCOPE');

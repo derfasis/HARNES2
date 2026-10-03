@@ -141,7 +141,7 @@ export class MtprotoTelegramChannel {
           continue;
         }
         try {
-          const rpc = new GramjsSourceRpc(this.client, this.service, policy.sourceId);
+          const rpc = new GramjsSourceRpc(this.client, this.service, policy.sourceId, { owner: this });
           const peer = await rpc.resolveInputChannel(policy.channelId);
           const reader = new TelegramPublicSourceReader(this.service, policy.sourceId, rpc, peer, null, { joinedPeer: true });
           await reader.bootstrap();

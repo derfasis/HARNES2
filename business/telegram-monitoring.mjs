@@ -10,7 +10,10 @@ export const TELEGRAM_MONITOR_INTERVAL_MS=120000;
 // their PTS/reconciliation contracts; selection merely grants two reads per pass.
 export function dueTelegramSources(service,readers){
  const telegram=readers.filter(r=>sourceTransportKind(service,r.sourceId)==='telegram');
- if(!service.scout.enabled)return telegram;
+ if(!service.scout.enabled){
+   const statics=new Set((service.config.opportunity?.telegramSources??[]).map(p=>p.sourceId));
+   return telegram.filter(r=>statics.has(r.sourceId));
+ }
  service.scout.ready();
  // maxLagSeconds is a freshness tolerance, never a delivery/availability SLA. The nominal
  // polling target is half that tolerance (capped by the portfolio default); actual freshness

@@ -34,8 +34,10 @@ export class ScoutRuntime {
    try{
      prepared=await this.service.exclusive(()=>this.db.transaction(()=>{
        this.scout.reconcile();
-       for(const job of this.db.all("SELECT j.* FROM scout_jobs j JOIN scout_campaigns c ON c.id=j.campaign_id WHERE c.partner_id=? AND j.status='queued' AND j.kind!='assessment' AND j.next_at<=? ORDER BY j.updated_at,j.id LIMIT 30",this.scout.partnerId,now())){
+       for(const job of this.db.all("SELECT j.* FROM scout_jobs j JOIN scout_campaigns c ON c.id=j.campaign_id JOIN scout_grants g ON g.id=j.grant_id WHERE c.partner_id=? AND g.account_id=? AND j.status='queued' AND j.kind!='assessment' AND j.next_at<=? ORDER BY j.updated_at,j.id LIMIT 30",this.scout.partnerId,this.service.telegramAccountId,now())){
          try{
+           const {grant}=this.scout.jobAuthority(job,{runtime:false});
+           if(grant.account_id!==this.service.telegramAccountId)continue;
            this.scout.jobAuthority(job);JSON.parse(job.cursor_json);
            const reservation=this.reserve(job,job.kind,job.kind==='history'?2:job.kind==='resolve'?3:1);
            if(reservation.wait){this.db.run('UPDATE scout_jobs SET next_at=?,reason=?,updated_at=? WHERE id=?',reservation.wait,reservation.reason,now(),job.id);continue;}

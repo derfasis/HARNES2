@@ -19,8 +19,10 @@ export async function processScoutAssessment(service,runtime){
    const prepared=await service.exclusive(()=>db.transaction(()=>{
      const count=db.get("SELECT COUNT(*) n FROM runs WHERE partner_id=? AND runtime='hermes-scout-v1' AND created_at>=?",scout.partnerId,now().slice(0,10)).n;
      if(count>=scout.cfg.maxModelRunsPerDay)return null;
-     for(const job of db.all("SELECT j.* FROM scout_jobs j JOIN scout_campaigns c ON c.id=j.campaign_id WHERE c.partner_id=? AND j.kind='assessment' AND j.status='queued' AND j.next_at<=? ORDER BY j.updated_at,j.id LIMIT 20",scout.partnerId,now())){
+     for(const job of db.all("SELECT j.* FROM scout_jobs j JOIN scout_campaigns c ON c.id=j.campaign_id JOIN scout_grants g ON g.id=j.grant_id WHERE c.partner_id=? AND g.account_id=? AND j.kind='assessment' AND j.status='queued' AND j.next_at<=? ORDER BY j.updated_at,j.id LIMIT 20",scout.partnerId,service.telegramAccountId,now())){
        try{
+         const {grant}=scout.jobAuthority(job,{runtime:false});
+         if(grant.account_id!==service.telegramAccountId)continue;
          const {campaign}=scout.jobAuthority(job),candidate=scout.candidate(job.candidate_id,campaign.id),sample=scout.sample(job.sample_id,candidate),cursor=JSON.parse(job.cursor_json);scout.sampleFresh(sample);
          check(cursor.sample_digest===sample.digest&&cursor.topic_hash===campaign.topic_hash&&cursor.evaluator_version===SCOUT_EVALUATOR_VERSION,'SCOUT_ASSESSMENT_STALE');
          const signals=scoutSignals(JSON.parse(sample.messages_json));check(signals.groups.length>0,'SCOUT_SEMANTIC_SAMPLE_EMPTY');

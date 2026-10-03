@@ -183,7 +183,10 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // tests/absent-source-readers.test.mjs.
     // Ownership-fence prerequisite: stale callbacks cannot mutate successor state.
     // Authored kill cases are in workspace-telegram-kill; execution awaits owner authorization.
-    "business/channels/telegram-mtproto.mjs": "356a4ff6315b3b6d9a6347884aa668a7eee53341",
+    // Pilot recovery extension: static read-only readers capture the shared
+    // client generation too. No outbound/private path changes. Native kill
+    // proofs are in telegram-source-owner-fence.test.mjs.
+    "business/channels/telegram-mtproto.mjs": "9198ed487343549fdd26ca690fa4a18638c704aa",
     "benchmarks/situation-router/README.md": "0da57bf3fcb53bbec5713f6a44c48654b16270b8",
     "benchmarks/situation-router/control-v1.json": "2c6265460c6ae6cc1de9b25fa978ba25d0e66236",
     "benchmarks/situation-router/synthetic/case-01-ignore.json": "f9fe79537ac036e32bbb547961901190b3f08007",

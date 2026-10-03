@@ -1,6 +1,5 @@
 import { GramjsSourceRpc } from './telegram-gramjs-rpc.mjs';
 import { TelegramPublicSourceReader } from './telegram-public-reader.mjs';
-import { effectiveSourceConfig } from '../scout-policy.mjs';
 import { digest } from '../source-ingestion.mjs';
 import { telegramRead } from '../telegram-read-gate.mjs';
 import { AppError, now } from '../errors.mjs';
@@ -97,7 +96,7 @@ export async function reconcileTelegramReaders(owner) {
   if (!current() || !account) return;
 
   const run = async () => {
-    const desired = () => effectiveSourceConfig(service).opportunity.telegramSources
+    const desired = () => [...(service.config.opportunity?.telegramSources??[]),...(service.scout?.monitorPolicies?.()??[])]
       .filter(policy => policy.accountId === account);
     if (!current()) return;
     const policies = desired();
@@ -127,7 +126,7 @@ export async function reconcileTelegramReaders(owner) {
         quarantine(entry.sourceId);
       }
       checkedCheckpoints.set(entry.sourceId, checkpoint);
-      if (corrupt || !policy || entry.policyHash !== digest(policy)
+      if (corrupt || !policy || entry.transport.ownsSource?.() === false || entry.policyHash !== digest(policy)
           || checkpoint && checkpoint.policy_hash !== digest(policy))
         await entry.transport.close().catch(() => {});
       else retained.push(entry);
@@ -156,7 +155,7 @@ export async function reconcileTelegramReaders(owner) {
       await saveCursor(service, owner, account, client, generation, policy.sourceId);
       if (!current() || !desired().some(item => digest(item) === digest(policy))) break;
       starts++;
-      const rpc = new GramjsSourceRpc(client, service, policy.sourceId);
+      const rpc = new GramjsSourceRpc(client, service, policy.sourceId, { owner });
       let reader = null;
       try {
         const stillDesired = () => current() && desired().some(item => digest(item) === digest(policy));

@@ -26,14 +26,19 @@ export class TelegramPublicSourceReader {
     rpc.subscribe(update=>this.receive(update),()=>this.fault());
   }
   #owns() {
-    const control=this.#service.control;
-    if(this.#service.sourceTransportHealth.get(this.#p.sourceId)!==this.#health
-        || control?.stopped || control && !control.processCurrent())return false;
     // Revocation/replacement takes effect before the registry gets another tick.
     // This exact captured authority also fences queued difference commits and
     // late failure callbacks, which may run after readDifference has returned.
-    try{return digest(telegramSourcePolicy(this.#service,this.#p.sourceId))===digest(this.#p);}
-    catch{return false;}
+    let owned=false;
+    try{
+      const control=this.#service.control;
+      owned=this.#service.sourceTransportHealth.get(this.#p.sourceId)===this.#health
+        && !control?.stopped && (!control || control.processCurrent())
+        && (!this.#rpc.ownsResource || this.#rpc.ownsResource()===true)
+        && digest(telegramSourcePolicy(this.#service,this.#p.sourceId))===digest(this.#p);
+    }catch{ /* Missing execution authority cannot preserve an earlier confirmation. */ }
+    if(!owned){this.#confirmed=null;this.#final=false;}
+    return owned;
   }
   #allowedChannel(channel) {
     return channel && !channel.min && !channel.restricted && (channel.broadcast || channel.megagroup)
@@ -95,7 +100,7 @@ export class TelegramPublicSourceReader {
       await this.#invalidate();return {duplicate:true,pts:existing.pts};
     }
     const response=await this.#read(new Api.channels.GetFullChannel({channel:this.#peer}));
-    nativeCheck(!this.#closed && digest(telegramSourcePolicy(this.#service,this.#p.sourceId))===digest(this.#p));
+    nativeCheck(!this.#closed && this.#owns() && digest(telegramSourcePolicy(this.#service,this.#p.sourceId))===digest(this.#p));
     nativeCheck(response.fullChat instanceof Api.ChannelFull && decimal(response.fullChat.id)===this.#p.channelId
       && nativeInt(response.fullChat.pts) && !response.fullChat.ttlPeriod);
     if(this.#joinedPeer)nativeCheck(Array.isArray(response.chats)
@@ -134,7 +139,7 @@ export class TelegramPublicSourceReader {
       && sourceCheckpoint(this.#service,p.sourceId)?.pts===input.pts);
     const response=await this.#read(new Api.updates.GetChannelDifference({channel:this.#peer,
       filter:new Api.ChannelMessagesFilterEmpty(),pts:input.pts,limit:100,force:false}));
-    nativeCheck(!this.#closed && !this.#blocked && digest(telegramSourcePolicy(this.#service,p.sourceId))===digest(this.#p)
+    nativeCheck(!this.#closed && !this.#blocked && this.#owns() && digest(telegramSourcePolicy(this.#service,p.sourceId))===digest(this.#p)
       && sourceCheckpoint(this.#service,p.sourceId)?.pts===input.pts);
     const result=mapChannelDifference(p,input.pts,response,[...this.#pending.values()],u=>this.#old(u),
       u=>telegramRecoveryCoverage(this.#service,p,u.pts,u.pts_count),control=>this.#control(control));
@@ -147,7 +152,7 @@ export class TelegramPublicSourceReader {
   confirmCurrent(pts=sourceCheckpoint(this.#service,this.#p.sourceId)?.pts) {return this.#final && this.#owns() && !this.#peerDirty && this.#watermark>=this.#ptsHint && pts===this.#watermark && !this.#closed && !this.#blocked && this.#confirmed!==null && this.#confirmed===this.#epoch
     && ![...this.#pending.values()].some(u=>u.pts>this.#watermark) && this.#rpc.connected();}
   acknowledge(pts) {
-    nativeCheck(sourceCheckpoint(this.#service,this.#p.sourceId)?.pts===pts);
+    nativeCheck(this.ownsSource() && sourceCheckpoint(this.#service,this.#p.sourceId)?.pts===pts);
     for(const [key,u] of this.#pending)if(u.pts<=pts){nativeCheck(this.#old(u));this.#pending.delete(key);}
   }
   status() {return {buffered:this.#pending.size,blocked:this.#blocked,closed:this.#closed,retry_at:this.#retryAt};}

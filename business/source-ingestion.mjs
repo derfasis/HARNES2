@@ -150,12 +150,21 @@ function telegramTransportBoundary(service, sourceId) {
   if (!configured.length && !state) return null; // Existing operator/fixture sources remain unchanged.
   check(configured.length === 1, 'SOURCE_TRANSPORT_POLICY_UNAVAILABLE');
   const p = configured[0];
+  const liveHealth = service.sourceTransportHealth?.get(sourceId);
+  // Ask the reader even if another readiness fence fails. It must observe a
+  // lost account/lease and retire its old in-memory confirmation before reuse.
+  const liveCurrent=typeof liveHealth==='function'?liveHealth():null;
+  if(p.sourceKind==='live_snapshot'){
+    check(service.telegramAccountId===p.accountId, 'SOURCE_TRANSPORT_NOT_READY');
+    const dynamic=!(service.config.opportunity?.telegramSources??[]).some(policy=>policy.sourceId===sourceId);
+    check(!dynamic||service.scout?.enabled===true, 'SOURCE_TRANSPORT_NOT_READY');
+  }
   if(service.scout?.enabled){const read=telegramReadState(service,p.accountId,{sourceId});check(!['SCOUT_ACCOUNT_BACKOFF','SCOUT_READ_GATE_UNPROVEN','SCOUT_OWNERSHIP_UNAVAILABLE'].includes(read.reason),'SOURCE_TRANSPORT_DIRTY');}
   check(state && state.policy_hash === digest(p), 'SOURCE_TRANSPORT_NOT_READY');
   validateSourceCheckpoint(state,p);
   check(state.phase === 'current', 'SOURCE_TRANSPORT_NOT_CURRENT');
-  const liveHealth = service.sourceTransportHealth?.get(sourceId);
-  check(!liveHealth || liveHealth() === true, 'SOURCE_TRANSPORT_DIRTY');
+  check(p.sourceKind!=='live_snapshot'||typeof liveHealth==='function', 'SOURCE_TRANSPORT_DIRTY');
+  check(!liveHealth || liveCurrent === true, 'SOURCE_TRANSPORT_DIRTY');
   return { policy: p, state };
 }
 // One boundary, chosen by the source's own kind, so a browser source is held to the same freshness

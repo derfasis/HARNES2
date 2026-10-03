@@ -12,7 +12,9 @@ export function validateScout(config) {
 }
 export function effectiveSourceConfig(service) {
  const cfg = service.config;
- const dynamic = service.scout?.monitorPolicies?.() ?? [];
+ // A disconnected reader is not an owner revocation. Permission stays durable;
+ // the transport boundary separately proves whether it can be used right now.
+ const dynamic = service.scout?.monitorAuthorityPolicies?.() ?? [];
  if (!dynamic.length) return cfg;
  const statics = cfg.opportunity?.telegramSources ?? [];
  const known = new Set(statics.map(p=>p.sourceId));
