@@ -1,6 +1,8 @@
 // Operator surface for durable audience goals. All remote text is escaped before rendering.
 export function createAudienceView({ api, command, esc, panel, button, empty, field, modal, refresh, notify }) {
-  let listing = null, goal = null, need = null, assessment = null;
+  let listing = null, goal = null, need = null, assessment = null, reassessmentContext = null;
+  let reassessmentContextGuard = null;
+  let reassessmentLoading = false, reassessmentError = '';
   let selectedGoal = null, selectedNeed = null, selectedAssessment = null, cursor = '';
   let error = '';
 
@@ -20,6 +22,15 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
         if (selectedAssessment) {
           assessment = await api(`/api/audience/assessments/${encodeURIComponent(selectedAssessment)}`);
         } else { assessment = null; selectedAssessment = null; }
+        if (reassessmentContext && reassessmentContextGuard && (
+          reassessmentContextGuard.goal_id !== goal.id
+          || reassessmentContextGuard.goal_revision !== goal.revision
+          || reassessmentContextGuard.need_id !== need?.id
+          || reassessmentContextGuard.need_revision !== need?.revision
+          || reassessmentContextGuard.need_basis_fingerprint !== need?.basis_fingerprint
+          || reassessmentContextGuard.listing_model_enabled !== (listing.model_enabled === true))) {
+          reassessmentContext = null; reassessmentContextGuard = null; reassessmentError = '';
+        }
       } else { goal = null; need = null; assessment = null; selectedGoal = selectedNeed = selectedAssessment = null; }
     } catch (e) { listing = null; goal = need = assessment = null; error = e.message; }
   }
@@ -79,6 +90,45 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
     if (assessment) html += assessmentPanel(assessment);
     return html;
   }
+  function hasPendingReassessment(needId) {
+    const rows = [...(goal?.assessments ?? []), ...(assessment ? [assessment] : [])];
+    return rows.some(a => ['captured','running'].includes(a.status)
+      && (a.packet?.reassessment?.need_id ?? a.reassessment?.need_id) === needId);
+  }
+  function reassessmentContextPanel(n) {
+    if (!reassessmentContext && !reassessmentError && !reassessmentLoading) {
+      return `<div class="actions">${button('Пересмотреть с новым контекстом', 'audience-reassessment-context', n.id, 'secondary')}</div>`;
+    }
+    if (reassessmentLoading) return '<section class="context-review"><p>Загружаем контекст для пересмотра…</p></section>';
+    if (reassessmentError) return `<section class="context-review"><p>Контекст пересмотра недоступен: ${esc(reassessmentError)}</p>${button('Повторить загрузку контекста', 'audience-reassessment-context', n.id, 'secondary')}</section>`;
+    const c = reassessmentContext ?? {};
+    const priorIds = new Set(c.prior_exchange_ids ?? []), newIds = new Set(c.new_exchange_ids ?? []);
+    const exchanges = c.exchanges ?? [];
+    const rows = exchanges.map(x => {
+      const prior = priorIds.has(x.id), fresh = newIds.has(x.id);
+      const origin = prior ? 'Историческое основание' : fresh ? 'Новый контекст' : 'Контекст без указанной группы';
+      return `<article class="workspace-evidence"><strong>${esc(origin)} · обмен ${esc(x.id ?? '—')} · ${esc(x.source_ref ?? 'источник не указан')}</strong>
+        <p>${x.current === true ? 'Актуальность подтверждена для этого снимка' : 'Актуальность не подтверждена'}${x.reasons?.length ? ` · ${esc(x.reasons.join('; '))}` : ''}</p>
+        ${(x.evidence ?? []).map(e => `<p>${esc(e.text ?? 'Свидетельство без текста')}<small>${esc(e.source_event_id ?? '')}${e.message_version ? ` · версия ${esc(e.message_version)}` : ''} · опубликовано ${esc(sourceDate(e.published_at))} · источник изменён ${esc(sourceDate(e.source_updated_at))} · наблюдалось ${esc(sourceDate(e.observed_at))}${e.confirmed_at ? ` · Browser подтвердил ${esc(sourceDate(e.confirmed_at))}` : ''}</small></p>`).join('') || '<p>Свидетельства не приложены.</p>'}</article>`;
+    }).join('') || '<p>Обмены для сравнения не предоставлены.</p>';
+    const coverage = c.coverage ?? {};
+    const omissions = c.omissions ?? c.withheld_exchanges ?? coverage.withheld_exchanges ?? [];
+    const pending = hasPendingReassessment(n.id) || c.pending === true || Boolean(c.pending_assessment_id) || Boolean(c.pending_assessment?.id);
+    const canRequest = c.model_enabled === true && c.available === true && !pending;
+    return `<section class="context-review"><h3>Пересмотр гипотезы с текущим контекстом</h3>
+      <p><strong>Отпечаток контекста:</strong> <code>${esc(c.context_fingerprint ?? 'не указан')}</code></p>
+      ${c.current === true ? '<p>Контекст и основание актуальны на момент снимка. Существование или решение прежней гипотезы этим не подтверждается.</p>' : '<p>Контекст неполон или требует сверки; это само по себе не означает, что прежняя потребность решена.</p>'}
+      ${c.reasons?.length ? `<p><strong>Причины и ограничения:</strong> ${esc(c.reasons.join('; '))}</p>` : ''}
+      <p><strong>Границы снимка:</strong> ${esc(c.scope?.selection ?? c.scope ?? 'не указаны')}</p>
+      <p><strong>Историческая память гипотезы:</strong> ${esc(c.hypothesis_memory?.hypothesis ?? n.hypothesis ?? '')}. Это прежняя интерпретация, а не подтверждённый факт и не подсказка о том, что потребность всё ещё существует. Текущее состояние разрешения: ${esc(c.hypothesis_memory?.resolution ?? 'неизвестно')}.</p>
+      <p><strong>Сравнение старого и нового контекста:</strong> исторических обменов ${esc((c.prior_exchange_ids ?? []).length)} · новых обменов ${esc((c.new_exchange_ids ?? []).length)} · всего показано ${esc(exchanges.length)}.</p>${rows}
+      <p class="muted tiny"><strong>Ограниченный охват:</strong> ${esc(coverage.selection ?? 'не указан')} · максимум ${esc(coverage.batch_exchanges ?? 'неизвестен')} обменов · на источник ${esc(coverage.source_capacity ?? 'неизвестно')} · полнота ${esc(coverage.source_completeness ?? 'неизвестна')}.</p>
+      <p class="muted tiny">Обмены, не вошедшие в снимок: ${esc(coverage.omitted_sample_exchanges ?? omissions.length)}.</p>
+      ${omissions.length ? `<p><strong>Пропуски и исключения (показано до 8):</strong></p>${omissions.slice(0,8).map(x => `<article class="workspace-evidence"><strong>${esc(x.source_ref ?? 'Источник')} · ${esc(x.id ?? 'обмен')}</strong><p>${esc((x.reasons ?? []).join('; ') || x.reason || 'Причина не указана')}</p></article>`).join('')}` : '<p class="muted tiny">Список пропусков не предоставлен; это не доказывает полноту охвата.</p>'}
+      <p class="section-note">Модельные вызовы ${c.model_enabled === true ? 'включены' : 'выключены'}. Этот просмотр не принимает гипотезу, не одобряет материал и не выдаёт разрешение на контакт или отправку.</p>
+      <div class="actions">${canRequest ? button('Запросить пересмотр с этим контекстом', 'audience-reassess', n.id, 'primary') : pending ? '<span>Пересмотр уже ожидает или выполняется.</span>' : '<span>Запрос модели недоступен: контекст недоступен или модели выключены.</span>'}</div>
+    </section>`;
+  }
   function needPanel(n) {
     const current = n.current === true;
     const accepted = n.status === 'accepted';
@@ -124,6 +174,7 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
       <p><strong>Точные цитаты-основания:</strong></p>${quotes.map(q => `<blockquote>${esc(q.quote)}<small> · событие ${esc(q.source_event_id)}</small></blockquote>`).join('') || '<p>Цитаты отсутствуют.</p>'}
       <p><strong>Поддерживающие события:</strong></p>${refs(ev)}<p><strong>Контрсвидетельства:</strong></p>${refs(counter)}<p><strong>Связанные обмены:</strong> ${esc(exchanges.join(', ') || 'нет ссылок')}</p>
       ${context}
+      ${reassessmentContextPanel(n)}
       ${preview}
       <p><strong>Актуальность основания:</strong> ${current ? 'ссылки и основание актуальны по сохранённой проверке; существование нерешённой проблемы этим не подтверждается' : esc((n.reasons ?? []).join('; ') || 'не подтверждена')}</p>
       <p class="muted tiny">Это гипотеза для рассмотрения. Принятие её не предоставляет разрешение на контакт или отправку. Для Continuity должна быть включена отдельная конфигурация.</p>
@@ -135,12 +186,17 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
     const packet = a.packet;
     const exchanges = packet?.exchanges ?? [];
     const evidenceCount = exchanges.reduce((n, x) => n + (x.evidence?.length ?? 0), 0);
-    return panel('Основание сбора', `<p>Состояние: ${badge(a.status)} · ID ${esc(a.id ?? '')}</p>
+    const target = packet?.reassessment;
+    const focused = target?.version === 1;
+    const emptyReassessment = focused && Array.isArray(a.output?.needs) && a.output.needs.length === 0;
+    return panel(focused ? 'Пересмотр гипотезы' : 'Основание сбора', `<p>Состояние: ${badge(a.status)} · ID ${esc(a.id ?? '')}</p>
+      ${focused ? `<p>Цель пересмотра: потребность ${esc(target.need_id ?? '—')} · ревизия ${esc(target.need_revision ?? '—')} · контекст ${esc(target.context_fingerprint ?? '—')}</p><p class="muted tiny">Новая оценка ограничена зафиксированным контекстом. Она не одобряет прежнюю гипотезу и не разрешает контакт.</p>` : ''}
       ${packet ? `<p>Актуальность: ${a.current === true ? 'текущая' : a.current === false ? 'устарела' : 'не указана'}</p>
         <p><strong>Обмены (${exchanges.length}), свидетельства (${evidenceCount}):</strong></p>${exchanges.map(x => `<article class="workspace-evidence"><strong>Обмен ${esc(x.id)} · ${esc(x.source_ref)}</strong><p>${x.current === true ? 'Текущий' : 'Требует сверки'}${x.reasons?.length ? ` · ${esc(x.reasons.join('; '))}` : ''}</p>${(x.evidence ?? []).map(e => `<p>${esc(e.text ?? 'Свидетельство без текста')}<small>${esc(e.source_event_id ?? '')}${e.message_version ? ` · версия ${esc(e.message_version)}` : ''} · опубликовано ${esc(sourceDate(e.published_at))} · источник изменён ${esc(sourceDate(e.source_updated_at))} · наблюдалось ${esc(sourceDate(e.observed_at))}${e.confirmed_at ? ` · Browser подтвердил ${esc(sourceDate(e.confirmed_at))}` : ''}</small></p>`).join('')}</article>`).join('') || '<p>Свидетельства не приложены.</p>'}
         ${packet.unknowns?.length ? `<p><strong>Неизвестно:</strong> ${esc(packet.unknowns.join('; '))}</p>` : ''}` : '<p>Снимок основания не возвращён.</p>'}
+      ${emptyReassessment ? '<p><strong>Новая интерпретация не предложена; прежняя находка не признана решённой.</strong></p>' : ''}
       ${a.output ? `<details><summary>Сохранённое предложение</summary><pre class="workspace-pre">${esc(JSON.stringify(a.output, null, 2))}</pre></details>` : ''}
-      <div class="actions">${a.status === 'captured' && a.current === true ? button('Внести гипотезу вручную', 'audience-propose', a.id, 'primary') : ''}</div>`);
+      <div class="actions">${focused && ['captured','running'].includes(a.status) ? button('Отменить пересмотр', 'audience-cancel-reassessment', a.id, 'danger') : ''}${!focused && a.status === 'captured' && a.current === true ? button('Внести гипотезу вручную', 'audience-propose', a.id, 'primary') : ''}</div>`);
   }
   function createGoal() {
     const refs = listing.source_refs ?? [];
@@ -158,8 +214,8 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
   }
   async function act(action, id) {
     if (action === 'audience-new') { createGoal(); return; }
-    if (action === 'audience-goal') { selectedGoal = id; selectedNeed = selectedAssessment = null; await load(); return; }
-    if (action === 'audience-need') { selectedNeed = id; selectedAssessment = null; await load(); return; }
+    if (action === 'audience-goal') { selectedGoal = id; selectedNeed = selectedAssessment = null; reassessmentContext = reassessmentContextGuard = null; reassessmentError = ''; await load(); return; }
+    if (action === 'audience-need') { selectedNeed = id; selectedAssessment = null; reassessmentContext = reassessmentContextGuard = null; reassessmentError = ''; await load(); return; }
     if (action === 'audience-assessment') { selectedAssessment = id; selectedNeed = null; await load(); return; }
     if (action === 'audience-next') { cursor = listing?.next_cursor ?? ''; await load(); return; }
     if (!goal) throw new Error('Сначала откройте цель.');
@@ -174,6 +230,53 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
       const result = await command('audience.capture', { goal_id: current.id, expected_revision: current.revision,
         expected_basis_fingerprint: current.basis_fingerprint });
       selectedAssessment = result.assessment_id; selectedNeed = null;
+      await load(); return;
+    }
+    if (action === 'audience-reassessment-context') {
+      if (!need || need.id !== id) throw new Error('Сначала откройте гипотезу.');
+      reassessmentLoading = true; reassessmentError = '';
+      try {
+        reassessmentContext = await api(`/api/audience/needs/${encodeURIComponent(need.id)}/context`);
+        reassessmentContextGuard = { goal_id: goal.id, goal_revision: goal.revision, need_id: need.id,
+          need_revision: reassessmentContext.need_revision, need_basis_fingerprint: reassessmentContext.need_basis_fingerprint,
+          listing_model_enabled: listing?.model_enabled === true };
+      }
+      catch (e) { reassessmentContext = null; reassessmentError = e.message; }
+      finally { reassessmentLoading = false; }
+      return;
+    }
+    if (action === 'audience-reassess') {
+      if (!need || need.id !== id || !reassessmentContext) throw new Error('Сначала загрузите текущий контекст гипотезы.');
+      const c = await api(`/api/audience/needs/${encodeURIComponent(need.id)}/context`);
+      const loaded = reassessmentContext;
+      const changed = c.need_id !== loaded.need_id || c.need_revision !== loaded.need_revision
+        || c.need_basis_fingerprint !== loaded.need_basis_fingerprint || c.context_fingerprint !== loaded.context_fingerprint
+        || c.model_enabled !== loaded.model_enabled || c.available !== loaded.available
+        || c.scope?.revision !== loaded.scope?.revision || c.need_id !== need.id
+        || c.need_revision !== need.revision || c.need_basis_fingerprint !== need.basis_fingerprint
+        || c.scope?.revision !== goal.revision;
+      reassessmentContext = c;
+      reassessmentContextGuard = { goal_id: goal.id, goal_revision: c.scope?.revision, need_id: c.need_id,
+        need_revision: c.need_revision, need_basis_fingerprint: c.need_basis_fingerprint,
+        listing_model_enabled: listing?.model_enabled === true };
+      if (changed) throw new Error('Контекст или настройки изменились после просмотра. Проверьте обновлённый контекст перед запросом.');
+      const pending = hasPendingReassessment(need.id) || c.pending === true || Boolean(c.pending_assessment_id) || Boolean(c.pending_assessment?.id);
+      if (c.model_enabled !== true || c.available !== true || pending) {
+        throw new Error('Пересмотр недоступен: модель выключена, контекст недоступен или уже ожидается другой пересмотр.');
+      }
+      const result = await command('audience.reassess', { need_id: c.need_id, expected_revision: c.need_revision,
+        expected_basis_fingerprint: c.need_basis_fingerprint, expected_context_fingerprint: c.context_fingerprint });
+      selectedAssessment = result.assessment_id ?? result.id;
+      await load(); return;
+    }
+    if (action === 'audience-cancel-reassessment') {
+      const a = assessment;
+      const target = a?.packet?.reassessment;
+      if (!a || a.id !== id || target?.version !== 1 || !['captured','running'].includes(a.status)) {
+        throw new Error('Отменить можно только ожидающий или выполняющийся пересмотр для открытой оценки.');
+      }
+      await command('audience.cancel_reassessment', { assessment_id: a.id,
+        expected_basis_fingerprint: target.need_basis_fingerprint });
       await load(); return;
     }
     if (action === 'audience-propose') {

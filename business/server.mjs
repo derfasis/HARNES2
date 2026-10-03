@@ -173,6 +173,8 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
           return send(200, service.audience.list({ limit: Number(rawLimit ?? 20), cursor }));
         }
         ensure([...url.searchParams].length === 0, 'Invalid audience query', 400);
+        const contextMatch = /^\/api\/audience\/needs\/([0-9a-f-]{36})\/context$/.exec(url.pathname);
+        if (contextMatch) return send(200, service.audience.reassessmentContext(contextMatch[1]));
         const needMatch = /^\/api\/audience\/needs\/([0-9a-f-]{36})$/.exec(url.pathname);
         if (needMatch) return send(200, service.audience.need(needMatch[1]));
         const assessmentMatch = /^\/api\/audience\/assessments\/([0-9a-f-]{36})$/.exec(url.pathname);

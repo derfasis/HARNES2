@@ -1,15 +1,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { ROOT, runtimeReadiness, usageAccounting } from './config.mjs';
+import { ROOT, readJson, runtimeReadiness, usageAccounting } from './config.mjs';
 // One bounded, no-tool Hermes turn per public slot. A durable assessment prevents a
 // scheduler tick or process restart from silently purchasing another attempt.
 import { outputSchema } from './audience.mjs';
 import { id } from './store.mjs';
 import { now, AppError } from './errors.mjs';
 import { automaticBoundary, digest } from './source-ingestion.mjs';
+import { normalizeFailureCause } from './failure-cause.mjs';
 
 const RUNTIME = 'hermes-audience-v1';
 const INSTRUCTIONS = fs.readFileSync(path.join(ROOT, 'partner/audience-reasoning.md'), 'utf8');
+const OWNER_LANGUAGE = readJson(path.join(ROOT, 'partner/profile.json')).language;
 const modelIdentity = value => value && typeof value === 'object' && Object.keys(value).sort().join(',') === 'model_id,model_version'
   && [value.model_id, value.model_version].every(v => typeof v === 'string' && /^[A-Za-z0-9._:/@+-]{1,200}$/.test(v)) ? value : null;
 
@@ -45,26 +47,44 @@ function prepare(service) {
       cursor = goalId;
       db.run('INSERT INTO channel_offsets VALUES(?,?,?) ON CONFLICT(channel,account_id) DO UPDATE SET cursor=excluded.cursor',
         'audience-reason-v1', cfg.partnerId, cursor);
-      const packet = audience.detail(goalId);
-      if (!packet.ready) continue;
-      let capture;
-      try {
-        capture = audience.capture({ goal_id: goalId, expected_revision: packet.revision,
-          expected_basis_fingerprint: packet.basis_fingerprint });
-      } catch (error) {
-        if (error instanceof AppError) continue;
-        throw error;
+      // Only a focused packet explicitly requested for a model may resume from
+      // captured. Existing manual captures remain manual and retain their fence.
+      let row = db.get("SELECT * FROM audience_assessments WHERE goal_id=? AND status='captured' ORDER BY rowid LIMIT 1", goalId);
+      if (row) {
+        try {
+          const capturedPacket = JSON.parse(row.packet_json);
+          if (!capturedPacket || typeof capturedPacket !== 'object' || Array.isArray(capturedPacket))
+            throw new AppError('Invalid audience packet', 409, 'AUDIENCE_RECORD_INVALID');
+          if (!capturedPacket.reassessment) continue;
+          audience.assertAssessmentCurrent(row);
+        } catch (error) {
+          if (!(error instanceof AppError) && !(error instanceof SyntaxError)) throw error;
+          db.run("UPDATE audience_assessments SET status='stale' WHERE id=? AND status='captured'", row.id);
+          audience.record('reassessment_withheld', { assessment_id: row.id, reason: error.code ?? 'AUDIENCE_RECORD_INVALID' });
+          continue;
+        }
+      } else {
+        const packet = audience.detail(goalId, { hypothesisMemory: true });
+        if (!packet.ready) continue;
+        try {
+          const capture = audience.capture({ goal_id: goalId, expected_revision: packet.revision,
+            expected_basis_fingerprint: packet.basis_fingerprint });
+          row = db.get('SELECT * FROM audience_assessments WHERE id=?', capture.assessment_id);
+        } catch (error) {
+          if (error instanceof AppError) continue;
+          throw error;
+        }
       }
-      const assessmentId = capture.assessment_id;
-      const row = db.get('SELECT * FROM audience_assessments WHERE id=?', assessmentId);
       if (!row || row.status !== 'captured') continue;
+      audience.assertAssessmentCurrent(row);
+      const assessmentId = row.id;
       const runId = id(), contract = outputSchema;
       const assessmentPacket = JSON.parse(row.packet_json);
-      const context = { input: { situation_id: goalId }, packet: assessmentPacket,
+      const context = { input: { situation_id: goalId }, owner_language: OWNER_LANGUAGE, packet: assessmentPacket,
         output_contract: contract, router_instructions: INSTRUCTIONS };
       db.run(`INSERT INTO runs(id,partner_id,status,runtime,model,context_json,created_at)
         VALUES(?,?,'running',?,?,?,?)`, runId, cfg.partnerId, RUNTIME, cfg.runtime.model,
-        JSON.stringify({ assessment_id: assessmentId, goal_id: goalId, packet: assessmentPacket,
+        JSON.stringify({ assessment_id: assessmentId, goal_id: goalId, owner_language: OWNER_LANGUAGE, packet: assessmentPacket,
           model_config: cfg.runtime, prompt_fingerprint: digest(INSTRUCTIONS), contract_fingerprint: digest(contract) }), now());
       if (service.control) service.control.bindRun(runId);
       const changed = db.run("UPDATE audience_assessments SET status='running',producer='model',run_id=? WHERE id=? AND status='captured'", runId, assessmentId);
@@ -88,7 +108,7 @@ async function processAudienceInternal(service, runtime) {
   try { result = await runtime.decide(prepared.run, prepared.context); }
   catch (error) {
     if (String(error?.code ?? '').startsWith('CONTROL_')) controlDenial = error.code;
-    result = { completed: false };
+    result = { completed: false, failure_cause: normalizeFailureCause(error?.failure_cause) };
   }
   const db = service.store;
   try {
@@ -111,25 +131,28 @@ async function processAudienceInternal(service, runtime) {
             throw new AppError('Audience model reasoning requires Control Plane admission', 409, 'AUDIENCE_CONTROL_REQUIRED');
           automaticBoundary(service);
           service.audience.assertAssessmentCurrent(assessment);
+          const output = JSON.parse(result.final_response);
           // The audience proposal validates and writes several needs in one call. Keep a bad
           // later need from leaving earlier partial proposals behind when we record invalid.
           db.db.exec('SAVEPOINT audience_model_proposal');
           try {
-            service.audience.propose({ assessment_id: assessment.id, output: JSON.parse(result.final_response) }, 'model');
+            service.audience.propose({ assessment_id: assessment.id, output }, 'model');
             db.db.exec('RELEASE SAVEPOINT audience_model_proposal');
           } catch (error) {
             db.db.exec('ROLLBACK TO SAVEPOINT audience_model_proposal');
             db.db.exec('RELEASE SAVEPOINT audience_model_proposal');
             throw error;
           }
-          disposition = 'proposal_created';
+          disposition = JSON.parse(assessment.packet_json).reassessment && output.needs.length === 0
+            ? 'no_revision_proposed' : 'proposal_created';
         } catch (error) {
           if (!(error instanceof AppError) && !(error instanceof SyntaxError)) throw error;
           disposition = String(error.code ?? '').startsWith('CONTROL_') ? 'control_withheld'
             : error instanceof SyntaxError ? 'invalid_output' : error.code;
         }
       }
-      if (assessment?.status === 'running' && disposition !== 'proposal_created') {
+      const applied = ['proposal_created', 'no_revision_proposed'].includes(disposition);
+      if (assessment?.status === 'running' && !applied) {
         const lower = disposition.toLowerCase();
         const status = lower.includes('stale') || lower.includes('basis') ? 'stale'
           : lower === 'invalid_output' || lower.startsWith('audience_')
@@ -139,10 +162,12 @@ async function processAudienceInternal(service, runtime) {
       }
       const receipt = { disposition, goal_id: prepared.goalId, assessment_id: prepared.assessmentId,
         run_id: prepared.run.id, model_identity: modelIdentity(result?.model_identity),
-        model_identity_reason: modelIdentity(result?.model_identity) ? null : 'runtime_identity_missing_or_invalid' };
+        model_identity_reason: modelIdentity(result?.model_identity) ? null : 'runtime_identity_missing_or_invalid',
+        model_api_calls: Number.isInteger(result?.api_calls) && result.api_calls >= 0 && result.api_calls <= 1000 ? result.api_calls : null,
+        failure_cause: result?.completed !== true && result?.failure_cause ? normalizeFailureCause(result.failure_cause) : null };
       db.run(`UPDATE runs SET status=?,result_json=?,error=?,input_tokens=?,output_tokens=?,estimated_cost_usd=?,cost_status=?,finished_at=? WHERE id=?`,
-        disposition === 'proposal_created' ? 'completed' : 'failed', JSON.stringify(receipt),
-        disposition === 'proposal_created' ? null : disposition, usage.input, usage.output, usage.cost, usage.costStatus, now(), prepared.run.id);
+        applied ? 'completed' : 'failed', JSON.stringify(receipt),
+        applied ? null : disposition, usage.input, usage.output, usage.cost, usage.costStatus, now(), prepared.run.id);
       return { disposition, goal_id: prepared.goalId, assessment_id: prepared.assessmentId };
     }));
   } catch (error) {
