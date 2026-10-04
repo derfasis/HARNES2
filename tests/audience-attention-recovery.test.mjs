@@ -10,7 +10,7 @@ import { ROOT } from '../business/config.mjs';
 import { Store, hash, id } from '../business/store.mjs';
 import { processAudienceAssessment } from '../business/audience-reasoning.mjs';
 import { digest } from '../business/source-ingestion.mjs';
-import { audienceHarness, SOURCE, SOURCE_B, proposalFrom } from './audience-test-helpers.mjs';
+import { audienceHarness, SOURCE, SOURCE_B, modelOutputFrom } from './audience-test-helpers.mjs';
 
 function runtimeConfig(h) {
   h.config.audience.modelEnabled = true;
@@ -54,7 +54,7 @@ async function grantGoal(h, goalId, maxAttempts = 1, expiresAt = new Date(Date.n
 }
 
 function validResult(context, extra = {}) {
-  return { completed: true, final_response: JSON.stringify(proposalFrom(context.packet)),
+  return { completed: true, final_response: JSON.stringify(modelOutputFrom(context.packet)),
     usage: { input_tokens: 321, output_tokens: 87 },
     model_identity: { model_id: 'offline-fake', model_version: '1' }, ...extra };
 }

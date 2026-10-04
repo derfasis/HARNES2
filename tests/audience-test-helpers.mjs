@@ -76,3 +76,31 @@ export function proposalFrom(packet, overrides = {}) {
   }
   return { needs: [need] };
 }
+
+// Add the decision audit required from newly evaluated model output. Keep proposalFrom
+// unchanged because manual/offline proposal commands exercise the historical contract.
+export function modelOutputFrom(packet, output = proposalFrom(packet)) {
+  const needs = Array.isArray(output?.needs) ? output.needs : [];
+  const exchange_reviews = (packet.exchanges ?? []).map(exchange => {
+    const evidence = Array.isArray(exchange.evidence) ? exchange.evidence.slice(0, 32) : [];
+    const eventIds = [...new Set(evidence.map(item => item.source_event_id).filter(Boolean))];
+    const related = needs.some(need => need && (
+      need.exchange_ids?.includes(exchange.id)
+      || [...(need.evidence_event_ids ?? []), ...(need.counterevidence_event_ids ?? []), ...(need.context_event_ids ?? [])]
+        .some(id => eventIds.includes(id))));
+    return { exchange_id: exchange.id, judgment: related ? 'relevant' : 'no_proposal',
+      reason: related ? 'This supplied exchange supports the synthetic proposal.'
+        : needs.length ? 'This supplied exchange was considered but does not support the synthetic proposal.'
+          : 'The supplied exchange was considered, but no need proposal is supported.',
+      evidence_event_ids: eventIds,
+      support_quotes: evidence.filter(item => item.source_event_id && typeof item.text === 'string' && item.text.length)
+        .map(item => ({ source_event_id: item.source_event_id, quote: item.text })),
+    };
+  });
+  return { ...output, decision_review: { version: 1, scope: 'supplied_packet_only',
+    disposition: needs.length ? 'needs_proposed' : 'no_need_proposed',
+    summary: needs.length ? 'The synthetic model proposes a need from the supplied packet.'
+      : 'The synthetic model proposes no need from the supplied packet.',
+    unknowns: ['Whether the supplied public observations represent a broader or continuing need.'],
+    exchange_reviews } };
+}

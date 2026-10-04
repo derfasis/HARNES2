@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { processAudienceAssessment } from '../business/audience-reasoning.mjs';
-import { audienceHarness, SOURCE, SOURCE_B, proposalFrom } from './audience-test-helpers.mjs';
+import { audienceHarness, SOURCE, SOURCE_B, modelOutputFrom, proposalFrom } from './audience-test-helpers.mjs';
 
 const runtimeConfig = h => {
   h.config.audience.modelEnabled = true;
@@ -126,7 +126,7 @@ test('retry leaves the original failure receipt and unknown cost unchanged after
   const { h, parent, parentRun } = await failedFocusedAttempt(t);
   const child = await h.command('audience.retry_reassessment', retryPayload(parent));
   const result = await processAudienceAssessment(h.service, { decide: async (_run, context) => ({
-    completed: true, final_response: JSON.stringify({ needs: [] }), usage: { input_tokens: 444, output_tokens: 12 },
+    completed: true, final_response: JSON.stringify(modelOutputFrom(context.packet, { needs: [] })), usage: { input_tokens: 444, output_tokens: 12 },
     model_identity: { model_id: 'offline-fake', model_version: '1' },
   }) });
   assert.equal(result.assessment_id, child.assessment_id);
@@ -220,7 +220,7 @@ test('completed focused assessment is not retry authority', async t => {
   const request = await h.command('audience.reassess', { need_id: need.id, expected_revision: need.revision,
     expected_basis_fingerprint: need.basis_fingerprint, expected_context_fingerprint: context.context_fingerprint });
   await processAudienceAssessment(h.service, { decide: async (_run, ctx) => ({ completed: true,
-    final_response: JSON.stringify({ needs: [] }), usage: { input_tokens: 50, output_tokens: 5 } }) });
+    final_response: JSON.stringify(modelOutputFrom(ctx.packet, { needs: [] })), usage: { input_tokens: 50, output_tokens: 5 } }) });
   const completed = h.service.audience.assessment(request.assessment_id);
   await assert.rejects(h.command('audience.retry_reassessment', retryPayload(completed)),
     { code: 'AUDIENCE_RETRY_UNAVAILABLE' });

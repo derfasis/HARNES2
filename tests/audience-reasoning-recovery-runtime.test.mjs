@@ -10,7 +10,7 @@ import { Store, id } from '../business/store.mjs';
 import { digest } from '../business/source-ingestion.mjs';
 import { exportPartner } from '../business/export.mjs';
 import { processAudienceAssessment } from '../business/audience-reasoning.mjs';
-import { audienceHarness, SOURCE, SOURCE_B, proposalFrom } from './audience-test-helpers.mjs';
+import { audienceHarness, SOURCE, SOURCE_B, modelOutputFrom, proposalFrom } from './audience-test-helpers.mjs';
 
 function modelConfig(h, { knownCost = true, maxRuns = 20 } = {}) {
   h.config.audience.modelEnabled = true;
@@ -141,7 +141,7 @@ test('a failed focused attempt is inert until one explicit retry creates a linke
     calls++;
     assert.deepEqual(packetContext.packet.reassessment.retry_of,
       { assessment_id: parent.id, basis_fingerprint: parent.basis_fingerprint });
-    return { completed: true, final_response: JSON.stringify({ needs: [] }),
+    return { completed: true, final_response: JSON.stringify(modelOutputFrom(packetContext.packet, { needs: [] })),
       usage: { input_tokens: 101, output_tokens: 14 },
       model_identity: { model_id: 'offline-fake', model_version: '1' } };
   } };
@@ -248,7 +248,7 @@ test('cancelling a retry child withholds late output and keeps actual usage', as
     calls++;
     await h.command('audience.cancel_reassessment', { assessment_id: child.id,
       expected_basis_fingerprint: child.basis_fingerprint });
-    return { completed: true, final_response: JSON.stringify({ needs: [] }),
+    return { completed: true, final_response: JSON.stringify(modelOutputFrom(packetContext.packet, { needs: [] })),
       usage: { input_tokens: 287, output_tokens: 99 },
       model_identity: { model_id: 'offline-fake', model_version: '1' } };
   } });
@@ -282,7 +282,7 @@ for (const mutation of ['edit', 'new_head', 'revoke']) test(`retry result is wit
       h.config.opportunity.allowedSourceRefs = [];
       h.service.audience.reconcile({ limit: 10 });
     }
-    return { completed: true, final_response: JSON.stringify({ needs: [] }),
+    return { completed: true, final_response: JSON.stringify(modelOutputFrom(packetContext.packet, { needs: [] })),
       usage: { input_tokens: 177, output_tokens: 38 },
       model_identity: { model_id: 'offline-fake', model_version: '1' } };
   } });
@@ -371,7 +371,7 @@ test('corrupt retry lineage is skipped so a healthy retry child behind it can ru
     calls++;
     assert.equal(packetContext.packet.reassessment.need_id, parents[1].need.id,
       'runtime only receives the healthy retry packet');
-    return { completed: true, final_response: JSON.stringify({ needs: [] }),
+    return { completed: true, final_response: JSON.stringify(modelOutputFrom(packetContext.packet, { needs: [] })),
       usage: { input_tokens: 80, output_tokens: 12 },
       model_identity: { model_id: 'offline-fake', model_version: '1' } };
   } });

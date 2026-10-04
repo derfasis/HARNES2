@@ -162,7 +162,7 @@ async function main() {
   fs.mkdirSync(cache, { recursive: true });
   const summaryPath = path.join(cache, 'summary.json');
   let lock = null, history, directory, currentAttempt = null;
-  let store, service, runtime;
+  let store, service, runtime, grant;
   try {
     lock = acquireHistoryLock(cache);
     history = fs.existsSync(summaryPath) ? JSON.parse(fs.readFileSync(summaryPath, 'utf8'))
@@ -185,7 +185,7 @@ async function main() {
       created_at: new Date(Date.now() - 10 * 60_000).toISOString(), updated_at: new Date().toISOString(),
     }, id(), actor);
 
-    service.command('audience.open', { title: 'Synthetic audience conformance',
+    const goal = await service.command('audience.open', { title: 'Synthetic audience conformance',
       objective: 'Find a real, unanswered setup question that warrants a concise owner-reviewed guide.',
       source_ids: [SOURCE], max_age_seconds: 3600 }, id(), { kind: 'operator' });
     await ingest('solved-question', 'How do I start the beginner workbook? I cannot find the first exercise.');
@@ -193,6 +193,11 @@ async function main() {
     await ingest('unanswered-question', 'Where can I download the worksheet for the Sunday practice session?');
     await ingest('unrelated-noise', 'Good morning everyone! Hope you all have a lovely day.');
     service.audience.reconcile({ limit: 10, event_limit: 20 });
+    const detail = service.audience.detail(goal.goal_id);
+    grant = await service.command('audience.attention_grant', {goal_id:goal.goal_id,
+      expected_revision:detail.revision,expected_scope_fingerprint:detail.attention.scope_fingerprint,
+      max_attempts:1,expires_at:new Date(Date.now()+15*60_000).toISOString(),
+      reason:'One finite synthetic conformance turn explicitly requested through this test CLI.'},id(),{kind:'operator'});
 
     const runtimeCapture = {};
     const observedRuntime = { async decide(run, context) {
@@ -280,7 +285,10 @@ async function main() {
         telegram_disabled: config.telegram.enabled === false && config.telegram.liveSending === false,
         control_plane_enabled_for_test: config.controlPlane.enabled === true && config.controlPlane.maxConcurrent === 2,
       },
-      output_contract_valid: result.disposition === 'proposal_created',
+      evidence_store: directory,
+      decision_review: assessment?.decision_review ?? null,
+      output_contract_valid: ['proposal_created','no_need_proposed'].includes(result.disposition)
+        && assessment?.decision_review?.state === 'current',
       invalid_output_diagnosis: result.disposition === 'invalid_output'
         ? diagnoseProposal(runtimeCapture.output?.final_response, assessment?.packet) : null,
       needs: needs.map(need => ({
@@ -297,14 +305,18 @@ async function main() {
     fs.writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 });
     process.stdout.write(`${JSON.stringify({ ...report, cumulative_provider_attempts: history.provider_attempt_count,
       summary_path: summaryPath, report_path: reportPath }, null, 2)}\n`);
-    if (result.disposition !== 'proposal_created') process.exitCode = 2;
+    if (!report.output_contract_valid) process.exitCode = 2;
   } finally {
     runtime?.close();
+    if (service) {
+      service.config.audience.modelEnabled=false;
+      if (grant) try { await service.command('audience.attention_revoke',{grant_id:grant.grant_id,
+        expected_grant_fingerprint:grant.grant_fingerprint,reason:'Finite conformance ended.'},id(),{kind:'operator'}); } catch { /* process exit cannot restore test authority */ }
+    }
     try { service?.control?.close(); service?.control?.releaseProcess(); } catch {}
     try { store?.close(); } catch {}
-    const cacheRoot = path.resolve(cache), runRoot = directory ? path.resolve(directory) : '';
-    if (runRoot && runRoot.toLowerCase().startsWith((cacheRoot + path.sep).toLowerCase()) && runRoot !== cacheRoot)
-      fs.rmSync(runRoot, { recursive: true, force: true });
+    // Keep the isolated synthetic receipts, usage and grant closure for inspection.
+    // They contain no provider credentials; the attempt cap is never reset here.
     releaseHistoryLock(cache, lock);
   }
 }

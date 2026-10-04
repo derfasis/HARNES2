@@ -31,6 +31,8 @@ test('no-tool runtime uses existing worker, no business URL/token/tools, first a
   assert.equal(envelope.business_url,undefined);assert.equal(options.env.PARTNER_RUN_TOKEN,undefined);assert.equal(options.env.PARTNER_TELEGRAM_BOT_TOKEN,undefined);
   assert.equal(options.env.OPENAI_API_KEY,undefined);assert.ok(options.env.PARTNER_MODEL_API_KEY_TERTIARY);
   assert.equal(envelope.system_prompt,'Trusted no-tool policy');assert.equal(envelope.context.input.message.text,context.input.message.text);
+  assert.equal(envelope.context.router_instructions,undefined,'trusted system instructions are not duplicated as user input');
+  assert.equal(context.router_instructions,'Trusted no-tool policy','building the worker envelope must not mutate caller context');
   assert.equal(tokens.size,0);assert.equal(adapter.children.size,0);assert.equal(result.final_response,'synthetic-result');assert.equal(spawn.mock.callCount(),1);
 });
 test('decision retry budget is bounded: one worker spawn, no adapter-level re-spawn loop',async t=>{

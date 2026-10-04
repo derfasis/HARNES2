@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { processAudienceAssessment } from '../business/audience-reasoning.mjs';
-import { audienceHarness, SOURCE, SOURCE_B, proposalFrom } from './audience-test-helpers.mjs';
+import { audienceHarness, SOURCE, SOURCE_B, proposalFrom, modelOutputFrom } from './audience-test-helpers.mjs';
 
 function runtimeConfig(h) {
   h.config.audience.modelEnabled = true;
@@ -73,7 +73,7 @@ function refreshedOutput(packet, need) {
 }
 
 function validResult(context, need, extra = {}) {
-  return { completed: true, final_response: JSON.stringify(refreshedOutput(context.packet, need)),
+  return { completed: true, final_response: JSON.stringify(modelOutputFrom(context.packet,refreshedOutput(context.packet, need))),
     usage: { input_tokens: 211, output_tokens: 73 },
   model_identity: { model_id: 'offline-fake', model_version: '1' }, ...extra };
 }
@@ -231,8 +231,8 @@ test('empty focused result completes with no_revision_proposed and leaves the ta
   const { need } = await acceptedNeed(h);
   await addRoot(h);
   const { assessment } = await requestReassessment(h, need);
-  const result = await processAudienceAssessment(h.service, { decide: async () => ({ completed: true,
-    final_response: JSON.stringify({ needs: [] }), usage: { input_tokens: 101, output_tokens: 14 },
+  const result = await processAudienceAssessment(h.service, { decide: async (_run, context) => ({ completed: true,
+    final_response: JSON.stringify(modelOutputFrom(context.packet,{ needs: [] })), usage: { input_tokens: 101, output_tokens: 14 },
     model_identity: { model_id: 'offline-fake', model_version: '1' } }) });
   assert.equal(result.disposition, 'no_revision_proposed');
   assert.equal(h.service.audience.need(need.id).revision, need.revision);

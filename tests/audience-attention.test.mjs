@@ -2,7 +2,7 @@
 // the sentinel credential is never sent to a provider.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { audienceHarness, SOURCE, SOURCE_B, proposalFrom } from './audience-test-helpers.mjs';
+import { audienceHarness, SOURCE, SOURCE_B, modelOutputFrom } from './audience-test-helpers.mjs';
 import { processAudienceAssessment } from '../business/audience-reasoning.mjs';
 
 const ATTENTION_RUNTIME = 'hermes-audience-v1';
@@ -52,7 +52,7 @@ function fakeModel({ before = async () => {}, fail = false } = {}) {
     await before(context);
     if (fail) return { completed: false, error: 'offline injected provider failure',
       usage: { input_tokens: 23, output_tokens: 0 }, model_identity: { model_id: 'offline-fake', model_version: '1' } };
-    return { completed: true, final_response: JSON.stringify(proposalFrom(context.packet)),
+    return { completed: true, final_response: JSON.stringify(modelOutputFrom(context.packet)),
       usage: { input_tokens: 23, output_tokens: 12 }, model_identity: { model_id: 'offline-fake', model_version: '1' } };
   } } };
 }

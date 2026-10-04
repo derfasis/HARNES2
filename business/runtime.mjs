@@ -81,7 +81,9 @@ export class HermesAdapter {
       // can never execute its builtin retry. The second iteration is exactly
       // that one retry after an empty first response; attempts stay bounded.
       const envelope = decision
-        ? { run_id: run.id, situation_id: context.input.situation_id, context, system_prompt: context.router_instructions,
+        ? { run_id: run.id, situation_id: context.input.situation_id,
+          context: Object.fromEntries(Object.entries(context).filter(([key]) => key !== 'router_instructions')),
+          system_prompt: context.router_instructions,
           model: { ...config.runtime, maxIterations: 2 }, tools: [] }
         : { run_id: run.id, context, model: config.runtime, tools, business_url: `http://127.0.0.1:${config.server.port}` };
       child.stdin.end(JSON.stringify(envelope));

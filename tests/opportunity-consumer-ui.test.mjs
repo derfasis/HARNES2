@@ -170,7 +170,9 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // Deliberate v0 extension: existing worker, no-tool envelope tested in opportunity-runtime.test.mjs.
     // Retry-budget extension: decision envelope raises maxIterations 1->2 so the pinned
     // Hermes empty-response ladder can actually re-enter the loop after an empty response.
-    "business/runtime.mjs": "147e4e9e9ab29534e4e1e38e47eb4dff752b6b2c",
+    // Same tested no-tool runtime with trusted instructions removed from the
+    // duplicated user payload. Credential, tool and sending fences stay covered.
+    "business/runtime.mjs": "f2d986a80a64d6efa9c0c1c396832ca4e8ebf8d8",
     // Outcome completion projects provider time and versions message-record
     // identities by partner. Delivery gates remain unchanged; real stub adapter
     // races and crash/receipt replay are in outcome-timing/redteam-kill tests.

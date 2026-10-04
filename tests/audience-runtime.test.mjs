@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { processAudienceAssessment } from '../business/audience-reasoning.mjs';
-import { audienceHarness, SOURCE, proposalFrom } from './audience-test-helpers.mjs';
+import { audienceHarness, SOURCE, modelOutputFrom, proposalFrom } from './audience-test-helpers.mjs';
 
 function runtimeConfig(h) {
   h.config.audience.modelEnabled = true;
@@ -44,7 +44,7 @@ async function grantGoal(h, goalId) {
 }
 
 function validResult(context, extra = {}) {
-  return { completed: true, final_response: JSON.stringify(proposalFrom(context.packet)),
+  return { completed: true, final_response: JSON.stringify(modelOutputFrom(context.packet)),
     usage: { input_tokens: 321, output_tokens: 87 }, model_identity: { model_id: 'offline-fake', model_version: '1' }, ...extra };
 }
 
@@ -154,7 +154,7 @@ test('a later fabricated quote rolls back every earlier need from the same model
     const valid = proposalFrom(context.packet).needs[0];
     const invalid = { ...structuredClone(valid), title: 'Second hypothesis', support_quotes: [
       { source_event_id: valid.evidence_event_ids[0], quote: 'This sentence is not in the source.' }] };
-    return { ...validResult(context), final_response: JSON.stringify({ needs: [valid, invalid] }) };
+    return { ...validResult(context), final_response: JSON.stringify(modelOutputFrom(context.packet, { needs: [valid, invalid] })) };
   } };
 
   const result = await processAudienceAssessment(h.service, runtime);

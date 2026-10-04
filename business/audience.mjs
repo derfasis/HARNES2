@@ -8,12 +8,15 @@ import { sourceRows, sourceEvent, digest } from './source-ingestion.mjs';
 import { effectiveSourceConfig } from './scout-policy.mjs';
 import { proposalRefs, proposalBindings, previewHash, frozenProposalBasis } from './audience-proposals.mjs';
 import { normalizeFailureCause } from './failure-cause.mjs';
+import { decisionBindings, assessmentDecision } from './audience-decisions.mjs';
 
 const storedOutputSchema = readJson(path.join(ROOT, 'contracts/audience-assessment.schema.json'));
 export const outputSchema = structuredClone(storedOutputSchema);
 outputSchema.properties.needs.items.required.push('proposal_version', 'context_event_ids', 'context_review');
 const validator = new Ajv({ strict: true, allowUnionTypes: true });
 export const validateOutput = validator.compile(storedOutputSchema);
+const validateLegacyModelOutput = validator.compile(structuredClone(outputSchema));
+outputSchema.required.push('decision_review');
 const validateModelOutput = validator.compile(outputSchema);
 const validateReassessment = validator.compile(readJson(path.join(ROOT, 'contracts/audience-reassessment.schema.json')));
 const validateReasoningRetry = validator.compile(readJson(path.join(ROOT, 'contracts/audience-reasoning-retry.schema.json')));
@@ -318,7 +321,7 @@ export class AudienceLoop {
     check(frozen && frozen.assessment_id === row.id && frozen.goal_id === row.goal_id
       && frozen.packet && digest(frozen.packet) === digest(packet)
       && (!receipt || receipt && typeof receipt === 'object' && !Array.isArray(receipt)
-        && !['proposal_created','no_revision_proposed'].includes(receipt.disposition)), 'AUDIENCE_RECORD_INVALID');
+        && !['proposal_created','no_revision_proposed','no_need_proposed'].includes(receipt.disposition)), 'AUDIENCE_RECORD_INVALID');
     return { row, packet, run };
   }
   attemptReceipt(row) {
@@ -418,7 +421,7 @@ export class AudienceLoop {
     catch { check(false, 'AUDIENCE_RECORD_INVALID'); }
     check(frozen?.assessment_id === row.id && frozen.goal_id === row.goal_id && frozen.packet && digest(frozen.packet) === digest(packet)
       && (!receipt || typeof receipt === 'object' && !Array.isArray(receipt)
-        && !['proposal_created','no_revision_proposed'].includes(receipt.disposition)), 'AUDIENCE_RECORD_INVALID');
+        && !['proposal_created','no_revision_proposed','no_need_proposed'].includes(receipt.disposition)), 'AUDIENCE_RECORD_INVALID');
     if (!packet.reasoning_retry) this.service.attention.assertHistory(run.id, row, frozen.attention_grant);
     else check(!frozen.attention_grant && !this.store.get('SELECT run_id FROM audience_attention_attempts WHERE run_id=?', run.id), 'AUDIENCE_RECORD_INVALID');
     return { row, packet, run };
@@ -693,15 +696,26 @@ export class AudienceLoop {
     let current = false; try { this.assertAssessmentCurrent(row); current = true; } catch { /* historical packet */ }
     const { packet_json, output_json, ...rest } = row;
     const packet = parse(packet_json);
-    return { ...rest, packet, output: output_json ? parse(output_json) : null,
+    let output = null;
+    try { output = output_json ? parse(output_json) : null; } catch { /* malformed output has no displayable interpretation */ }
+    return { ...rest, packet, output,
+      decision_review:assessmentDecision({row,packet,output,current,
+        run:row.run_id ? this.store.get('SELECT * FROM runs WHERE id=?',row.run_id) : null,validateOutput:validateModelOutput}),
       retry: packet.reassessment ? this.retryState(row) : this.ordinaryRetryState(row), attempt_receipt: this.attemptReceipt(row),
       current, reviewable: current && ['captured', 'running', 'proposed'].includes(row.status), ...AUTHORITY };
   }
   propose(p, producer = 'operator') {
     this.requireEnabled(); fields(p, ['assessment_id', 'output']); const a = this.assessment(p.assessment_id);
     check(a.status === (producer === 'model' ? 'running' : 'captured'), 'AUDIENCE_ASSESSMENT_UNAVAILABLE'); this.assertAssessmentCurrent(a);
+    const runContext = producer === 'model' && a.run_id ? parse(this.store.get('SELECT context_json FROM runs WHERE id=?',a.run_id)?.context_json ?? '{}') : {};
+    const decisionContract = runContext.decision_contract_version === 1;
     check(Buffer.byteLength(JSON.stringify(p.output ?? null)) <= 60000 && validateOutput(p.output)
-      && (producer !== 'model' || a.packet.proposal_contract_version !== 2 || validateModelOutput(p.output)), 'AUDIENCE_PROPOSAL_INVALID', 400);
+      && (producer !== 'model' || (decisionContract ? validateModelOutput(p.output)
+        : a.packet.proposal_contract_version !== 2 || validateLegacyModelOutput(p.output))), 'AUDIENCE_PROPOSAL_INVALID', 400);
+    if (p.output.decision_review) {
+      check(producer === 'model' && decisionContract, 'AUDIENCE_DECISION_MODEL_ONLY');
+      decisionBindings(p.output,a.packet);
+    }
     if (a.packet.reassessment) check(p.output.needs.length <= 1
       && p.output.needs.every(n => n.need_id === a.packet.reassessment.need_id && n.proposal_version === 2), 'AUDIENCE_REASSESSMENT_SCOPE');
     const seen = new Set(), results = [];

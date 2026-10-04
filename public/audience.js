@@ -226,6 +226,97 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
       ${['proposed','stale'].includes(n.status) ? button('Отклонить', 'audience-reject', n.id, 'danger') : ''}
       ${current && accepted ? button(n.thread_id ? 'Обновить предложение Continuity' : 'Открыть работу в Continuity', n.thread_id ? 'audience-refresh-work' : 'audience-open-work', n.id, 'secondary') : ''}</div>`);
   }
+  function validDecisionReview(review, exchanges) {
+    if (!review || typeof review !== 'object' || Array.isArray(review) || review.version !== 1
+      || review.scope !== 'supplied_packet_only' || !['needs_proposed','no_need_proposed'].includes(review.disposition)
+      || !decisionText(review.summary, 1000) || !Array.isArray(review.unknowns)
+      || review.unknowns.length < 1 || review.unknowns.length > 8
+      || !review.unknowns.every(value => decisionText(value, 1000)) || !Array.isArray(review.exchange_reviews)
+      || review.exchange_reviews.length < 1 || review.exchange_reviews.length > 8
+      || review.exchange_reviews.length !== exchanges.length) return false;
+    const byId = new Map(exchanges.map(exchange => [exchange.id, exchange]));
+    const seen = new Set();
+    for (const row of review.exchange_reviews) {
+      const exchange = byId.get(row?.exchange_id);
+      if (!exchange || seen.has(row.exchange_id) || !['relevant','no_proposal','uncertain'].includes(row.judgment)
+        || typeof row.exchange_id !== 'string' || row.exchange_id.length > 36
+        || !decisionText(row.reason, 1000) || !Array.isArray(row.evidence_event_ids)
+        || row.evidence_event_ids.length < 1 || row.evidence_event_ids.length > 32
+        || !row.evidence_event_ids.every(decisionEventId)
+        || new Set(row.evidence_event_ids).size !== row.evidence_event_ids.length
+        || !Array.isArray(row.support_quotes) || row.support_quotes.length < 1 || row.support_quotes.length > 32) return false;
+      seen.add(row.exchange_id);
+      const evidence = new Map((exchange.evidence ?? []).map(item => [item.source_event_id, item]));
+      if (!row.evidence_event_ids.every(eventId => evidence.has(eventId))) return false;
+      const quotedRefs = new Set();
+      for (const citation of row.support_quotes) {
+        const item = evidence.get(citation?.source_event_id);
+        if (!item || !row.evidence_event_ids.includes(citation.source_event_id)
+          || !decisionEventId(citation.source_event_id) || !decisionText(citation.quote, 2000)
+          || typeof item.text !== 'string' || !item.text.includes(citation.quote)) return false;
+        quotedRefs.add(citation.source_event_id);
+      }
+      if (!row.evidence_event_ids.every(eventId => quotedRefs.has(eventId))) return false;
+    }
+    return seen.size === exchanges.length;
+  }
+  function decisionText(value, maxLength) {
+    return typeof value === 'string' && value.length > 0 && value.length <= maxLength && /\S/.test(value);
+  }
+  function decisionEventId(value) {
+    return typeof value === 'string' && value.length <= 20 && /^[1-9][0-9]*$/.test(value);
+  }
+  function decisionReviewPanel(a, exchanges) {
+    const metadata = a.decision_review;
+    const state = metadata?.state;
+    const pending = ['captured','running'].includes(a.status);
+    const valid = ['current','stale'].includes(state) && validDecisionReview(metadata.review, exchanges)
+      && metadata.epistemic_status === 'unverified_model_interpretation'
+      && metadata.resolution === 'unknown' && metadata.scope === 'supplied_packet_only'
+      && ((state === 'current') === (a.current === true));
+    const notRecorded = state === 'not_recorded' && metadata.review === null
+      && metadata.epistemic_status === 'unverified_model_interpretation'
+      && metadata.resolution === 'unknown' && metadata.scope === 'supplied_packet_only';
+    if (state === 'stale' && metadata.review === null && a.current === false
+      && metadata.epistemic_status === 'unverified_model_interpretation'
+      && metadata.resolution === 'unknown' && metadata.scope === 'supplied_packet_only') {
+      return `<section class="context-review"><h3>Решение модели</h3><p>Ответ не применён: основание устарело; объяснение решения не записано.</p><p class="muted tiny">Результат не относится к текущему основанию. Неизвестно, решена ли потребность.</p></section>`;
+    }
+    if (state === 'invalid' || (['current','stale'].includes(state) && !valid)
+      || state === 'not_recorded' && !notRecorded
+      || !['current','stale','invalid','not_recorded'].includes(state)) {
+      return `<section class="context-review"><h3>Решение модели</h3><p>Объяснение решения не прошло проверку и скрыто.</p><p class="muted tiny">Неизвестно, решена ли потребность. Решение модели не подтверждено и не выходит за пределы предоставленного снимка.</p></section>`;
+    }
+    if (!valid) {
+      const message = pending
+        ? 'Оценка ещё выполняется; объяснение решения пока не записано.'
+        : 'Объяснение решения не записано для этой исторической оценки.';
+      return `<section class="context-review"><h3>Решение модели</h3><p>${message}</p><p class="muted tiny">Пустой результат без записанного обоснования не позволяет заключить, почему модель воздержалась. Неизвестно, решена ли потребность.</p></section>`;
+    }
+    const review = metadata.review;
+    const exchangeById = new Map(exchanges.map(exchange => [exchange.id, exchange]));
+    const evidenceById = new Map(exchanges.flatMap(exchange => exchange.evidence ?? []).map(item => [item.source_event_id, item]));
+    const rows = review.exchange_reviews.map(row => {
+      const exchange = exchangeById.get(row.exchange_id);
+      const judgment = { relevant:'Связано с целью', no_proposal:'Не поддерживает предложение', uncertain:'Неопределённо' }[row.judgment];
+      const citations = row.support_quotes.map(citation => {
+        const item = evidenceById.get(citation.source_event_id);
+        return `<blockquote>${esc(citation.quote)}<small> · событие ${esc(citation.source_event_id)} · опубликовано ${esc(sourceDate(item.published_at))} · источник изменён ${esc(sourceDate(item.source_updated_at))} · наблюдалось ${esc(sourceDate(item.observed_at))}</small></blockquote>`;
+      }).join('') || '<small>Точная цитата не указана.</small>';
+      return `<article class="workspace-evidence"><strong>${esc(judgment)} · обмен ${esc(exchange.id)} · ${esc(exchange.source_ref ?? 'источник не указан')}</strong><p>${esc(row.reason)}</p>${citations}</article>`;
+    }).join('');
+    const stale = state === 'stale';
+    const disposition = review.disposition === 'no_need_proposed' ? 'Потребность не предложена.' : 'Предложена гипотеза для отдельного рассмотрения.';
+    return `<section class="context-review"><h3>Решение модели по предоставленному снимку</h3>
+      <p><strong>${disposition}</strong> ${stale ? 'Историческое объяснение сохранено; основание устарело.' : 'Объяснение относится к текущему сохранённому основанию.'}</p>
+      <p>${esc(review.summary)}</p>
+      <p><strong>Неизвестно, решена ли потребность.</strong> Это непроверенная интерпретация модели, а не вывод о полном источнике или подтверждение результата.</p>
+      <p>Гипотеза не является решением владельца и сама по себе не разрешает принятие, работу, контакт или отправку.</p>
+      <p><strong>Охват:</strong> только предоставленный снимок (${exchanges.length} обменов). Полнота источника неизвестна.</p>
+      ${review.unknowns.length ? `<p><strong>Неизвестно:</strong> ${esc(review.unknowns.join('; '))}</p>` : ''}
+      ${rows || '<p>Обменов в сохранённом снимке нет.</p>'}
+    </section>`;
+  }
   function assessmentPanel(a) {
     const packet = a.packet;
     const exchanges = packet?.exchanges ?? [];
@@ -239,6 +330,19 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
     const retryAction = retry?.kind === 'ordinary' ? 'audience-retry-assessment'
       : retry?.kind === 'focused' ? 'audience-retry-reassessment' : null;
     const receipt = a.attempt_receipt;
+    const reviewHtml = decisionReviewPanel(a, exchanges);
+    const packetWithheld = packet?.withheld_exchanges ?? packet?.coverage?.withheld_exchanges;
+    const withheldSample = Array.isArray(packetWithheld) ? packetWithheld.slice(0, 8) : [];
+    const withheldReasons = new Map();
+    for (const item of withheldSample) for (const reason of new Set(Array.isArray(item?.reasons)
+      ? item.reasons.filter(reason => typeof reason === 'string' && reason.trim()) : []))
+      withheldReasons.set(reason, (withheldReasons.get(reason) ?? 0) + 1);
+    const withheldReasonText = [...withheldReasons].map(([reason, count]) => `${esc(reason)} (${count})`).join(', ') || 'коды причин не указаны';
+    const omittedSample = packet?.coverage?.omitted_sample_exchanges;
+    const coverageHtml = packet ? `<p class="muted tiny"><strong>Охват пакета:</strong> включено ${exchanges.length} обменов. В ограниченном списке исключённых обменов — ${withheldSample.length} (не более 8 показанных записей); причины в этом списке: ${withheldReasonText}. Общее число исключённых или ожидающих обменов неизвестно; полнота источника неизвестна.
+      ${Number.isSafeInteger(omittedSample) && omittedSample >= 0 ? `В ограниченном окне пересмотра ${omittedSample} кандидатов не вошли в пакет; это не полный backlog источника.` : ''}</p>` : '';
+    const safeOutput = a.output && typeof a.output === 'object' && !Array.isArray(a.output)
+      ? Object.fromEntries(Object.entries(a.output).filter(([key]) => key !== 'decision_review')) : a.output;
     const receiptInteger = value => Number.isSafeInteger(value) && value >= 0 ? String(value) : 'неизвестно';
     const receiptHtml = receipt && typeof receipt === 'object' ? `<section class="context-review"><h3>Квитанция попытки модели</h3>
       <p>Запуск ${esc(receipt.run_id ?? 'не указан')} · состояние ${esc(receipt.status ?? 'неизвестно')} · вызовы API: ${receiptInteger(receipt.model_api_calls)}.</p>
@@ -267,7 +371,8 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
         <p><strong>Обмены (${exchanges.length}), свидетельства (${evidenceCount}):</strong></p>${exchanges.map(x => `<article class="workspace-evidence"><strong>Обмен ${esc(x.id)} · ${esc(x.source_ref)}</strong><p>${x.current === true ? 'Текущий' : 'Требует сверки'}${x.reasons?.length ? ` · ${esc(x.reasons.join('; '))}` : ''}</p>${(x.evidence ?? []).map(e => `<p>${esc(e.text ?? 'Свидетельство без текста')}<small>${esc(e.source_event_id ?? '')}${e.message_version ? ` · версия ${esc(e.message_version)}` : ''} · опубликовано ${esc(sourceDate(e.published_at))} · источник изменён ${esc(sourceDate(e.source_updated_at))} · наблюдалось ${esc(sourceDate(e.observed_at))}${e.confirmed_at ? ` · Browser подтвердил ${esc(sourceDate(e.confirmed_at))}` : ''}</small></p>`).join('')}</article>`).join('') || '<p>Свидетельства не приложены.</p>'}
         ${packet.unknowns?.length ? `<p><strong>Неизвестно:</strong> ${esc(packet.unknowns.join('; '))}</p>` : ''}` : '<p>Снимок основания не возвращён.</p>'}
       ${emptyReassessment ? '<p><strong>Новая интерпретация не предложена; прежняя находка не признана решённой.</strong></p>' : ''}
-      ${a.output ? `<details><summary>Сохранённое предложение</summary><pre class="workspace-pre">${esc(JSON.stringify(a.output, null, 2))}</pre></details>` : ''}
+      ${coverageHtml}${reviewHtml}
+      ${safeOutput ? `<details><summary>${Array.isArray(safeOutput.needs) && safeOutput.needs.length === 0 ? 'Сохранённый ответ модели' : 'Сохранённое предложение'}</summary><pre class="workspace-pre">${esc(JSON.stringify(safeOutput, null, 2))}</pre></details>` : ''}
       ${receiptHtml}${retryHtml}
       <div class="actions">${focused && ['captured','running'].includes(a.status) ? button('Отменить пересмотр', 'audience-cancel-reassessment', a.id, 'danger') : ''}${ordinaryRetry && ['captured','running'].includes(a.status) ? button('Отменить обычную попытку', 'audience-cancel-assessment', a.id, 'danger') : ''}${!focused && !ordinaryRetry && a.status === 'captured' && a.current === true ? button('Внести гипотезу вручную', 'audience-propose', a.id, 'primary') : ''}</div>`);
   }
