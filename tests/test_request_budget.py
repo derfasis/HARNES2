@@ -330,7 +330,7 @@ class WorkerRequestBudgetIntegrationTests(unittest.TestCase):
             "situation_id": "need-followup-local-stub",
             "tools": [],
             "model": {
-                "provider": "openai", "apiMode": "chat_completions",
+                "provider": "custom", "apiMode": "chat_completions",
                 "baseUrl": f"http://127.0.0.1:{server.server_port}/v1",
                 "model": "offline-stub-model", "maxIterations": 2,
                 "maxOutputTokens": 32, "timeoutSeconds": 15, "maxApiCalls": 2,
