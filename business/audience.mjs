@@ -9,6 +9,8 @@ import { effectiveSourceConfig } from './scout-policy.mjs';
 import { proposalRefs, proposalBindings, previewHash, frozenProposalBasis } from './audience-proposals.mjs';
 import { normalizeFailureCause } from './failure-cause.mjs';
 import { decisionBindings, assessmentDecision } from './audience-decisions.mjs';
+import { currentBasis, currentBasisState } from './audience-current-events.mjs';
+import { FOLLOWUP_TEMPORARY } from './audience-followup.mjs';
 
 const storedOutputSchema = readJson(path.join(ROOT, 'contracts/audience-assessment.schema.json'));
 export const outputSchema = structuredClone(storedOutputSchema);
@@ -247,12 +249,17 @@ export class AudienceLoop {
       considered: exchange.considered_fingerprint === exchange.fingerprint };
   }
   basis(goal, exchanges) {
+    if (exchanges.some(e => e.evidence_scope === 'current_events_with_structural_ancestry_v1')) {
+      check(exchanges.every(e => e.evidence_scope === 'current_events_with_structural_ancestry_v1'), 'AUDIENCE_RECORD_INVALID');
+      return currentBasis(this, goal, exchanges);
+    }
     const watches = this.watches(goal.id);
     return { goal_id: goal.id, revision: goal.revision,
       exchanges: exchanges.map(e => ({ id: e.id, fingerprint: e.fingerprint, source_ref: e.source_ref })),
       policies: [...new Set(exchanges.map(e => e.source_ref))].sort().map(ref => [ref, watches.find(w => w.source_ref === ref)?.policy_hash]) };
   }
   basisState(basis) {
+    if (basis?.version === 2) return currentBasisState(this, basis);
     if (!basis || typeof basis !== 'object' || Object.keys(basis).sort().join(',') !== 'exchanges,goal_id,policies,revision'
       || typeof basis.goal_id !== 'string' || !Number.isInteger(basis.revision) || basis.revision < 1
       || !Array.isArray(basis.exchanges) || !basis.exchanges.length || basis.exchanges.length > BATCH
@@ -640,6 +647,10 @@ export class AudienceLoop {
   assertAssessmentCurrent(row) {
     const packet = row.packet ?? parse(row.packet_json);
     check(packet && typeof packet === 'object' && !Array.isArray(packet), 'AUDIENCE_RECORD_INVALID');
+    if (packet.followup !== undefined || packet.scope?.version === 2) {
+      this.service.followup.assertPacket(row, { live: !['proposed','stale'].includes(row.status) });
+      return this.assertBasis(packet.scope);
+    }
     const goal = this.assertBasis(packet.scope);
     if (packet.reassessment !== undefined) {
       const focus = packet.reassessment;
@@ -695,7 +706,8 @@ export class AudienceLoop {
     return assessmentDecision({ row, packet, output, current,
       run:row.run_id ? this.store.get('SELECT * FROM runs WHERE id=?',row.run_id) : null,validateOutput:validateModelOutput,
       validateAuthority:frozen => {
-        if (!packet.reassessment && !packet.reasoning_retry) this.service.attention.assertHistory(row.run_id, row, frozen.attention_grant);
+        if (packet.followup || packet.scope?.version === 2) this.service.followup.assertHistory(row.run_id, row, frozen.followup_request);
+        else if (!packet.reassessment && !packet.reasoning_retry) this.service.attention.assertHistory(row.run_id, row, frozen.attention_grant);
       } });
   }
   assessment(assessmentId) {
@@ -724,6 +736,8 @@ export class AudienceLoop {
     }
     if (a.packet.reassessment) check(p.output.needs.length <= 1
       && p.output.needs.every(n => n.need_id === a.packet.reassessment.need_id && n.proposal_version === 2), 'AUDIENCE_REASSESSMENT_SCOPE');
+    if (a.packet.followup) check(producer === 'model' && p.output.needs.length <= 1
+      && p.output.needs.every(n => n.need_id === a.packet.followup.need_id && n.proposal_version === 2), 'AUDIENCE_FOLLOWUP_SCOPE');
     const seen = new Set(), results = [];
     for (const output of p.output.needs) {
       const { selected } = proposalBindings(output, a.packet);
@@ -750,7 +764,7 @@ export class AudienceLoop {
       results.push(needId);
     }
     this.store.run("UPDATE audience_assessments SET status='proposed',producer=?,output_json=? WHERE id=?", producer, JSON.stringify(p.output), a.id);
-    if (!a.packet.reassessment) for (const e of a.packet.exchanges) this.store.run('UPDATE audience_exchanges SET considered_fingerprint=? WHERE id=?', e.fingerprint, e.id);
+    if (!a.packet.reassessment && !a.packet.followup) for (const e of a.packet.exchanges) this.store.run('UPDATE audience_exchanges SET considered_fingerprint=? WHERE id=?', e.fingerprint, e.id);
     this.record('proposed', { assessment_id: a.id, need_ids: results, producer }); return { assessment_id: a.id, need_ids: results, ...AUTHORITY };
   }
   need(needId, { includeWorkCase = true } = {}) {
@@ -759,6 +773,7 @@ export class AudienceLoop {
     try { output = parse(row.output_json); basis = parse(row.basis_json); }
     catch { throw new AppError('AUDIENCE_RECORD_INVALID', 409, 'AUDIENCE_RECORD_INVALID'); }
     check(validateOutput({ needs: [output] }) && basis?.goal_id === row.goal_id, 'AUDIENCE_RECORD_INVALID');
+    check(basis.version !== 2 || output.proposal_version === 2, 'AUDIENCE_RECORD_INVALID');
     if (output.proposal_version === 2) {
       // The durable need is a projection of an immutable assessment, not an editable
       // authority document. Bind its text, references and selected context on read/import.
@@ -771,7 +786,11 @@ export class AudienceLoop {
         if (assessment.producer === 'model') {
           const run = assessment.run_id && this.store.get('SELECT * FROM runs WHERE id=? AND partner_id=?', assessment.run_id, this.partnerId);
           const frozen = run && parse(run.context_json);
-          if (!packet.reassessment && !packet.reasoning_retry && (frozen?.attention_grant || frozen?.model_profile
+          if (packet.followup || packet.scope?.version === 2 || basis.version === 2 || frozen?.followup_request
+            || this.store.get('SELECT run_id FROM audience_followup_attempts WHERE assessment_id=?', assessment.id)) {
+            check(run?.status === 'completed', 'AUDIENCE_RECORD_INVALID');
+            this.service.followup.assertHistory(run.id, assessment, frozen?.followup_request);
+          } else if (!packet.reassessment && !packet.reasoning_retry && (frozen?.attention_grant || frozen?.model_profile
             || frozen?.decision_contract_version !== undefined || frozen?.model_projection_version !== undefined
             || original.decision_review !== undefined ||
             this.store.get('SELECT run_id FROM audience_attention_attempts WHERE run_id=?', assessment.run_id))) {
@@ -940,13 +959,15 @@ export class AudienceLoop {
       try {
       const packet = parse(a.packet_json), state = this.basisState(packet.scope);
       if (state.reasons.some(r => !TEMPORARY.has(r))) this.store.run("UPDATE audience_assessments SET status='stale' WHERE id=?", a.id);
-      else if (state.current && (packet.reassessment || packet.reasoning_retry) && a.status === 'captured') this.assertAssessmentCurrent(a);
+      else if (state.current && (packet.reassessment || packet.reasoning_retry || packet.followup) && a.status === 'captured') this.assertAssessmentCurrent(a);
       } catch (error) {
         if (!(error instanceof AppError) && !(error instanceof SyntaxError)) throw error;
+        if (FOLLOWUP_TEMPORARY.has(error.code) && parse(a.packet_json).followup) continue;
         this.store.run("UPDATE audience_assessments SET status='stale' WHERE id=?", a.id);
         this.record('quarantined', { assessment_id: a.id, reason: 'AUDIENCE_RECORD_INVALID' });
       }
     }
+    this.service.followup?.reconcile(goalId);
   }
   reconcile({ limit = 10, event_limit: eventLimit = 20 } = {}) {
     check(Number.isInteger(limit) && limit >= 1 && limit <= 20 && Number.isInteger(eventLimit) && eventLimit >= 1 && eventLimit <= 50, 'AUDIENCE_RECONCILE_LIMIT');

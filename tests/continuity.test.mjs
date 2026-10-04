@@ -357,6 +357,7 @@ test('new memory and cursors export/import; a four-migration bundle shape restor
     const data = structuredClone(bundle);
     if (legacy) {
       delete data.tables.model_profiles; delete data.tables.audience_attention_models;
+      delete data.tables.audience_followup_requests; delete data.tables.audience_followup_attempts;
       for (const table of [...CONTINUITY_TABLES, ...EXECUTIVE_TABLES, ...ACTION_TABLES, ...OUTCOME_TABLES, ...WORK_TABLES, ...CONTROL_TABLES, ...SCOUT_TABLES, ...AUDIENCE_TABLES]) delete data.tables[table];
       for (const row of data.tables.messages) { delete row.occurred_at; delete row.time_basis; }
       data.migrations = data.migrations.slice(0, 4); data.tables_sha256 = hash(JSON.stringify(data.tables));
@@ -571,7 +572,7 @@ test('an actual four-migration SQLite database upgrades in place without rewriti
   try {
     assert.deepEqual(store.all('SELECT * FROM events'), before);
     assert.equal(store.get('SELECT mission FROM partners').mission, 'Original baseline mission');
-    assert.equal(store.all('SELECT * FROM schema_migrations').length, 14);
+    assert.equal(store.all('SELECT * FROM schema_migrations').length, 15);
     assert.deepEqual(store.all('PRAGMA foreign_key_check'), []);
     noEffects({ store });
     for (const table of CONTINUITY_TABLES) assert.equal(store.get(`SELECT COUNT(*) n FROM ${table}`).n, 0);

@@ -23,7 +23,8 @@ export class HermesAdapter {
   async run(run, context, decision = false) {
     const globalConfig = this.service.config;
     const config = decision && run.runtime === 'hermes-audience-v1' && JSON.parse(run.context_json).model_profile
-      ? { ...globalConfig, runtime: this.service.attention.runtimeForRun(run) } : globalConfig;
+      ? { ...globalConfig, runtime: JSON.parse(run.context_json).followup_request
+        ? this.service.followup.runtimeForRun(run) : this.service.attention.runtimeForRun(run) } : globalConfig;
     const controlEnabled = config.controlPlane?.enabled === true || !!this.service.control?.ticket(run.id);
     let ticket = null;
     if (decision) {
@@ -79,10 +80,9 @@ export class HermesAdapter {
         }
         finish(null, result);
       });
-      // Hermes' empty-response retry ladder re-enters the loop only while
-      // api_call_count < max_iterations, so a single-iteration decision run
-      // can never execute its builtin retry. The second iteration is exactly
-      // that one retry after an empty first response; attempts stay bounded.
+      // Two iterations permit Hermes' built-in empty-response retry. Iterations
+      // do not count hidden retries/summary requests: focused follow-up authority
+      // separately freezes maxApiCalls, enforced by the worker's HTTPX hooks.
       const envelope = decision
         ? { run_id: run.id, situation_id: context.input.situation_id,
           context: Object.fromEntries(Object.entries(context).filter(([key]) => key !== 'router_instructions')),

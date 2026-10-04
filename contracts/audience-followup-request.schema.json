@@ -1,0 +1,14 @@
+{
+  "type": "object", "additionalProperties": false,
+  "required": ["need_id", "expected_revision", "expected_basis_fingerprint", "expected_context_fingerprint", "model_profile_id", "expected_profile_hash", "expires_at", "reason"],
+  "properties": {
+    "need_id": {"type": "string", "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"},
+    "model_profile_id": {"type": "string", "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"},
+    "expected_revision": {"type": "integer", "minimum": 1},
+    "expected_basis_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "expected_context_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "expected_profile_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "expires_at": {"type": "string", "minLength": 20, "maxLength": 24},
+    "reason": {"type": "string", "minLength": 1, "maxLength": 500}
+  }
+}

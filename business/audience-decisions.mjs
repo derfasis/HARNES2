@@ -32,10 +32,12 @@ export function audienceModelPacket(packet) {
     assessment_id:packet.assessment_id,proposal_contract_version:packet.proposal_contract_version,
     basis_fingerprint:packet.basis_fingerprint,
     exchanges:packet.exchanges.map(e => ({id:e.id,source_ref:e.source_ref,anchor_id:e.anchor_id,
-      fingerprint:e.fingerprint,evidence:e.evidence,unsupported_count:e.unsupported_count})),
+      fingerprint:e.fingerprint,evidence:e.evidence,unsupported_count:e.unsupported_count,
+      ...(packet.followup ? {evidence_scope:e.evidence_scope,current_event_ids:e.current_event_ids,structural_event_ids:e.structural_event_ids} : {})})),
     needs:packet.needs,
     coverage:{...coverage,withheld_sample_exchanges:withheld.length,withheld_reason_counts:reasonCounts},
     ...(packet.reassessment ? {reassessment:packet.reassessment} : {}),
+    ...(packet.followup ? {followup:packet.followup} : {}),
     ...(packet.reasoning_retry ? {reasoning_retry:packet.reasoning_retry} : {}),
     executable:false,contact_permission:false,allowed_effects:[] });
 }
@@ -66,7 +68,7 @@ export function assessmentDecision({ row, packet, output, run, current, validate
       && row.run_id === run.id && receipt.run_id === run.id && receipt.assessment_id === row.id && receipt.goal_id === row.goal_id
       && digest(frozen.packet) === digest(packet) && receipt.output_fingerprint === digest(output)
       && validateOutput(output), 'AUDIENCE_DECISION_RECEIPT_INVALID');
-    check(receipt.disposition === (output.needs.length ? 'proposal_created' : packet.reassessment ? 'no_revision_proposed' : 'no_need_proposed'),
+    check(receipt.disposition === (output.needs.length ? 'proposal_created' : packet.reassessment || packet.followup ? 'no_revision_proposed' : 'no_need_proposed'),
       'AUDIENCE_DECISION_RECEIPT_INVALID');
     decisionBindings(output,packet);
     if (validateAuthority) validateAuthority(frozen);

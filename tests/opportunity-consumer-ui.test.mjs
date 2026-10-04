@@ -150,7 +150,10 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // Reviewed extension: the worker now records the served model name from the provider response,
 // which the pinned runtime only exposes through its post_api_request lifecycle hook. The
 // configured model is still never used, and a run that reached two models is refused outright.
-    "scripts/situation_router_worker.py": "29453f5084a80d040ac1e1e776fcd87fdeec5d3a",
+    // Follow-up's frozen generation-request cap wraps the existing SDK with HTTPX
+    // hooks. Real loopback-only Hermes/SSE controls prove count, rejection and usage
+    // independently of its outer iteration counter (test_request_budget.py).
+    "scripts/situation_router_worker.py": "6aa5e1bd9195f46f021b4ac7ee4f0760f5304457",
     // Reviewed extension: invalidate read-only source checkpoints on process recovery.
     // textBlobHash normalizes CRLF, so this is the LF-normalized R7 blob hash.
     // Continuity adds export tables and recovers its running turns as interrupted.
@@ -166,7 +169,9 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // Narrow deployed 011 encoding compatibility; immutable fixture + real upgrade/restart tests.
     // Scoped profiles add two export tables. Exact v13/v14 staging transfer tests
     // preserve metadata and revoke all model/attention authority after import.
-    "business/store.mjs": "22da5fea45fa1aa500eadafd3952084255a2e405",
+    // Follow-through adds two more tables; strict catalogues through014 remain
+    // historical, and schema015 transfer retires one-shot model requests.
+    "business/store.mjs": "bd9350ba94ce689de7092b28d7f3f208b523d0c6",
     "adapters/hermes/credentials.py": "2797bd89081eaf4a950178cec3d637015ee8f45f",
     "adapters/hermes/runner.py": "e631237829d9b7a4521799b4a19c4c500b33f5aa",
     // Deliberate v0 extension: existing worker, no-tool envelope tested in opportunity-runtime.test.mjs.
@@ -177,7 +182,10 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // A profile-bound Audience turn uses its validated frozen model, without
     // global retargeting. The real adapter/child envelope remains no-tools;
     // scoped-audience-activation-boundary.test.mjs proves that boundary.
-    "business/runtime.mjs": "e9d2e75a88b92e06c5d0d0e3fb4cac9384b8cdd2",
+    // Separately bound follow-through validates its request, lineage, profile
+    // and frozen operational bounds before the same no-tool adapter dispatch.
+    // The real adapter and scheduler seam is exercised in need-followthrough-runtime.
+    "business/runtime.mjs": "056a20598d3b6a39d244b5c2f946a0ae8f528d41",
     // Outcome completion projects provider time and versions message-record
     // identities by partner. Delivery gates remain unchanged; real stub adapter
     // races and crash/receipt replay are in outcome-timing/redteam-kill tests.

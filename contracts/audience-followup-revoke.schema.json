@@ -1,0 +1,9 @@
+{
+  "type": "object", "additionalProperties": false,
+  "required": ["request_id", "expected_request_fingerprint", "reason"],
+  "properties": {
+    "request_id": {"type": "string", "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"},
+    "expected_request_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "reason": {"type": "string", "minLength": 1, "maxLength": 500}
+  }
+}

@@ -14,6 +14,7 @@ import { WORK_TABLES, CONTROL_TABLES } from './work-tables.mjs';
 import { SCOUT_TABLES } from './scout-tables.mjs';
 import { AUDIENCE_TABLES } from './audience-tables.mjs';
 import { MODEL_PROFILE_TABLES } from './model-profile-tables.mjs';
+import { AUDIENCE_FOLLOWUP_TABLES } from './audience-followup-tables.mjs';
 
 export const id = () => randomUUID();
 export const hash = value => createHash('sha256').update(value).digest('hex');
@@ -45,7 +46,7 @@ export function migrationChecksumMatches(version, recordedChecksum, currentCheck
   return pinned?.published.has(currentChecksum) === true
     && (pinned.published.has(recordedChecksum) || pinned.historical.has(recordedChecksum));
 }
-export const TABLES = ['partners','persons','channel_identities','conversations','messages','facts','tasks','runs','drafts','draft_versions','approvals','delivery_attempts','outcome_events','lessons','capability_proposals','skill_versions','events','command_receipts','channel_offsets','tool_calls',...ENGAGEMENT_TABLES,...DISCOVERY_TABLES,...CONTINUITY_TABLES,...EXECUTIVE_TABLES,...ACTION_TABLES,...OUTCOME_TABLES,...WORK_TABLES,...CONTROL_TABLES,...SCOUT_TABLES,...AUDIENCE_TABLES,...MODEL_PROFILE_TABLES];
+export const TABLES = ['partners','persons','channel_identities','conversations','messages','facts','tasks','runs','drafts','draft_versions','approvals','delivery_attempts','outcome_events','lessons','capability_proposals','skill_versions','events','command_receipts','channel_offsets','tool_calls',...ENGAGEMENT_TABLES,...DISCOVERY_TABLES,...CONTINUITY_TABLES,...EXECUTIVE_TABLES,...ACTION_TABLES,...OUTCOME_TABLES,...WORK_TABLES,...CONTROL_TABLES,...SCOUT_TABLES,...AUDIENCE_TABLES,...MODEL_PROFILE_TABLES,...AUDIENCE_FOLLOWUP_TABLES];
 export class Store {
   constructor(directory = DATA) {
     this.directory = path.resolve(directory);

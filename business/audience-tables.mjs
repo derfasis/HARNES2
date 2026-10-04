@@ -4,4 +4,5 @@ export const AUDIENCE_TABLES = ['audience_goals', 'audience_watches', 'audience_
 export const AUDIENCE_ACTIONS = new Set(['audience.open', 'audience.pause', 'audience.capture',
   'audience.propose', 'audience.review', 'audience.open_work', 'audience.refresh_work', 'audience.import_preview',
   'audience.reassess', 'audience.cancel_reassessment', 'audience.retry_reassessment',
-  'audience.attention_grant', 'audience.attention_revoke', 'audience.retry_assessment', 'audience.cancel_assessment']);
+  'audience.attention_grant', 'audience.attention_revoke', 'audience.retry_assessment', 'audience.cancel_assessment',
+  'audience.followup_request', 'audience.followup_revoke']);

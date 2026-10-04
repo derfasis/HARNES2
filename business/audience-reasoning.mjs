@@ -9,6 +9,7 @@ import { now, AppError } from './errors.mjs';
 import { automaticBoundary, digest } from './source-ingestion.mjs';
 import { normalizeFailureCause } from './failure-cause.mjs';
 import { audienceModelPacket } from './audience-decisions.mjs';
+import { FOLLOWUP_TEMPORARY } from './audience-followup.mjs';
 
 const RUNTIME = 'hermes-audience-v1';
 const INSTRUCTIONS = fs.readFileSync(path.join(ROOT, 'partner/audience-reasoning.md'), 'utf8');
@@ -21,7 +22,7 @@ function prepare(service) {
   if (cfg.audience?.enabled !== true || !service.attention.modelEnabled()) return { disposition: 'disabled' };
   if (cfg.controlPlane?.enabled !== true) throw new AppError('Audience model reasoning requires Control Plane admission', 409, 'AUDIENCE_CONTROL_REQUIRED');
   automaticBoundary(service);
-  if (!service.attention.hasScopedGrant() && !runtimeReadiness(cfg, { decision: true }).ready) return { disposition: 'waiting_model' };
+  if (!service.attention.hasScopedGrant() && !service.followup.hasPending() && !runtimeReadiness(cfg, { decision: true }).ready) return { disposition: 'waiting_model' };
   const counts = db.get(`SELECT COUNT(*) n,COALESCE(SUM(estimated_cost_usd),0) cost,
     COALESCE(SUM(CASE WHEN cost_status='unknown' AND (status NOT IN ('running','analyzed') OR NOT EXISTS
       (SELECT 1 FROM control_tickets t WHERE t.run_id=runs.id AND t.status IN ('reserved','running'))) THEN 1 ELSE 0 END),0) unknown,
@@ -55,17 +56,23 @@ function prepare(service) {
       let grant = null, jobConfig = cfg;
       let row = db.get("SELECT * FROM audience_assessments WHERE goal_id=? AND status='captured' ORDER BY rowid LIMIT 1", goalId);
       if (row) {
-        // A scoped ordinary grant never supplies authority for focused/retry requests.
-        if (cfg.audience?.modelEnabled !== true) continue;
-        if (!runtimeReadiness(cfg, { decision: true }).ready) { waitingModel = true; continue; }
         try {
           const capturedPacket = JSON.parse(row.packet_json);
           if (!capturedPacket || typeof capturedPacket !== 'object' || Array.isArray(capturedPacket))
             throw new AppError('Invalid audience packet', 409, 'AUDIENCE_RECORD_INVALID');
-          if (!capturedPacket.reassessment && !capturedPacket.reasoning_retry) continue;
+          if (capturedPacket.followup || capturedPacket.scope?.version === 2) {
+            jobConfig = service.followup.configurationFor(row);
+            if (!runtimeReadiness(jobConfig, { decision: true }).ready) { waitingModel = true; continue; }
+          } else {
+            // An ordinary grant never supplies authority to manual/focused/retry packets.
+            if (cfg.audience?.modelEnabled !== true) continue;
+            if (!runtimeReadiness(cfg, { decision: true }).ready) { waitingModel = true; continue; }
+            if (!capturedPacket.reassessment && !capturedPacket.reasoning_retry) continue;
+          }
           audience.assertAssessmentCurrent(row);
         } catch (error) {
           if (!(error instanceof AppError) && !(error instanceof SyntaxError)) throw error;
+          if (FOLLOWUP_TEMPORARY.has(error.code)) continue;
           db.run("UPDATE audience_assessments SET status='stale' WHERE id=? AND status='captured'", row.id);
           audience.record('reassessment_withheld', { assessment_id: row.id, reason: error.code ?? 'AUDIENCE_RECORD_INVALID' });
           continue;
@@ -99,6 +106,7 @@ function prepare(service) {
       const assessmentId = row.id;
       const runId = id(), contract = outputSchema;
       const assessmentPacket = JSON.parse(row.packet_json);
+      const followup = assessmentPacket.followup ? service.followup.assertPacket(row) : null;
       const context = { input: { situation_id: goalId }, owner_language: OWNER_LANGUAGE, assessment_created_at:row.created_at,
         packet: audienceModelPacket(assessmentPacket),
         output_contract: contract, router_instructions: INSTRUCTIONS };
@@ -108,9 +116,12 @@ function prepare(service) {
           ...(grant ? { attention_grant: { id: grant.id, grant_fingerprint: grant.grant_fingerprint } } : {}),
           ...(grant && service.attention.binding(grant) ? { model_profile: { id: service.attention.binding(grant).model_profile_id,
             definition_hash: service.attention.binding(grant).definition_hash } } : {}),
+          ...(followup ? { followup_request: { id:followup.d.id,request_fingerprint:followup.request.request_fingerprint },
+            model_profile: { id:followup.d.model_profile_id,definition_hash:followup.d.profile_hash } } : {}),
           model_config: jobConfig.runtime, prompt_fingerprint: digest(INSTRUCTIONS), contract_fingerprint: digest(contract),
           decision_contract_version:1,model_input_fingerprint:digest(context),model_projection_version:1 }), now());
       if (grant) service.attention.bind(grant, row, runId);
+      if (followup) service.followup.bind(row, runId);
       if (service.control) service.control.bindRun(runId);
       const changed = db.run("UPDATE audience_assessments SET status='running',producer='model',run_id=? WHERE id=? AND status='captured'", runId, assessmentId);
       if (changed.changes !== 1) {
@@ -166,8 +177,14 @@ async function processAudienceInternal(service, runtime) {
             throw new AppError('Audience run packet changed', 409, 'AUDIENCE_RECORD_INVALID');
           service.audience.assertAssessmentCurrent(assessment);
           const packet = JSON.parse(assessment.packet_json);
-          if (!packet.reassessment && !packet.reasoning_retry) service.attention.assertRun(prepared.run.id, assessment, frozen.attention_grant);
-          if (frozen.model_profile) service.attention.runtimeForRun(prepared.run);
+          if (packet.followup && (!Number.isInteger(result.api_calls) || result.api_calls < 1
+            || result.api_calls > frozen.model_config.maxApiCalls))
+            throw new AppError('Missing or exceeded follow-up request accounting', 409, 'AUDIENCE_FOLLOWUP_REQUEST_ACCOUNTING_INVALID');
+          if (packet.followup) service.followup.runtimeForRun(prepared.run);
+          else {
+            if (!packet.reassessment && !packet.reasoning_retry) service.attention.assertRun(prepared.run.id, assessment, frozen.attention_grant);
+            if (frozen.model_profile) service.attention.runtimeForRun(prepared.run);
+          }
           const output = JSON.parse(result.final_response);
           // The audience proposal validates and writes several needs in one call. Keep a bad
           // later need from leaving earlier partial proposals behind when we record invalid.
@@ -180,7 +197,7 @@ async function processAudienceInternal(service, runtime) {
             db.db.exec('RELEASE SAVEPOINT audience_model_proposal');
             throw error;
           }
-          disposition = output.needs.length ? 'proposal_created' : packet.reassessment ? 'no_revision_proposed' : 'no_need_proposed';
+          disposition = output.needs.length ? 'proposal_created' : packet.reassessment || packet.followup ? 'no_revision_proposed' : 'no_need_proposed';
         } catch (error) {
           if (!(error instanceof AppError) && !(error instanceof SyntaxError)) throw error;
           disposition = String(error.code ?? '').startsWith('CONTROL_') ? 'control_withheld'
@@ -201,6 +218,7 @@ async function processAudienceInternal(service, runtime) {
           output_fingerprint:digest(JSON.parse(db.get('SELECT output_json FROM audience_assessments WHERE id=?',prepared.assessmentId).output_json))} : {}),
         run_id: prepared.run.id, model_identity: modelIdentity(result?.model_identity),
         ...(JSON.parse(prepared.run.context_json).model_profile ? { model_profile: JSON.parse(prepared.run.context_json).model_profile } : {}),
+        ...(JSON.parse(prepared.run.context_json).followup_request ? { followup_request: JSON.parse(prepared.run.context_json).followup_request } : {}),
         model_identity_reason: modelIdentity(result?.model_identity) ? null : 'runtime_identity_missing_or_invalid',
         model_api_calls: Number.isInteger(result?.api_calls) && result.api_calls >= 0 && result.api_calls <= 1000 ? result.api_calls : null,
         failure_cause: result?.completed !== true && result?.failure_cause ? normalizeFailureCause(result.failure_cause) : null };
@@ -211,9 +229,16 @@ async function processAudienceInternal(service, runtime) {
     }));
   } catch (error) {
     // A failed durable receipt must never permit the same batch to be billed again.
+    // Known usage is independent of whether the interpretation could be committed.
+    const usage = usageAccounting(JSON.parse(prepared.run.context_json).model_config, result?.usage);
     await service.exclusive(() => db.transaction(() => {
       db.run("UPDATE audience_assessments SET status='interrupted' WHERE id=? AND status='running'", prepared.assessmentId);
-      db.run("UPDATE runs SET status='interrupted',error='RESULT_PERSIST_FAILED',finished_at=? WHERE id=? AND status='running'", now(), prepared.run.id);
+      db.run(`UPDATE runs SET status='interrupted',error='RESULT_PERSIST_FAILED',input_tokens=?,output_tokens=?,
+        estimated_cost_usd=?,cost_status=?,finished_at=? WHERE id=? AND status='running'`,
+        usage.input, usage.output, usage.cost, usage.costStatus, now(), prepared.run.id);
+      service.audience.record('receipt_persistence_failed', { run_id:prepared.run.id,assessment_id:prepared.assessmentId,
+        interpretation_committed:false,usage_known:usage.input!==null&&usage.output!==null,
+        model_api_calls:Number.isInteger(result?.api_calls)&&result.api_calls>=0&&result.api_calls<=1000?result.api_calls:null });
     }));
     throw error;
   }

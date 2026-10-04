@@ -23,6 +23,7 @@ import { ControlPlane } from './control-plane.mjs';
 import { SourceScout, SCOUT_COMMANDS } from './scout.mjs';
 import { AudienceLoop } from './audience.mjs';
 import { AudienceAttention } from './audience-attention.mjs';
+import { AudienceFollowup } from './audience-followup.mjs';
 import { ModelProfiles } from './model-profiles.mjs';
 import { MODEL_PROFILE_COMMANDS } from './model-profile-tables.mjs';
 import { AUDIENCE_ACTIONS } from './audience-tables.mjs';
@@ -33,7 +34,7 @@ import { discoveryCommand, discoveryDecisionQueue, discoveryDetail, discoveryPre
 // manual path would also have accepted, or promotion becomes a way around that refusal.
 const OUTCOMES = new Set(OUTCOME_KINDS);
 export class BusinessService {
-  constructor(store, config) { this.store = store; this.config = config; this.tail = Promise.resolve(); this.telegramAccountId = null; this.engagement = new EngagementLoop(this); this.continuity = new ContinuityLoop(this); this.executive = new ExecutiveLoop(this); this.actions = new ActionLoop(this); this.outcomes = new OutcomeLoop(this); this.control = new ControlPlane(this); this.work = new WorkCore(this); this.scout = new SourceScout(this); this.audience = new AudienceLoop(this); this.modelProfiles = new ModelProfiles(this); this.attention = new AudienceAttention(this); this.discoveryApply = ensureDiscoveryApplied; this.reconcileDiscovery = () => reconcileDiscoveryPending(this, 50); }
+  constructor(store, config) { this.store = store; this.config = config; this.tail = Promise.resolve(); this.telegramAccountId = null; this.engagement = new EngagementLoop(this); this.continuity = new ContinuityLoop(this); this.executive = new ExecutiveLoop(this); this.actions = new ActionLoop(this); this.outcomes = new OutcomeLoop(this); this.control = new ControlPlane(this); this.work = new WorkCore(this); this.scout = new SourceScout(this); this.audience = new AudienceLoop(this); this.modelProfiles = new ModelProfiles(this); this.attention = new AudienceAttention(this); this.followup = new AudienceFollowup(this); this.discoveryApply = ensureDiscoveryApplied; this.reconcileDiscovery = () => reconcileDiscoveryPending(this, 50); }
   exclusive(fn) { const job = this.tail.then(fn); this.tail = job.catch(() => {}); return job; }
   partner() { return this.store.get('SELECT * FROM partners WHERE id=?', this.config.partnerId); }
   person(personId) {
@@ -142,6 +143,7 @@ export class BusinessService {
     if (action === 'audience.retry_reassessment') this.audience.assertRetryRequest(p);
     if (action === 'audience.retry_assessment') this.audience.assertOrdinaryRetryRequest(p);
     if (action === 'audience.attention_grant') this.attention.assertGrantRequest(p);
+    if (action === 'audience.followup_request') this.followup.assertRequest(p);
     if (previous) { ensure(previous.fingerprint === fingerprint, 'request_id использован для другой операции', 409); return JSON.parse(previous.result_json); }
     const agentActions = new Set(['draft.create','fact.propose','lesson.propose','task.propose','capability.propose', ...ENGAGEMENT_AGENT_ACTIONS]);
     ensure((actor.kind === 'operator' && action !== 'discovery.observe')
@@ -161,7 +163,8 @@ export class BusinessService {
     } else if (SCOUT_COMMANDS.has(action)) {
       result = this.scout.command(action, p, actor);
     } else if (AUDIENCE_ACTIONS.has(action)) {
-      result = this.audience.command(action, p, actor);
+      result = action === 'audience.followup_request' ? this.followup.request(p)
+        : action === 'audience.followup_revoke' ? this.followup.revoke(p) : this.audience.command(action, p, actor);
     } else if (WORK_COMMANDS.has(action)) {
       result = this.work.command(action, p, actor);
     } else if (OUTCOME_COMMANDS.has(action)) {

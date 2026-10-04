@@ -173,6 +173,10 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
           return send(200, service.audience.list({ limit: Number(rawLimit ?? 20), cursor }));
         }
         ensure([...url.searchParams].length === 0, 'Invalid audience query', 400);
+        const followupContextMatch = /^\/api\/audience\/needs\/([0-9a-f-]{36})\/followup-context$/.exec(url.pathname);
+        if (followupContextMatch) return send(200, service.followup.context(followupContextMatch[1]));
+        const followupMatch = /^\/api\/audience\/followups\/([0-9a-f-]{36})$/.exec(url.pathname);
+        if (followupMatch) return send(200, service.followup.detail(followupMatch[1]));
         const contextMatch = /^\/api\/audience\/needs\/([0-9a-f-]{36})\/context$/.exec(url.pathname);
         if (contextMatch) return send(200, service.audience.reassessmentContext(contextMatch[1]));
         const needMatch = /^\/api\/audience\/needs\/([0-9a-f-]{36})$/.exec(url.pathname);
@@ -280,6 +284,7 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
       if (req.method === 'POST' && url.pathname === '/api/commands') {
         const body = await readBody(req); ensure(validateCommand(body),'Неверная форма команды');
         const result = await service.command(body.action,body.payload,body.request_id);
+        if (body.action === 'audience.followup_revoke' && result.run_id) scheduler.cancel(result.run_id);
         if (['person.stop','conversation.takeover','task.cancel'].includes(body.action)) {
           for (const run of store.all("SELECT r.id FROM runs r JOIN tasks t ON t.id=r.task_id WHERE r.status='running' AND t.status='cancelled'")) scheduler.cancel(run.id);
         }
@@ -289,7 +294,9 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
         const body = await readBody(req); return send(200,await telegram.sendApproved(requiredText(body.draft_id,'draft_id',100)));
       }
       if (req.method === 'POST' && url.pathname === '/api/scheduler/wake') {
-        const ready = runtimeReadiness(config); ensure(ready.ready,`Модель не подключена: ${ready.missing.join(', ')}`,409);
+        const ready = runtimeReadiness(config);
+        const scopedAudience = config.audience?.enabled === true && service.attention.modelEnabled();
+        ensure(ready.ready || scopedAudience,`Модель не подключена: ${ready.missing.join(', ')}`,409);
         // `tick()` is the full pass — source then reasoning — so it is the only call here.
         // Naming both was a double alarm: `reasonTick()` would race the one `tick()` already
         // schedules, and losing that race is not harmless, because the loser can record a

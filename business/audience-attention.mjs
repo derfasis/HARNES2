@@ -90,7 +90,7 @@ export class AudienceAttention {
       WHERE g.partner_id=? AND g.status='active' AND p.status='available' AND a.status='OPEN' AND g.expires_at>?
       AND (SELECT COUNT(*) FROM audience_attention_attempts t WHERE t.grant_id=g.id)<g.max_attempts LIMIT 1`, this.partnerId, now());
   }
-  modelEnabled() { return this.service.config.audience?.modelEnabled === true || this.hasScopedGrant(); }
+  modelEnabled() { return this.service.config.audience?.modelEnabled === true || this.hasScopedGrant() || this.service.followup?.hasPending(); }
   configurationFor(grant) {
     if (!grant) return this.service.config;
     check(this.live(grant), 'AUDIENCE_ATTENTION_REVOKED_OR_STALE');

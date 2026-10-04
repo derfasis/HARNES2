@@ -3,6 +3,8 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
   let listing = null, goal = null, need = null, assessment = null, reassessmentContext = null;
   let reassessmentContextGuard = null;
   let reassessmentLoading = false, reassessmentError = '';
+  let followupContext = null, followupContextGuard = null;
+  let followupLoading = false, followupError = '';
   let selectedGoal = null, selectedNeed = null, selectedAssessment = null, cursor = '';
   let error = '';
 
@@ -22,6 +24,12 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
         if (selectedAssessment) {
           assessment = await api(`/api/audience/assessments/${encodeURIComponent(selectedAssessment)}`);
         } else { assessment = null; selectedAssessment = null; }
+        if (followupContext && followupContextGuard && (
+          followupContextGuard.goal_id !== goal.id || followupContextGuard.need_id !== need?.id
+          || followupContextGuard.need_revision !== need?.revision
+          || followupContextGuard.need_basis_fingerprint !== need?.basis_fingerprint)) {
+          followupContext = null; followupContextGuard = null; followupError = '';
+        }
         if (reassessmentContext && reassessmentContextGuard && (
           reassessmentContextGuard.goal_id !== goal.id
           || reassessmentContextGuard.goal_revision !== goal.revision
@@ -31,7 +39,10 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
           || reassessmentContextGuard.listing_model_enabled !== (listing.model_enabled === true))) {
           reassessmentContext = null; reassessmentContextGuard = null; reassessmentError = '';
         }
-      } else { goal = null; need = null; assessment = null; selectedGoal = selectedNeed = selectedAssessment = null; }
+      } else {
+        goal = null; need = null; assessment = null; selectedGoal = selectedNeed = selectedAssessment = null;
+        followupContext = null; followupContextGuard = null; followupError = '';
+      }
     } catch (e) { listing = null; goal = need = assessment = null; error = e.message; }
   }
   const statusName = value => ({OPEN:'Открыта',PAUSED:'Приостановлена',open:'Открыта',active:'Активна',paused:'Приостановлена',accepted:'Принято',rejected:'Отклонено',proposed:'На рассмотрении',captured:'Собрано',stale:'Устарело',pending:'Ожидает',interrupted:'Прервано',invalid:'Невалидный вывод'})[value] ?? value ?? 'Неизвестно';
@@ -204,6 +215,152 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
       <div class="actions">${canRequest ? button('Запросить пересмотр с этим контекстом', 'audience-reassess', n.id, 'primary') : pending ? '<span>Пересмотр уже ожидает или выполняется.</span>' : '<span>Запрос модели недоступен: контекст недоступен или модели выключены.</span>'}</div>
     </section>`;
   }
+  const followupProfileHash = profile => profile?.profile_hash;
+  const followupStateLabel = state => ({ available:'доступен', revoked:'отозван', stale:'устарел', invalid:'не прошёл проверку',
+    active:'действует', pending:'ожидает', captured:'ожидает запуска', running:'выполняется', consumed:'использован',
+    expired:'истёк', proposed:'предложена', accepted:'принята', rejected:'отклонена' })[state] ?? 'состояние неизвестно';
+  const followupProfiles = context => (context?.profile_options ?? []).filter(profile =>
+    profile?.available === true && !['revoked','stale','invalid'].includes(profile.state)
+    && profile.model_ready !== false
+    && typeof profile.profile_id === 'string' && profile.profile_id.length > 0
+    && typeof followupProfileHash(profile) === 'string' && followupProfileHash(profile).length > 0
+    && !(profile.reasons?.length) && !(profile.block_reasons?.length));
+  const stableValue = value => Array.isArray(value) ? value.map(stableValue)
+    : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key,stableValue(value[key])])) : value;
+  const sameValue = (a,b) => JSON.stringify(stableValue(a)) === JSON.stringify(stableValue(b));
+  function followupContextPanel(n) {
+    if (!followupContext && !followupError && !followupLoading) {
+      return `<div class="actions">${button('Показать новые сообщения', 'audience-followup-context', n.id, 'secondary')}</div>`;
+    }
+    if (followupLoading) return '<section class="context-review"><p>Проверяем новые сообщения…</p></section>';
+    if (followupError) return `<section class="context-review"><p>Не удалось проверить новые сообщения: ${esc(followupError)}</p>${button('Повторить проверку', 'audience-followup-context', n.id, 'secondary')}</section>`;
+    const c = followupContext ?? {};
+    const correctlyBound = c.need_id === n.id && c.need_revision === n.revision
+      && c.need_basis_fingerprint === n.basis_fingerprint && followupContextGuard?.goal_id === goal?.id
+      && followupContextGuard?.need_id === n.id && followupContextGuard?.need_revision === n.revision
+      && followupContextGuard?.need_basis_fingerprint === n.basis_fingerprint;
+    const scopeValid = c.scope?.version === 2 && c.scope?.purpose === 'audience_current_events_v1'
+      && typeof c.context_fingerprint === 'string' && c.context_fingerprint.length > 0;
+    const exchanges = Array.isArray(c.exchanges) ? c.exchanges : [];
+    const scopeExchanges = Array.isArray(c.scope?.exchanges) ? c.scope.exchanges : [];
+    const freshRows = exchanges.map(exchange => {
+      const scopeExchange = scopeExchanges.find(row => row.id === exchange.id) ?? {};
+      const currentIds = scopeExchange.current_event_ids ?? [];
+      const structuralIds = scopeExchange.structural_event_ids ?? [];
+      const evidence = Array.isArray(exchange.evidence) ? exchange.evidence : [];
+      return `<article class="workspace-evidence"><strong>Текущий обмен ${esc(exchange.id ?? '—')} · ${esc(exchange.source_ref ?? 'источник не указан')}</strong>
+        <p>${exchange.current === true ? 'Новые сообщения доступны' : 'Актуальность сообщений не подтверждена'}</p>
+        <p><strong>Новые сообщения:</strong> ${esc(currentIds.join(', ') || 'не указаны')}
+          · сообщения, нужные для проверки связи: ${esc(structuralIds.join(', ') || 'не указаны')}</p>
+        ${exchange.reasons?.length ? `<p><strong>Ограничения:</strong> ${esc(exchange.reasons.join('; '))}</p>` : ''}
+        ${evidence.map(item => `<p>${esc(item.text ?? 'Текст текущего события не предоставлен')}<small>Событие ${esc(item.source_event_id ?? 'не указано')}${item.message_version ? ` · версия ${esc(item.message_version)}` : ''} · опубликовано ${esc(sourceDate(item.published_at))} · источник изменён ${esc(sourceDate(item.source_updated_at))} · наблюдалось ${esc(sourceDate(item.observed_at))}${item.confirmed_at ? ` · Browser подтвердил ${esc(sourceDate(item.confirmed_at))}` : ''}</small></p>`).join('') || '<p>Свежие цитируемые события не предоставлены.</p>'}</article>`;
+    }).join('') || '<p>Текущих поддержанных обменов не предоставлено.</p>';
+    const historical = c.historical_memory && typeof c.historical_memory === 'object' ? c.historical_memory : {};
+    const historicalEvidence = Array.isArray(c.historical_evidence) ? c.historical_evidence : [];
+    const historicalMetadata = historicalEvidence.slice(0,8).map(item => `<li>${esc(item.source_ref ?? 'Источник не указан')} · сообщение ${esc(item.message_id ?? 'не указано')} · версия ${esc(item.message_version ?? 'не указана')} · ${esc((item.reasons ?? []).join('; ') || 'только исторические сведения')}</li>`).join('');
+    const profiles = Array.isArray(c.profile_options) ? c.profile_options : [];
+    const usableProfiles = followupProfiles(c);
+    const profileRows = profiles.map(profile => `<article class="lesson"><strong>${esc(profile.label ?? profile.profile_id ?? 'Профиль без названия')}</strong>
+      <p>ID: <code>${esc(profile.profile_id ?? 'не указан')}</code> · hash: <code>${esc(followupProfileHash(profile) ?? 'не указан')}</code> · ${esc(followupStateLabel(profile.state))}</p>
+      <p>${esc(profile.provider ?? profile.model_config?.provider ?? 'провайдер не указан')} · ${esc(profile.model ?? profile.model_config?.model ?? 'модель не указана')} · ${profile.available === true ? 'профиль доступен для отдельного разбора' : 'профиль недоступен'} · ${profile.model_ready === true ? 'модель готова при отдельном разрешении' : 'готовность модели не подтверждена'}</p>
+      ${(profile.reasons?.length || profile.block_reasons?.length) ? `<p><strong>Ограничения:</strong> ${esc([...(profile.reasons ?? []), ...(profile.block_reasons ?? [])].join('; '))}</p>` : ''}</article>`).join('') || '<p>Профили для разбора не предоставлены.</p>';
+    const requests = (Array.isArray(c.requests) ? c.requests : []).filter(row => !row.need_id || row.need_id === n.id);
+    const activeRequests = requests.filter(row => ['active','pending','captured','running'].includes(row.state ?? row.status));
+    const requestRows = requests.map(row => `<article class="lesson"><p><strong>Запрос ${esc(row.request_id ?? 'не указан')}</strong> · ${esc(followupStateLabel(row.state ?? row.status))}</p>
+      <p>Профиль ${esc(row.model_profile_id ?? row.profile_id ?? 'не указан')} · hash ${esc(row.expected_profile_hash ?? row.profile_hash ?? 'не указан')} · истекает ${esc(row.expires_at ?? 'неизвестно')}</p>
+      ${row.request_fingerprint && ['active','pending','captured','running'].includes(row.state ?? row.status)
+        ? button('Отозвать этот запрос', 'audience-followup-revoke', row.request_id, 'danger') : ''}</article>`).join('') || '<p>Истории запросов нет.</p>';
+    const eligible = correctlyBound && scopeValid && c.available === true && exchanges.length > 0
+      && usableProfiles.length > 0 && activeRequests.length === 0;
+    return `<section class="context-review"><h3>Новые сообщения по этой гипотезе</h3>
+      <p><strong>Гипотеза:</strong> ${esc(c.need_id ?? '—')} · версия ${esc(c.need_revision ?? '—')} · основание <code>${esc(c.need_basis_fingerprint ?? 'не указано')}</code></p>
+      <p><strong>Состояние источников:</strong> <code>${esc(c.context_fingerprint ?? 'не указано')}</code> · ${esc(JSON.stringify(c.observation_heads ?? {}))}</p>
+      <p><strong>Проверка:</strong> только выбранные новые сообщения из доступных источников.</p>
+      <p><strong>Прежняя непроверенная гипотеза — это не факт и не подтверждение:</strong> ${esc(historical.title ?? 'Без названия')} · ${esc(historical.hypothesis ?? 'Текст прежней гипотезы не сохранён')}${historical.hypothesis_truncated === true ? ' · текст сокращён' : ''}.</p>
+      <p>Версия ${esc(historical.revision ?? 'неизвестна')} · ${esc(followupStateLabel(historical.status ?? 'unknown'))} · результат ${historical.resolution === 'unknown' ? 'неизвестен' : esc(historical.resolution ?? 'неизвестен')}.</p>
+      <p class="muted tiny">Прежний текст источников здесь не показывается и не считается новым подтверждением. Неизвестно, разрешилась ли прежняя гипотеза.</p>
+      ${historicalMetadata ? `<p><strong>Сведения о прежних сообщениях (до 8):</strong></p><ul>${historicalMetadata}</ul>` : '<p class="muted tiny">Прежние тексты не используются как новое подтверждение.</p>'}
+      <p><strong>Новые сообщения (${exchanges.length} обменов):</strong></p>${freshRows}
+      ${c.reasons?.length ? `<p><strong>Причины недоступности или ограничения:</strong> ${esc(c.reasons.join('; '))}</p>` : ''}
+      <p><strong>Доступные профили:</strong></p>${profileRows}
+      <p class="muted tiny">Разрешено до двух запросов на генерацию к провайдеру или прокси, включая повторы. Возможна оплата; неизвестная стоимость не означает, что это бесплатно. Внутренние повторы провайдера не видны системе. Ответ не принимает гипотезу и не создаёт работу, контакт или отправку: для этого нужны отдельные решения.</p>
+      ${activeRequests.length ? '<p>Для этой гипотезы уже есть действующий запрос; новый пока недоступен.</p>' : ''}
+      <div class="actions">${eligible ? button('Разрешить один разбор новых сообщений', 'audience-followup-request', n.id, 'primary') : '<span>Разбор недоступен. Проверьте версию гипотезы, новые сообщения и выбранный профиль.</span>'}</div>
+      <h4>История запросов</h4>${requestRows}
+    </section>`;
+  }
+  function openFollowupRequest(n) {
+    const c = followupContext ?? {}, profiles = followupProfiles(c);
+    const frozen = { goal_id:goal?.id, need_id:n.id, need_revision:n.revision,
+      need_basis_fingerprint:n.basis_fingerprint, context_fingerprint:c.context_fingerprint,
+      observation_heads:structuredClone(c.observation_heads ?? {}) };
+    if (selectedNeed !== n.id || c.need_id !== n.id || c.need_revision !== n.revision
+      || c.need_basis_fingerprint !== n.basis_fingerprint || c.available !== true
+      || c.scope?.version !== 2 || c.scope?.purpose !== 'audience_current_events_v1'
+      || !frozen.context_fingerprint || !profiles.length) throw new Error('Нельзя разрешить разбор: обновите гипотезу, новые сообщения и профиль.');
+    const options = [['','Выберите профиль'], ...profiles.map(profile => [profile.profile_id,
+      `${profile.label ?? profile.profile_id} · ${profile.profile_id} · ${followupProfileHash(profile)}`])];
+    const defaultExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    modal('Разрешить один разбор новых сообщений', `<p>Гипотеза ${esc(n.id)} · версия ${esc(n.revision)} · основание <code>${esc(n.basis_fingerprint)}</code>.</p>
+      <p>Перед запуском ещё раз проверим новые сообщения и выбранный профиль.</p>
+      ${field('model_profile_id','Профиль модели','select','',options)}
+      ${field('expires_at','Истекает (ISO 8601 UTC, не более чем через 7 дней)','text',defaultExpiry)}
+      ${field('reason','Зачем нужен разбор','textarea')}
+      <p>Разрешение запускает один ограниченный разбор: до двух запросов на генерацию к провайдеру или прокси, включая повторы. Внутренние повторы провайдера системе неизвестны. Возможна оплата; неизвестная стоимость не означает, что вызов бесплатный. Глобальные переключатели модели останутся выключены.</p>
+      <p>Ответ станет новой гипотезой и не будет принят автоматически. Работа, контакт и отправка требуют отдельных решений.</p>`, async p => {
+      const profileId = String(p.model_profile_id ?? '').trim();
+      const expiry = String(p.expires_at ?? '').trim(), expiryAt = Date.parse(expiry);
+      const reason = String(p.reason ?? '').trim();
+      if (!profileId) throw new Error('Выберите профиль.');
+      if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(expiry)
+        || !Number.isFinite(expiryAt) || expiryAt <= Date.now() || expiryAt > Date.now() + 7 * 86400000)
+        throw new Error('Укажите будущую дату ISO 8601 UTC не более чем через семь дней.');
+      if (!reason || reason.length > 500) throw new Error('Укажите причину длиной от 1 до 500 знаков.');
+      if (selectedGoal !== frozen.goal_id || selectedNeed !== frozen.need_id || need?.id !== frozen.need_id
+        || need?.revision !== frozen.need_revision || need?.basis_fingerprint !== frozen.need_basis_fingerprint
+        || followupContext?.context_fingerprint !== frozen.context_fingerprint)
+        throw new Error('Гипотеза или показанные сообщения изменились. Проверьте их ещё раз перед подтверждением.');
+      const latest = await api(`/api/audience/needs/${encodeURIComponent(frozen.need_id)}/followup-context`);
+      const selected = profiles.find(profile => profile.profile_id === profileId);
+      const latestProfile = (latest.profile_options ?? []).find(profile => profile.profile_id === profileId);
+      if (!selected || !latestProfile || !followupProfiles(latest).some(profile => profile.profile_id === profileId)
+        || followupProfileHash(latestProfile) !== followupProfileHash(selected)
+        || latest.available !== true || latest.need_id !== frozen.need_id || latest.need_revision !== frozen.need_revision
+        || latest.need_basis_fingerprint !== frozen.need_basis_fingerprint
+        || latest.context_fingerprint !== frozen.context_fingerprint
+        || !sameValue(latest.observation_heads ?? {}, frozen.observation_heads)
+        || latest.scope?.version !== 2 || latest.scope?.purpose !== 'audience_current_events_v1')
+        throw new Error('Гипотеза, сообщения или профиль изменились. Проверьте их ещё раз перед новым разрешением.');
+      const result = await command('audience.followup_request', { need_id:frozen.need_id,
+        expected_revision:frozen.need_revision, expected_basis_fingerprint:frozen.need_basis_fingerprint,
+        expected_context_fingerprint:frozen.context_fingerprint, model_profile_id:profileId,
+        expected_profile_hash:followupProfileHash(selected), expires_at:expiry, reason });
+      selectedAssessment = result?.assessment_id ?? null;
+      followupContext = null; followupContextGuard = null; followupError = '';
+      await load();
+    });
+  }
+  function openFollowupRevoke(n, requestId) {
+    const row = (followupContext?.requests ?? []).find(request => request.request_id === requestId && (!request.need_id || request.need_id === n.id));
+    const state = row?.state ?? row?.status;
+    if (!row || !row.request_fingerprint || !['active','pending','captured','running'].includes(state))
+      throw new Error('Этот запрос нельзя отозвать в показанном состоянии.');
+    const frozen = { request_id:row.request_id, expected_request_fingerprint:row.request_fingerprint };
+    modal('Отозвать одноразовый запрос', `<p>Отзыв остановит ожидающую работу, если она ещё не завершилась. Уже использованный вызов и его стоимость останутся в истории.</p>${field('reason','Причина отзыва','textarea')}`, async p => {
+      const reason = String(p.reason ?? '').trim();
+      if (!reason || reason.length > 500) throw new Error('Укажите причину отзыва длиной от 1 до 500 знаков.');
+      if (selectedNeed !== n.id || need?.id !== n.id) throw new Error('Выбранная гипотеза изменилась. Обновите экран перед отзывом.');
+      const latest = await api(`/api/audience/needs/${encodeURIComponent(n.id)}/followup-context`);
+      const current = (latest.requests ?? []).find(request => request.request_id === frozen.request_id
+        && (!request.need_id || request.need_id === n.id));
+      if (!current || current.request_fingerprint !== frozen.expected_request_fingerprint
+        || !['active','pending','captured','running'].includes(current.state ?? current.status))
+        throw new Error('Запрос уже изменился или завершён. Обновите историю.');
+      await command('audience.followup_revoke', { ...frozen, reason });
+      followupContext = null; followupContextGuard = null;
+      await load();
+    });
+  }
   function needPanel(n) {
     const current = n.current === true;
     const accepted = n.status === 'accepted';
@@ -249,6 +406,7 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
       <p><strong>Точные цитаты-основания:</strong></p>${quotes.map(q => `<blockquote>${esc(q.quote)}<small> · событие ${esc(q.source_event_id)}</small></blockquote>`).join('') || '<p>Цитаты отсутствуют.</p>'}
       <p><strong>Поддерживающие события:</strong></p>${refs(ev)}<p><strong>Контрсвидетельства:</strong></p>${refs(counter)}<p><strong>Связанные обмены:</strong> ${esc(exchanges.join(', ') || 'нет ссылок')}</p>
       ${context}
+      ${followupContextPanel(n)}
       ${reassessmentContextPanel(n)}
       ${preview}
       <p><strong>Актуальность основания:</strong> ${current ? 'ссылки и основание актуальны по сохранённой проверке; существование нерешённой проблемы этим не подтверждается' : esc((n.reasons ?? []).join('; ') || 'не подтверждена')}</p>
@@ -423,11 +581,34 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
   }
   async function act(action, id) {
     if (action === 'audience-new') { createGoal(); return; }
-    if (action === 'audience-goal') { selectedGoal = id; selectedNeed = selectedAssessment = null; reassessmentContext = reassessmentContextGuard = null; reassessmentError = ''; await load(); return; }
-    if (action === 'audience-need') { selectedNeed = id; selectedAssessment = null; reassessmentContext = reassessmentContextGuard = null; reassessmentError = ''; await load(); return; }
-    if (action === 'audience-assessment') { selectedAssessment = id; selectedNeed = null; await load(); return; }
+    if (action === 'audience-goal') { selectedGoal = id; selectedNeed = selectedAssessment = null; reassessmentContext = reassessmentContextGuard = null; reassessmentError = ''; followupContext = followupContextGuard = null; followupError = ''; await load(); return; }
+    if (action === 'audience-need') { selectedNeed = id; selectedAssessment = null; reassessmentContext = reassessmentContextGuard = null; reassessmentError = ''; followupContext = followupContextGuard = null; followupError = ''; await load(); return; }
+    if (action === 'audience-assessment') { selectedAssessment = id; selectedNeed = null; followupContext = followupContextGuard = null; followupError = ''; await load(); return; }
     if (action === 'audience-next') { cursor = listing?.next_cursor ?? ''; await load(); return; }
     if (!goal) throw new Error('Сначала откройте цель.');
+    if (action === 'audience-followup-context') {
+      if (!need || need.id !== id || selectedNeed !== id) throw new Error('Сначала откройте гипотезу.');
+      followupLoading = true; followupError = '';
+      try {
+        const loaded = await api(`/api/audience/needs/${encodeURIComponent(need.id)}/followup-context`);
+        if (loaded?.need_id !== need.id || loaded.need_revision !== need.revision
+          || loaded.need_basis_fingerprint !== need.basis_fingerprint) throw new Error('Гипотеза изменилась; перечитайте её перед просмотром нового контекста.');
+        followupContext = loaded;
+        followupContextGuard = { goal_id:goal.id, need_id:need.id, need_revision:need.revision,
+          need_basis_fingerprint:need.basis_fingerprint, context_fingerprint:loaded.context_fingerprint,
+          observation_heads:structuredClone(loaded.observation_heads ?? {}) };
+      } catch (e) { followupContext = null; followupContextGuard = null; followupError = e.message; }
+      finally { followupLoading = false; }
+      return;
+    }
+    if (action === 'audience-followup-request') {
+      if (!need || need.id !== id || selectedNeed !== id) throw new Error('Сначала откройте гипотезу и новый текущий контекст.');
+      openFollowupRequest(need); return;
+    }
+    if (action === 'audience-followup-revoke') {
+      if (!need || !selectedNeed) throw new Error('Сначала откройте гипотезу с историей запросов.');
+      openFollowupRevoke(need, id); return;
+    }
     if (action === 'audience-attention-profile-create') {
       const current = goal, attention = current.attention;
       const allowed = Array.isArray(attention?.allowed_base_urls)

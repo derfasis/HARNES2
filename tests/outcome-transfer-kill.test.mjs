@@ -142,6 +142,7 @@ function managedObservation(h, cid, label, offsetHours) {
 function alterAs008(bundle, { withoutCoverage = false } = {}) {
   bundle.migrations = bundle.migrations.slice(0, 8);
   delete bundle.tables.model_profiles; delete bundle.tables.audience_attention_models;
+  delete bundle.tables.audience_followup_requests; delete bundle.tables.audience_followup_attempts;
   for (const table of [...WORK_TABLES, ...CONTROL_TABLES, ...SCOUT_TABLES, ...AUDIENCE_TABLES]) delete bundle.tables[table];
   for (const row of bundle.tables.messages) { delete row.occurred_at; delete row.time_basis; }
   bundle.tables.outcome_candidates = bundle.tables.outcome_candidates.map(row =>

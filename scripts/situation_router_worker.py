@@ -179,7 +179,15 @@ def main():
     sys.path.insert(0, str(ROOT / "runtime" / "hermes-agent"))
     sys.path.insert(0, str(ROOT / "adapters" / "hermes"))
 
-    with contextlib.redirect_stdout(sys.stderr):
+    cfg = envelope["model"]
+    focused = envelope.get("context", {}).get("packet", {}).get("followup") is not None
+    budget = None
+    if focused:
+        if type(cfg.get("maxApiCalls")) is not int or cfg["maxApiCalls"] != 2:
+            raise RuntimeError("Invalid frozen follow-up request budget")
+        from request_budget import RequestBudget
+        budget = RequestBudget(cfg["maxApiCalls"], model_requests_only=True)
+    with contextlib.redirect_stdout(sys.stderr), (budget.install() if budget else contextlib.nullcontext()):
         from run_agent import AIAgent
         from credentials import runtime_credentials
 
@@ -198,10 +206,24 @@ def main():
         )
         if agent.tools:
             raise RuntimeError("Hermes advertised tools for a no-tool Situation Router run")
+        if budget:
+            budget.on_exhausted = lambda: agent.interrupt("MODEL_REQUEST_BUDGET_EXHAUSTED", hard_cancel=True)
         response_models = collect_response_models()
-        result = agent.run_conversation(
-            user_message=json.dumps(envelope["context"], ensure_ascii=False), task_id=run_id,
-        )
+        try:
+            result = agent.run_conversation(
+                user_message=json.dumps(envelope["context"], ensure_ascii=False), task_id=run_id,
+            )
+        except Exception:
+            if not budget:
+                raise
+            # An interrupted/failed bounded run still owes its known request/usage
+            # accounting. Never forward an exception, request body or credential.
+            result = {"completed": False, "error": "MODEL_FAILED"}
+        if budget:
+            # Hermes reports outer iterations; only the HTTP hook counts requests.
+            result["api_calls"] = budget.calls
+            if budget.exhausted:
+                result.update(completed=False, error="MODEL_REQUEST_BUDGET_EXHAUSTED", failure_retryable=False)
         failure_cause = worker_failure_cause(result)
         completed = bool(result.get("completed", False)) and not result.get("error")
         raw_messages = result.get("messages", [])
