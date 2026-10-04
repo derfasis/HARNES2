@@ -771,11 +771,15 @@ export class AudienceLoop {
         if (assessment.producer === 'model') {
           const run = assessment.run_id && this.store.get('SELECT * FROM runs WHERE id=? AND partner_id=?', assessment.run_id, this.partnerId);
           const frozen = run && parse(run.context_json);
-          if (!packet.reassessment && !packet.reasoning_retry && (frozen?.attention_grant ||
+          if (!packet.reassessment && !packet.reasoning_retry && (frozen?.attention_grant || frozen?.model_profile
+            || frozen?.decision_contract_version !== undefined || frozen?.model_projection_version !== undefined
+            || original.decision_review !== undefined ||
             this.store.get('SELECT run_id FROM audience_attention_attempts WHERE run_id=?', assessment.run_id))) {
             // Admission authenticity is independent of source freshness and of the
             // review-only rationale. A corrupt audit summary cannot rewrite a valid
             // need basis; a broken grant/profile proof cannot become accepted Work.
+            // Missing admission records cannot downgrade a modern ordinary model
+            // proposal into legacy history, even if its frozen markers also disappear.
             check(run.status === 'completed', 'AUDIENCE_RECORD_INVALID');
             this.service.attention.assertHistory(run.id, assessment, frozen.attention_grant);
           }

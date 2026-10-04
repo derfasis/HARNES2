@@ -239,6 +239,36 @@ function corruptCompletedProfileProof(h, run) {
   h.store.run('UPDATE runs SET context_json=? WHERE id=?', JSON.stringify(context), run.id);
 }
 
+for (const removeMarkers of [false, true]) test(`missing attempt and frozen grant cannot downgrade a modern ordinary need to legacy${removeMarkers ? ' even after frozen markers are removed' : ''}`, async t => {
+  sentinel(t);
+  const h = audienceHarness(t); configure(h);
+  const { goal } = await observed(h, `missing-admission-${removeMarkers}`);
+  const profile = await createProfile(h);
+  await grantProfile(h, goal.goal_id, profile);
+  const result = await processAudienceAssessment(h.service, successfulRuntime().runtime);
+  assert.equal(result.disposition, 'proposal_created');
+  const needId = h.store.get('SELECT id FROM audience_needs WHERE assessment_id=?', result.assessment_id).id;
+  const before = h.service.audience.need(needId);
+  assert.equal(before.current, true, 'positive control: healthy completed ordinary proof admits its derived need');
+  assert.equal(h.service.audience.assessment(result.assessment_id).decision_review.state, 'current');
+  const run = h.store.get('SELECT * FROM runs WHERE id=(SELECT run_id FROM audience_assessments WHERE id=?)', result.assessment_id);
+  const frozen = JSON.parse(run.context_json);
+  assert.ok(frozen.attention_grant); assert.ok(frozen.model_profile);
+  delete frozen.attention_grant;
+  if (removeMarkers) {
+    delete frozen.model_profile; delete frozen.decision_contract_version; delete frozen.model_projection_version;
+  }
+  h.store.run('UPDATE runs SET context_json=? WHERE id=?', JSON.stringify(frozen), run.id);
+  h.store.run('DELETE FROM audience_attention_attempts WHERE run_id=?', run.id);
+  assert.equal(h.service.audience.assessment(result.assessment_id).decision_review.state, 'invalid');
+  assert.throws(() => h.service.audience.need(needId), { code:'AUDIENCE_RECORD_INVALID' });
+  await assert.rejects(h.command('audience.review', { need_id:needId, expected_revision:before.revision,
+    expected_basis_fingerprint:before.basis_fingerprint, decision:'accept', note:'Cannot upgrade a missing admission proof.' }),
+  { code:'AUDIENCE_RECORD_INVALID' });
+  assert.equal(h.store.get('SELECT status FROM audience_needs WHERE id=?', needId).status, 'proposed');
+  assert.equal(h.store.get('SELECT COUNT(*) n FROM audience_work_links').n, 0);
+});
+
 test('corrupt modern model proof blocks need display and owner acceptance while a valid revoked profile keeps its history', async t => {
   sentinel(t);
   const h = audienceHarness(t); configure(h);
