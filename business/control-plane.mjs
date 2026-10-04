@@ -46,6 +46,7 @@ export class ControlPlane {
     this.db.run("UPDATE control_tickets SET status='expired',reason='LEASE_EXPIRED',finished_at=? WHERE partner_id=? AND status IN ('reserved','running') AND expires_at<=?", now(), this.service.config.partnerId, now());
   }
   assertModelBudget({ runtime, maxRunsPerDay } = {}) {
+    this.service.deployment?.assertModelAllowed();
     // Read-only preflight and execution admission share the same ledger rules.
     // Queuing a domain request reserves neither resources nor effect authority.
     const cfg = this.service.config, c = cfg.controlPlane, at = now();
@@ -84,6 +85,7 @@ export class ControlPlane {
   }
   ticket(runId) { return typeof runId === 'string' ? this.db.get('SELECT * FROM control_tickets WHERE run_id=? AND partner_id=?', runId, this.service.config.partnerId) : null; }
   canApply(runId) {
+    if (this.service.deployment && (this.service.deployment.summary().phase !== 'active' || this.service.deployment.mode !== 'scoped_reasoning')) return false;
     if (!this.enabled) return !this.ticket(runId); // Turning CP off cannot turn its retired ticket into permission.
     const t = this.ticket(runId);
     return !this.stopped && this.processCurrent() && t?.owner_id === this.ownerId && ['running','completed'].includes(t.status)

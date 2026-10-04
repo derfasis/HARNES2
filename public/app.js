@@ -10,6 +10,7 @@ const empty = (title,text,action='') => `<div class="empty"><strong>${esc(title)
 const panel = (title,content,action='') => `<section class="panel"><div class="panel-head"><h2>${esc(title)}</h2>${action}</div>${content}</section>`;
 let token='',state=null,tab='overview',selected=null,detail=null;
 let reviewFilter='pending',reviewOffset=0,reviewDetail=null;
+let renderActivationCard = () => '';
 const pending = new Map();
 let researchView = null, actionsView = null, outcomesView = null, workspaceView = null, scoutView = null, audienceView = null;
 async function api(route,body) {
@@ -44,15 +45,23 @@ async function refresh() {
     await workspaceView.load();
   }
   if(tab==='scout'){
-    scoutView ??= (await import('./scout.js')).createScoutView({ api, command, esc, modal, refresh });
+    scoutView ??= (await import('./scout.js')).createScoutView({ api, command, esc, modal, refresh, openAudienceGoal });
     await scoutView.load();
   }
   if(tab==='audience'){
     audienceView ??= (await import('./audience.js')).createAudienceView({ api, command, esc, panel, button, empty, field, modal, refresh, notify });
     await audienceView.load();
   }
-  $('#model-status').textContent=state.runtime.ready?'Модель подключена':'Ожидает подключения ИИ';
-  $('#model-status').className=`pill${state.runtime.ready?' ready':''}`;render();
+  const scopedModelReady=state.release?.verified===true&&state.release?.dirty!==true&&state.activation?.mode==='scoped_reasoning'
+    &&state.activation?.phase==='active'&&Date.parse(state.activation?.expires_at)>Date.now()&&state.activation?.model_capability_available===true;
+  const modelStatus=state.activation?.mode==='read_only'?'Модельные вызовы закрыты'
+    :scopedModelReady?'Модельная возможность доступна':state.runtime.ready?'Ожидает отдельного разрешения':'Ожидает настройки';
+  $('#model-status').textContent=modelStatus;
+  $('#model-status').className=`pill${scopedModelReady?' ready':''}`;
+  const releaseLabel=$('#release-version');
+  if(releaseLabel){const sha=typeof state.release?.code_sha==='string'?state.release.code_sha.slice(0,12):'без SHA';
+    releaseLabel.textContent=`${state.release?.verified===true&&state.release?.dirty!==true?'Проверен':'Не проверен'} · ${sha}`;}
+  render();
 }
 function render(){
   const titles={overview:'Обзор',people:'Люди и диалоги',tasks:'Задачи',discovery:'Discovery',research:'Исследования',actions:'Действия',outcomes:'Результаты',scout:'Источники',workspace:'Partner Workspace',audience:'Audience Intelligence',experience:'Память и опыт',capabilities:'Способности',runs:'История работы',settings:'Подключения'};
@@ -62,12 +71,17 @@ function render(){
 }
 function overview(){
   const m=state.metrics,pendingTasks=state.tasks.filter(t=>['pending','proposed','running'].includes(t.status));
-  return `<section class="hero"><div class="orb">✧</div><span class="eyebrow">ОБЩАЯ ЦЕЛЬ</span><h2>Развиваем бизнес вместе.</h2><p>${esc(state.partner.mission)}</p><div class="actions">${button('Задать направление','mission','','primary')}${button('Добавить человека','person-new')}</div></section>
+  return `${renderActivationCard(state,esc)}<section class="hero"><div class="orb">✧</div><span class="eyebrow">ОБЩАЯ ЦЕЛЬ</span><h2>Развиваем бизнес вместе.</h2><p>${esc(state.partner.mission)}</p><div class="actions">${button('Задать направление','mission','','primary')}${button('Добавить человека','person-new')}</div></section>
   <div class="stats">${[['Люди в работе',state.conversations.length,'Все разговоры в одном месте'],['Ожидают решения',state.conversations.reduce((n,c)=>n+c.pending_drafts,0),'Черновики на рассмотрении'],['Задачи партнёра',pendingTasks.length,'Сохранены между запусками'],['Состоявшиеся встречи',m.call_attended??0,'Только подтверждённые события']].map(([l,n,s])=>`<div class="stat"><span class="label">${l}</span><strong>${n}</strong><small>${s}</small></div>`).join('')}</div>
   <div class="grid-two">${panel('Ближайшие действия',pendingTasks.length?pendingTasks.slice(0,5).map(t=>`<div class="feature"><div>${esc(t.title)}<small>${date(t.due_at)} · ${esc(label(t.kind))}</small></div>${badge(t.status)}</div>`).join(''):empty('Есть место для первого шага','Добавьте человека или задачу. Партнёр сохранит работу до подключения модели.',button('Создать задачу','task-new')),button('Все задачи','go-tasks'))}
   ${panel('Рабочие способности',state.capabilities.slice(0,4).map(c=>`<div class="feature"><div>${esc(c.name)}<small>${esc(c.id)}</small></div>${badge(c.status)}</div>`).join(''),button('Открыть','go-capabilities'))}</div>
   ${!state.runtime.ready?`<div class="section-note">Архитектура установлена. Можно вести контакты, записывать сообщения, планировать задачи и сохранять опыт. Для самостоятельной работы партнёра осталось подключить модель.</div>`:''}
   ${panel('Последние события',state.events.length?state.events.slice(0,6).map(e=>`<div class="activity"><span class="marker"></span><div>${esc(e.kind)}<small>${date(e.created_at)} · ${esc(label(e.actor))}</small></div></div>`).join(''):empty('История начинается здесь','Здесь появятся действия партнёра и ваши решения.'))}`;
+}
+async function openAudienceGoal(handoff){
+  tab='audience'; await refresh();
+  if(!audienceView || typeof audienceView.openGoalForSource!=='function') throw new Error('Форма Audience недоступна. Обновите страницу и проверьте снова.');
+  await audienceView.openGoalForSource(handoff); render();
 }
 // Stage 3E: a read-only Discovery viewer. It renders the frozen 3B/3C projections and issues
 // nothing but the two GET endpoints. There is deliberately no command path here.
@@ -422,5 +436,5 @@ document.addEventListener('click',async event=>{const nav=event.target.closest('
 document.addEventListener('change',async event=>{if(event.target.id==='review-filter'){reviewFilter=event.target.value;reviewOffset=0;try{await refresh();}catch(error){notify(error.message,true);}}else if(event.target.id==='outcome-status'){try{await outcomesView.act('outcome-filter',event.target.value);render();}catch(error){notify(error.message,true);}}});
 $('#close-modal').onclick=()=>$('#modal').close();
 $('#export-button').onclick=async()=>{try{const data=await api('/api/export');const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const link=document.createElement('a');link.href=url;link.download=`digital-ai-partner-${new Date().toISOString().slice(0,10)}.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);notify('Экспорт подготовлен. В нём есть персональные данные; храните его как рабочую базу.');}catch(error){notify(error.message,true);}};
-try{token=(await api('/api/session')).token;await refresh();}catch(error){notify(error.message,true);}
+try{({renderActivationCard}=await import('./readiness.js'));token=(await api('/api/session')).token;await refresh();}catch(error){notify(error.message,true);}
 setInterval(()=>{if(state&&!$('#modal').open&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName))refresh().catch(error=>notify(error.message,true));},15000);

@@ -565,8 +565,44 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
       ${receiptHtml}${retryHtml}
       <div class="actions">${focused && ['captured','running'].includes(a.status) ? button('Отменить пересмотр', 'audience-cancel-reassessment', a.id, 'danger') : ''}${ordinaryRetry && ['captured','running'].includes(a.status) ? button('Отменить обычную попытку', 'audience-cancel-assessment', a.id, 'danger') : ''}${!focused && !ordinaryRetry && a.status === 'captured' && a.current === true ? button('Внести гипотезу вручную', 'audience-propose', a.id, 'primary') : ''}</div>`);
   }
-  function createGoal() {
+  async function handoffLeaseCurrent(handoff) {
+    const current = await api(`/api/scout/campaigns/${encodeURIComponent(handoff.campaign_id)}`);
+    const candidate = (current?.candidates ?? []).find(row => row.id === handoff.candidate_id);
+    const grant = candidate?.monitor_grant;
+    return current?.id === handoff.campaign_id && current.status === 'active'
+      && current.revision === handoff.campaign_revision && candidate?.joined === true
+      && `telegram:channel:${candidate.channel_id}` === handoff.source_ref
+      && grant?.id === handoff.grant_id && grant.current === true && grant.status === 'active'
+      && grant.campaign_id === current.id && grant.candidate_id === candidate.id
+      && grant.campaign_revision === current.revision && grant.expires_at === handoff.expires_at
+      && typeof grant.expires_at === 'string' && Date.parse(grant.expires_at) > Date.now();
+  }
+  function createGoal(handoff = null) {
     const refs = listing.source_refs ?? [];
+    if (handoff) {
+      const sourceRef = handoff.source_ref;
+      if (listing.enabled !== true || typeof sourceRef !== 'string' || !refs.includes(sourceRef)
+        || typeof handoff.expires_at !== 'string' || Date.parse(handoff.expires_at) <= Date.now()) {
+        throw new Error('Источник или его разрешение больше не доступны. Обновите раздел «Источники».');
+      }
+      const content = field('title', 'Название цели') + field('objective', 'Что понять или отслеживать', 'textarea')
+        + `<p>Источник: <code>${esc(sourceRef)}</code>. Разрешение мониторинга действует до ${esc(handoff.expires_at)}.</p>`
+        + '<p>Сохранение создаст только цель для этого источника. Сейчас не создаются модельное разрешение, запрос к модели или разрешение на контакт.</p>';
+      modal('Новая цель аудитории по выбранному источнику', content, async p => {
+        const title = String(p.title ?? '').trim(), objective = String(p.objective ?? '').trim();
+        if (!title || !objective) throw new Error('Заполните название цели и что нужно понять.');
+        if (Date.parse(handoff.expires_at) <= Date.now()) throw new Error('Разрешение источника истекло. Обновите источники перед сохранением.');
+        const latest = await api('/api/audience?limit=50');
+        if (latest?.enabled !== true || !Array.isArray(latest.source_refs) || !latest.source_refs.includes(sourceRef))
+          throw new Error('Разрешение источника больше не действует. Цель не создана.');
+        if (!(listing.source_refs ?? []).includes(sourceRef)) throw new Error('Источник больше не входит в текущий список. Цель не создана.');
+        if (!await handoffLeaseCurrent(handoff)) throw new Error('Именно это разрешение источника больше не действует. Цель не создана.');
+        const result = await command('audience.open', { title, objective, source_ids:[sourceRef] });
+        selectedGoal = result.goal_id ?? result.id; selectedNeed = selectedAssessment = null;
+        followupContext = followupContextGuard = null; followupError = '';
+      });
+      return;
+    }
     const choices = refs.map((ref, i) => `<label class="research-choice"><input type="checkbox" name="source_${i}" value="${esc(ref)}"> ${esc(ref)}</label>`).join('');
     const content = field('title', 'Название цели') + field('objective', 'Что понять или отслеживать', 'textarea')
       + '<p>Выберите только источники, уже разрешённые для чтения. Создание цели само не запускает чтение.</p>'
@@ -850,5 +886,20 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
     }
     throw new Error(`Неизвестное действие Audience Intelligence: ${action}`);
   }
-  return { load, render, act };
+  async function openGoalForSource(handoff) {
+    if (!listing) await load();
+    if (!handoff || !/^telegram:channel:[1-9][0-9]{0,18}$/.test(String(handoff.source_ref ?? ''))
+      || typeof handoff.grant_id !== 'string' || !handoff.grant_id.trim()
+      || typeof handoff.campaign_id !== 'string' || !handoff.campaign_id.trim()
+      || typeof handoff.candidate_id !== 'string' || !handoff.candidate_id.trim())
+      throw new Error('Передан некорректный источник.');
+    if (listing?.enabled !== true || !(listing.source_refs ?? []).includes(handoff.source_ref)
+      || typeof handoff.expires_at !== 'string' || Date.parse(handoff.expires_at) <= Date.now())
+      throw new Error('Источник или разрешение мониторинга истекло/отозвано. Цель не создана.');
+    if (!await handoffLeaseCurrent(handoff)) throw new Error('Именно это разрешение источника истекло или отозвано. Цель не создана.');
+    selectedGoal = selectedNeed = selectedAssessment = null;
+    followupContext = followupContextGuard = null; followupError = '';
+    createGoal({ ...handoff });
+  }
+  return { load, render, act, openGoalForSource };
 }

@@ -1,4 +1,4 @@
-export function createScoutView({ api, command, esc, modal, refresh }) {
+export function createScoutView({ api, command, esc, modal, refresh, openAudienceGoal = null }) {
   let data = null;
   let selectedId = null;
   let detail = null;
@@ -61,6 +61,9 @@ export function createScoutView({ api, command, esc, modal, refresh }) {
     const candidateMarkup=candidates.length?candidates.map(x=>{
       const s=x.sample, a=x.assessment;
       const monitoring=x.monitor_grant;
+      const liveMonitor=monitoring?.current===true&&monitoring.status==='active'
+        &&typeof monitoring.expires_at==='string'&&Date.parse(monitoring.expires_at)>Date.now()
+        &&c.status==='active'&&x.joined===true&&/^[1-9][0-9]{0,18}$/.test(String(x.channel_id??''));
       const checkpoint=x.checkpoint??monitoring?.checkpoint;
       const checkpointMarkup=checkpoint&&checkpoint.pts!==undefined?`<small class="muted scout-checkpoint">Точка текущего разрешения чтения: PTS ${esc(checkpoint.pts)}</small>`:'';
       return `<article class="scout-card"><div class="panel-head"><div><h3>${esc(x.title||x.username||x.channel_id||'Источник')}</h3><small>${esc(x.username?`@${x.username}`:'')}${x.channel_id?` · ${esc(x.channel_id)}`:''} · ${esc(x.kind||'')}</small>${checkpointMarkup}</div>${badge(a?.status||'candidate')}</div>
@@ -68,7 +71,7 @@ export function createScoutView({ api, command, esc, modal, refresh }) {
         <p class="muted tiny">Точные повторы не оценивают спам. ID авторов не подтверждают, что это разные люди.</p>
         <div class="scout-audit"><strong>Текущий мониторинг</strong>${safeGrant(monitoring)}</div>
         ${a?`<div class="scout-audit"><strong>Оценка · ${esc(a.id||'')}</strong><p>${esc(a.reason||'')}</p><p>Возможности: ${esc((a.opportunities??[]).map(o=>`${o.description} [${(o.evidence_refs??[]).join(', ')}]`).join('; ')||'не указаны')}</p><p>Неопределённость: ${esc((a.uncertainty??[]).join('; ')||'не указана')}</p>${a.status==='pending'||a.status==='proposed'?button('Одобрить оценку','scout-review-approve',a.id)+button('Отклонить оценку','scout-review-reject',a.id):''}</div>`:''}
-        <div class="actions">${button('Проверить источник','scout-audit',x.id)}${s?button('Запросить оценку','scout-assess',x.id,'secondary',data?.model_enabled!==true):''}${s&&data?.model_enabled!==true?'<small class="muted">Оценка отключена в конфигурации; кнопка не ставит запрос в очередь.</small>':''}${s?button('Выдать разрешение мониторинга','scout-admit',x.id):''}</div></article>`;
+        <div class="actions">${button('Проверить источник','scout-audit',x.id)}${s?button('Запросить оценку','scout-assess',x.id,'secondary',data?.model_enabled!==true):''}${s&&data?.model_enabled!==true?'<small class="muted">Оценка отключена в конфигурации; кнопка не ставит запрос в очередь.</small>':''}${s?button('Выдать разрешение мониторинга','scout-admit',x.id):''}${liveMonitor&&openAudienceGoal?button('Добавить цель Audience','scout-audience-handoff',x.id,'secondary'):''}</div></article>`;
     }).join(''):empty('Кандидатов пока нет','Добавьте известный источник вручную или запустите поиск после отдельной выдачи разрешения.');
     const jobsMarkup=jobs.length?jobs.map(j=>`<div class="feature"><div>${esc(j.kind)}<small>${esc(j.reason||'')} · Следующий запуск: ${esc(date(j.next_at))}</small></div>${badge(j.status)}</div>`).join(''):empty('Очередь пуста','Новые задания появятся после явного запуска поиска или проверки.');
     const unknown=(c.unknown??[]).length?`<ul>${c.unknown.map(v=>`<li>${esc(v)}</li>`).join('')}</ul>`:empty('Неизвестных состояний нет','');
@@ -88,6 +91,23 @@ export function createScoutView({ api, command, esc, modal, refresh }) {
     if(action==='scout-workspace') { document.querySelector('[data-tab="workspace"]')?.click(); return; }
     if(!c) throw new Error('Сначала выберите кампанию.');
     const base={campaign_id:c.id,revision:c.revision};
+    if(action==='scout-audience-handoff') {
+      if(typeof openAudienceGoal!=='function')throw new Error('Переход к Audience недоступен.');
+      // Re-read the campaign and grant at the moment of handoff. A stale Scout
+      // card must not open a form as if its source lease were still active.
+      const current=await api(`/api/scout/campaigns/${encodeURIComponent(c.id)}`);
+      if(current?.id!==c.id||current.status!=='active')throw new Error('Мониторинг источника больше не доступен.');
+      const candidate=(current.candidates??[]).find(row=>row.id===id);
+      const grant=candidate?.monitor_grant;
+      if(candidate?.joined!==true||!/^[1-9][0-9]{0,18}$/.test(String(candidate?.channel_id??''))
+        ||grant?.current!==true||grant.status!=='active'||grant.campaign_id!==current.id
+        ||grant.candidate_id!==candidate.id||grant.campaign_revision!==current.revision
+        ||typeof grant.expires_at!=='string'||Date.parse(grant.expires_at)<=Date.now())
+        throw new Error('Разрешение мониторинга истекло или отозвано. Обновите источник перед передачей в Audience.');
+      await openAudienceGoal({source_ref:`telegram:channel:${candidate.channel_id}`,grant_id:grant.id,
+        expires_at:grant.expires_at,campaign_id:current.id,campaign_revision:current.revision,candidate_id:candidate.id});
+      return;
+    }
     if(action==='scout-revise') {
       const cfg=c.config??{};
       modal('Изменить тему кампании',`<p class="review-error">Изменение создаёт новую ревизию. Старые разрешения и результаты могут стать устаревшими.</p>${input('topic','Тема',cfg.topic??c.topic)}${area('audience','Целевая аудитория',cfg.audience)}${input('language','Язык',cfg.language)}${input('geography','География',cfg.geography)}${area('queries','Поисковые запросы, по одному в строке',(cfg.queries??[]).join('\n'))}`,p=>command('scout.revise',{...base,topic:p.topic,audience:p.audience,language:p.language,geography:p.geography,queries:p.queries.split('\n').map(x=>x.trim()).filter(Boolean)})); return;

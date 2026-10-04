@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Verified local partner deployment profile",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "id", "label", "code_root", "code_sha", "data_directory", "config_file", "config_sha256", "credentials_file", "partner_id", "expires_at", "mode", "state"],
+  "properties": {
+    "version": { "const": 1 },
+    "id": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+    "label": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "code_root": { "type": "string", "minLength": 1, "maxLength": 1000 },
+    "code_sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "data_directory": { "type": "string", "minLength": 1, "maxLength": 1000 },
+    "config_file": { "type": "string", "minLength": 1, "maxLength": 1000 },
+    "config_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "credentials_file": { "type": ["string", "null"], "maxLength": 1000 },
+    "partner_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$" },
+    "expires_at": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d{3})?Z$" },
+    "mode": { "enum": ["read_only", "scoped_reasoning"] },
+    "state": { "enum": ["existing", "new"] }
+  }
+}

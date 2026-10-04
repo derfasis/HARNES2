@@ -1,5 +1,10 @@
+param([string]$Profile)
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
+if ($Profile) {
+    & (Join-Path $PSScriptRoot 'deployment.ps1') -Operation Stop -Profile $Profile -NoBrowser
+    exit $LASTEXITCODE
+}
 $serviceFile = Join-Path $projectRoot 'data/runtime/service.json'
 if (-not (Test-Path -LiteralPath $serviceFile)) { Write-Host 'No recorded service process.'; exit 0 }
 $serviceState = Get-Content -Raw -LiteralPath $serviceFile | ConvertFrom-Json

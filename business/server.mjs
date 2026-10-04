@@ -1,7 +1,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import Ajv from 'ajv';
 import { loadConfig, checkAutomaticPrerequisite, validateAllowedSourceRefs, validateTelegramSources, validateBrowserSources, validateOutcomes, ROOT, DATA, readJson, runtimeReadiness } from './config.mjs';
@@ -19,9 +19,11 @@ import { listCandidates } from './executive-donors.mjs';
 import { AppError, ensure, requiredText } from './errors.mjs';
 import { validateControl } from './control-plane.mjs';
 import { validateScout } from './scout-policy.mjs';
+import { RuntimeActivation, workspaceIdentity, assertSafeConfig, assertActivationAdmission } from './deployment.mjs';
 
 const publicFiles = new Map([['/', ['index.html','text/html; charset=utf-8']], ['/app.js',['app.js','text/javascript; charset=utf-8']], ['/research.js',['research.js','text/javascript; charset=utf-8']], ['/actions.js',['actions.js','text/javascript; charset=utf-8']], ['/outcomes.js',['outcomes.js','text/javascript; charset=utf-8']], ['/workspace.js',['workspace.js','text/javascript; charset=utf-8']], ['/scout.js',['scout.js','text/javascript; charset=utf-8']], ['/audience.js',['audience.js','text/javascript; charset=utf-8']], ['/styles.css',['styles.css','text/css; charset=utf-8']], ['/favicon.svg',['favicon.svg','image/svg+xml']]]);
 const validateCommand = new Ajv().compile(readJson(path.join(ROOT,'contracts/command.schema.json')));
+publicFiles.set('/readiness.js',['readiness.js','text/javascript; charset=utf-8']);
 const tokenEquals = (a,b) => typeof a === 'string' && Buffer.byteLength(a) === Buffer.byteLength(b) && timingSafeEqual(Buffer.from(a),Buffer.from(b));
 async function readBody(req) {
   ensure(req.headers['content-type']?.split(';')[0] === 'application/json', 'Ожидается application/json', 415);
@@ -86,7 +88,25 @@ const discoveryQueryOptions = url => {
   }
   return options;
 };
-export async function start({ config = loadConfig(), directory = DATA } = {}) {
+export async function start({ config = loadConfig(), directory = DATA, deployment = null } = {}) {
+  const codeIdentity = workspaceIdentity();
+  if (deployment) {
+    ensure(deployment.activation instanceof RuntimeActivation, 'DEPLOYMENT_PROFILE_INVALID', 400, 'DEPLOYMENT_PROFILE_INVALID');
+    assertSafeConfig(config, deployment.activation.mode);
+    assertActivationAdmission(deployment.activation, directory);
+    if (deployment.identity) {
+      ensure(deployment.activation.matchesPreparedIdentity(deployment.identity,directory)
+        && deployment.config === config && Object.isFrozen(config) && config.partnerId === deployment.identity.partner_id
+        && deployment.identity.verified === true && !codeIdentity.dirty && deployment.identity.code_sha === codeIdentity.code_sha
+        && path.resolve(deployment.identity.code_root) === path.resolve(codeIdentity.code_root),
+      'DEPLOYMENT_CODE_IDENTITY_MISMATCH', 409, 'DEPLOYMENT_CODE_IDENTITY_MISMATCH');
+    }
+  }
+  const release = { ...codeIdentity, verified: deployment?.identity?.verified === true,
+    release_status: deployment?.identity ? 'verified_profile' : codeIdentity.release_status, mode: deployment?.activation.mode ?? 'unmanaged',
+    deployment_id: deployment?.activation.id ?? null, partner_id:config.partnerId,
+    config_sha256:deployment?.identity?.config_sha256 ?? null,profile_fingerprint:deployment?.activation.profileFingerprint ?? null,
+    instance_id: randomUUID(), pid: process.pid, port: null };
   ensure(config.server.host === '127.0.0.1', 'Only loopback dashboard binding is supported', 409);
   validateControl(config);
   validateScout(config);
@@ -105,6 +125,7 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
   // misconfigured outcome window reaches a running service having never been validated.
   validateOutcomes(config);
   const store = new Store(directory), service = new BusinessService(store,config);
+  service.deployment = deployment?.activation ?? null;
   ensure(service.partner(), 'partnerId не совпадает с профилем', 500);
   const operatorToken = randomBytes(32).toString('hex'), mcpToken = randomBytes(32).toString('hex'), runTokens = new Map();
   const telegram = config.telegram.transport === 'mtproto' ? new MtprotoTelegramChannel(service) : new TelegramChannel(service);
@@ -133,16 +154,16 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
     res.setHeader('Referrer-Policy','no-referrer');
     res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
     try {
-      ensure(!shuttingDown, 'Приложение завершает работу', 503);
       const hosts = [`127.0.0.1:${servicePort}`,`localhost:${servicePort}`];
       ensure(hosts.includes(req.headers.host), 'Недопустимый Host', 403);
       ensure(!req.headers.origin || hosts.map(h => `http://${h}`).includes(req.headers.origin), 'Недопустимый Origin', 403);
       ensure(!['cross-site'].includes(req.headers['sec-fetch-site']), 'Запрос с другого сайта запрещён', 403);
       const url = new URL(req.url, `http://${req.headers.host}`);
+      ensure(!shuttingDown || ['/health','/api/session','/api/runtime/stop'].includes(url.pathname), 'Приложение завершает работу', 503);
       if (req.method === 'GET' && publicFiles.has(url.pathname)) {
         const [file,mime] = publicFiles.get(url.pathname); res.writeHead(200,{'Content-Type':mime}); return res.end(fs.readFileSync(path.join(ROOT,'public',file)));
       }
-      if (req.method === 'GET' && url.pathname === '/health') return send(200,{status:'running',version:'0.1.0',runtime_ready:runtimeReadiness(config).ready});
+      if (req.method === 'GET' && url.pathname === '/health') return send(200,{status:shuttingDown?'stopping':'running',version:'0.1.0',runtime_ready:!shuttingDown && runtimeReadiness(config).ready,release,activation:service.deployment?.summary() ?? null});
       if (req.method === 'GET' && url.pathname === '/api/session') return send(200,{token:operatorToken});
       if (url.pathname.startsWith('/internal/')) {
         const bearer = req.headers.authorization?.replace(/^Bearer /,'');
@@ -246,8 +267,11 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
         runtime:runtimeReadiness(config), scheduler:scheduler.status(), telegram:telegram.readiness(),
         capabilities:readJson(path.join(ROOT,'partner/capabilities.json')),
         knowledge:fs.readdirSync(path.join(ROOT,'partner/knowledge')).filter(f=>f.endsWith('.json')).map(f=>readJson(path.join(ROOT,'partner/knowledge',f))),
-        configuration:{opportunity_automatic:config.opportunity.automatic===true,runtime_enabled:config.runtime.enabled,provider:config.runtime.provider,model:config.runtime.model,base_url:config.runtime.baseUrl, max_runs_per_day:config.runtime.maxRunsPerDay,daily_budget_usd:config.runtime.dailyBudgetUsd,timezone:config.scheduler.timezone},
-        release:{version:'0.1.0-engagement-v1',tests:'see_docs_PERSISTENT_ENGAGEMENT_VALIDATION',model_validation:'controlled_disposable_smoke_pass'} });
+        configuration:{opportunity_automatic:config.opportunity.automatic===true,runtime_enabled:config.runtime.enabled,provider:config.runtime.provider,model:config.runtime.model,base_url:config.runtime.baseUrl, max_runs_per_day:config.runtime.maxRunsPerDay,daily_budget_usd:config.runtime.dailyBudgetUsd,timezone:config.scheduler.timezone,
+          audience_enabled:config.audience?.enabled===true,scout_enabled:config.scout?.enabled===true,control_plane_enabled:config.controlPlane?.enabled===true,
+          model_endpoint_allowlisted:(config.modelProfiles?.allowedBaseUrls?.length ?? 0)>0,
+          public_source_configured:(config.opportunity.telegramSources.length + config.opportunity.browserSources.length + service.scout.monitorAuthorityPolicies().length)>0},
+        release,activation:service.deployment?.summary() ?? null });
       // Outside the discovery block on purpose: a route nested inside another route's prefix
       // is unreachable, and these two paths are not discovery routes at all.
       if (url.pathname === '/api/outcomes') {
@@ -294,6 +318,7 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
         const body = await readBody(req); return send(200,await telegram.sendApproved(requiredText(body.draft_id,'draft_id',100)));
       }
       if (req.method === 'POST' && url.pathname === '/api/scheduler/wake') {
+        service.deployment?.assertModelAllowed();
         const ready = runtimeReadiness(config);
         const scopedAudience = config.audience?.enabled === true && service.attention.modelEnabled();
         ensure(ready.ready || scopedAudience,`Модель не подключена: ${ready.missing.join(', ')}`,409);
@@ -302,6 +327,14 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
         // schedules, and losing that race is not harmless, because the loser can record a
         // reconciliation failure the winner has since resolved.
         void scheduler.tick().catch(()=>{}); return send(202,{accepted:true});
+      }
+      if (req.method === 'POST' && url.pathname === '/api/runtime/stop') {
+        const body = await readBody(req);
+        ensure(body && Object.keys(body).length===1 && body.instance_id===release.instance_id,
+          'DEPLOYMENT_INSTANCE_MISMATCH',409,'DEPLOYMENT_INSTANCE_MISMATCH');
+        send(202,{accepted:true,instance_id:release.instance_id});
+        setImmediate(()=>{void Promise.resolve().then(()=>close('operator_stop')).catch(()=>console.error('[business] graceful_stop_failed'));});
+        return;
       }
       return send(404,{error:'not found'});
     } catch (error) {
@@ -315,9 +348,24 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
   catch (error) {store.close();throw error;}
   const listeningAddress = server.address();
   if (listeningAddress && typeof listeningAddress === 'object') servicePort = listeningAddress.port;
+  release.port = servicePort;
   // Recovery occurs only after acquiring this server port; a duplicate launch cannot interrupt the live instance.
   try { service.control.acquireProcess(); }
   catch (error) { await new Promise(resolve => server.close(resolve)); store.close(); throw error; }
+  const receiptFile = path.join(directory,'runtime/service.json');
+  const activationFile = service.deployment ? path.join(directory,'runtime',`activation-${service.deployment.id}.json`) : null;
+  const startedAt = new Date().toISOString();
+  const writePrivate = (file,value) => {
+    const temporary = `${file}.${release.instance_id}.tmp`;
+    fs.writeFileSync(temporary,JSON.stringify(value),{mode:0o600,flush:true});
+    fs.renameSync(temporary,file);
+  };
+  const persistIdentity = status => {
+    const activation = service.deployment?.summary() ?? null;
+    if (activationFile) writePrivate(activationFile,Object.fromEntries(['version','id','code_sha','expires_at','phase','stop_reason','instance_id','pid','profile_fingerprint'].map(key=>[key,activation[key]])));
+    writePrivate(receiptFile,{...release,started_at:startedAt,status,activation});
+  };
+  try {
   store.recover();
   invalidateRevokedDiscoverySources(service);
   try { service.continuity.reconcile(); }
@@ -327,13 +375,25 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
   try { service.actions.reconcile(); }
   catch { scheduler.actionState = { disposition: 'reconciliation_failed' }; }
   fs.mkdirSync(path.join(directory,'runtime'),{recursive:true});
-  fs.writeFileSync(path.join(directory,'runtime/mcp-connection.json'),JSON.stringify({url:`http://127.0.0.1:${servicePort}`,token:mcpToken}),{mode:0o600});
-  fs.writeFileSync(path.join(directory,'runtime/service.json'),JSON.stringify({pid:process.pid,port:servicePort,started_at:new Date().toISOString()}));
-  scheduler.start(); telegram.start();
-  console.log(`Digital AI Partner: http://127.0.0.1:${servicePort}`);
-  console.log(`Hermes ${runtimeReadiness(config).ready ? 'enabled' : 'waiting for model configuration'}; Telegram ${config.telegram.enabled ? 'enabled' : 'disabled'}.`);
-  const close = async () => {
-    if (shuttingDown) return; shuttingDown=true; scheduler.stop();
+  writePrivate(path.join(directory,'runtime/mcp-connection.json'),{url:`http://127.0.0.1:${servicePort}`,token:mcpToken});
+  service.deployment?.bindInstance({instance_id:release.instance_id,pid:process.pid,code_sha:release.code_sha});
+  persistIdentity('running');
+  } catch (error) {
+    // A failed migration/recovery or private receipt must not leave a listening owner behind.
+    shuttingDown=true; service.deployment?.stop('STARTUP_FAILED'); service.control.close();
+    try { persistIdentity('startup_failed'); } catch { /* Keep the original failure; no admission/network is started. */ }
+    server.closeIdleConnections(); await new Promise(resolve=>server.close(resolve));
+    service.control.releaseProcess(); store.close(); throw error;
+  }
+  let closing = null, activationTimer = null;
+  const close = (reason = 'operator_stop') => {
+    if (closing) return closing;
+    shuttingDown=true; scheduler.stop();
+    if (activationTimer) clearTimeout(activationTimer);
+    service.deployment?.stop(reason);
+    service.control.close();
+    persistIdentity('stopping');
+    closing = (async () => {
     server.closeIdleConnections(); const closed = new Promise(resolve=>server.close(resolve));
     // The in-flight tick keeps running after stop(), and it is that tick that polls the readers.
     // Draining it before Telegram goes away is what keeps a reader from being released underneath
@@ -345,11 +405,27 @@ export async function start({ config = loadConfig(), directory = DATA } = {}) {
     // committing to it, which is how a run ends as `interrupted` with the receipt half-written.
     // Both loops are drained here, and the store is closed after both are quiet.
     while (scheduler.busy || scheduler.reasonBusy || scheduler.privateBusy || scheduler.workBusy || scheduler.scoutRuntime.busy || scheduler.scoutReasonBusy || scheduler.actionRuntime.busy || telegram.polling || telegram.sourceReconcile) await new Promise(resolve=>setTimeout(resolve,50));
-    await closed; await telegram.stop(); service.control.releaseProcess(); store.close();
+    await closed; await telegram.stop();
+    try { persistIdentity('stopped'); }
+    finally { service.control.releaseProcess(); store.close(); }
+    })();
+    return closing;
   };
-  for (const signal of ['SIGINT','SIGTERM']) process.once(signal,()=>close().then(()=>process.exit(0)));
+  const signalHandlers = new Map();
+  for (const signal of ['SIGINT','SIGTERM']) {
+    const handler = ()=>{void Promise.resolve().then(()=>close(signal)).then(()=>process.exit(0)).catch(()=>console.error('[business] signal_drain_failed'));};
+    signalHandlers.set(signal,handler); process.once(signal,handler);
+  }
+  server.once('close',()=>{for (const [signal,handler] of signalHandlers) process.off(signal,handler);});
+  if (service.deployment) {
+    activationTimer = setTimeout(()=>{void Promise.resolve().then(()=>close('ACTIVATION_EXPIRED')).catch(()=>console.error('[business] activation_drain_failed'));},Math.max(0,Date.parse(service.deployment.expiresAt)-Date.now()));
+    activationTimer.unref();
+  }
+  scheduler.start(); telegram.start();
+  console.log(`Digital AI Partner: http://127.0.0.1:${servicePort}`);
+  console.log(`Hermes ${runtimeReadiness(config).ready ? 'enabled' : 'waiting for model configuration'}; Telegram ${config.telegram.enabled ? 'enabled' : 'disabled'}.`);
   // The scheduler and the channel are returned so the wiring itself can be tested: a test that
   // copies this composition is a copy, and a copy stays green when the original is rewired.
-  return {server,store,service,scheduler,telegram,close};
+  return {server,store,service,scheduler,telegram,close,activation:service.deployment,release};
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) start().catch(error=>{console.error(`Startup failed: ${error.message}`);process.exitCode=1;});

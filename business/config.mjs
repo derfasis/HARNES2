@@ -126,9 +126,10 @@ export function validateOutcomes(config) {
   }
   return config;
 }
-export function loadConfig() {
-  const file = path.join(ROOT, 'config/local.json');
-  const cfg = merge(readJson(path.join(ROOT, 'config/default.json')), fs.existsSync(file) ? readJson(file) : {});
+export function loadConfig({ file = path.join(ROOT, 'config/local.json'), bytes } = {}) {
+  if (typeof file !== 'string' || !path.isAbsolute(file)) throw new Error('Configuration file must be an absolute path');
+  const local = bytes === undefined ? (fs.existsSync(file) ? readJson(file) : {}) : JSON.parse(Buffer.from(bytes).toString('utf8').replace(/^\uFEFF/, ''));
+  const cfg = merge(readJson(path.join(ROOT, 'config/default.json')), local);
   if (cfg.server.host !== '127.0.0.1') throw new Error('This local release binds only to 127.0.0.1.');
   for (const [name, value, min, max] of [
     ['port', cfg.server.port, 1024, 65535], ['tickSeconds', cfg.scheduler.tickSeconds, 5, 3600],

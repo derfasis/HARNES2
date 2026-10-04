@@ -230,6 +230,7 @@ export class Scheduler {
         // budget would drain the whole list in a minute and the interval would mean nothing.
         for (const sourceId of considered) markBrowserConsidered(this.browserPolls, sourceId);
         for (const { sourceId, transport } of this.sourceReaders) {
+          if (this.stopped || this.service.deployment && this.service.deployment.summary().phase !== 'active') break;
           // Membership decides, full stop. An earlier version guarded the skip with
           // `dueBrowser.length && …`, which meant that on a tick where nothing was due the guard
           // was false, no source was skipped, and the whole cadence was skipped with it: every page
