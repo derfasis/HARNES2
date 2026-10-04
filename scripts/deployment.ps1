@@ -9,10 +9,17 @@ if ($profileState.version -ne 1 -or [string]$profileState.code_sha -notmatch '^[
     -not [IO.Path]::IsPathRooted([string]$profileState.code_root) -or
     -not [IO.Path]::IsPathRooted([string]$profileState.data_directory)) { throw 'DEPLOYMENT_PROFILE_INVALID' }
 $selectedRoot = [IO.Path]::GetFullPath([string]$profileState.code_root).TrimEnd('\','/')
+$nodePath = (Get-Command node -ErrorAction Stop).Source
+# Node is already required for this launcher. Use its native filesystem identity
+# for both roots; GetFullPath alone preserves Windows8.3 names and junction aliases.
+$canonicalRoots = & $nodePath -e "const fs=require('node:fs'); process.stdout.write(JSON.stringify(process.argv.slice(1).map(value=>fs.realpathSync.native(value))));" $projectRoot $selectedRoot
+if ($LASTEXITCODE -ne 0) { throw 'DEPLOYMENT_CODE_ROOT_MISMATCH' }
+$resolvedRoots = $canonicalRoots | ConvertFrom-Json
+$projectRoot = [string]$resolvedRoots[0]
+$selectedRoot = [string]$resolvedRoots[1]
 if ($selectedRoot -ne $projectRoot) { throw 'DEPLOYMENT_CODE_ROOT_MISMATCH' }
 $serviceFile = Join-Path $profileState.data_directory 'runtime/service.json'
 $entryFile = Join-Path $projectRoot 'scripts/run-deployment.mjs'
-$nodePath = (Get-Command node -ErrorAction Stop).Source
 
 function Get-VerifiedInstance {
     if (-not (Test-Path -LiteralPath $serviceFile)) { return $null }

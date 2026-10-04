@@ -112,8 +112,8 @@ No automatic PC shutdown: that instruction is cancelled.
 
 ## Implementation and verification
 
-Implemented in the isolated branch; integration and native activation are not yet
-claimed. `business/deployment.mjs` and its strict profile schema verify the selected
+Implemented in the isolated branch; main integration is not yet claimed.
+`business/deployment.mjs` and its strict profile schema verify the selected
 Git root/SHA, clean code, exact external config bytes, safety fences and existing
 state before opening Store. The CLI inspection path is read-only and does not
 import the server, load credentials, create state or perform a backup.
@@ -162,8 +162,8 @@ uses the existing-state checks and SQLite backup, not a second empty installatio
 
 ```powershell
 node scripts/run-deployment.mjs --inspect D:\HARNES2-deployments\partner\profile.json
-powershell -NoProfile -File scripts/start.ps1 -Profile D:\HARNES2-deployments\partner\profile.json
-powershell -NoProfile -File scripts/stop.ps1 -Profile D:\HARNES2-deployments\partner\profile.json
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start.ps1 -Profile D:\HARNES2-deployments\partner\profile.json
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stop.ps1 -Profile D:\HARNES2-deployments\partner\profile.json
 ```
 
 All global model flags and ordinary runtime remain disabled with blank runtime
@@ -185,7 +185,8 @@ finite goal/profile grant or one-shot follow-up before any actual call.
   launcher; fixtures never weaken clean-code or owner checks.
 - Combined local gate: 1507/1507 Node tests, 25/25 Python tests and build PASS
   (238 JavaScript/JSON, 11 Python files); `git diff --check` PASS. There are no
-  skipped/cancelled Node tests. Hosted exact-head/native results remain pending.
+  skipped/cancelled Node tests. The receipt flush change additionally passed all
+  fourteen lifecycle tests. Hosted exact-head results remain pending.
 - Fourteen lifecycle tests include healthy scoped completion, read-only denial,
   expiry with usage/consumed attempt persistence, no next-source poll after stop,
   durable same-ID stop, duplicate ownership and startup receipt rollback. The real
@@ -203,10 +204,80 @@ finite goal/profile grant or one-shot follow-up before any actual call.
   did not execute tests or claim native/runtime proof. Stop is explicitly an
   accepted asynchronous request, not a completed/persisted stop confirmation.
 
-The native preflight independently confirmed schema013, three still-active source
-monitor grants (expiry October9), no Control Plane owner and a revoked model grant.
-Its historical transport confirmations from 16:32UTC are stale; no model/source
-authority was renewed and no native migration or connection has yet occurred.
+### Bounded native verification, October4
+
+The actual feature commit `72b5a4651ae5587aa6f55845535a832e635b65fe`
+ran through the managed PowerShell launcher against the existing native database.
+A new finite read-only verification profile expired at19:46:22UTC; it did not
+extend the previous observer deadline or renew source/model authority. The
+configured account/session was referenced in place; credentials were not copied.
+
+The Node SQLite backup preserved committed state before normal013->015 migration.
+Health, authenticated state and the private receipt agreed on code/root/profile,
+config hash, fingerprint, PID680, bound port8790 and fresh instance nonce. Telegram
+connected and all three real admitted readers refreshed their native checkpoints;
+one PTS advanced. This proves bounded observation, not complete history or coverage.
+
+A separate Luna read-only backup/current comparison proved all five Scout grants,
+the one revoked attention grant, its consumed attempt and two goals byte-equivalent
+with identical IDs. Four watch IDs and authority fields were unchanged; one mutable
+watch cursor advanced. Three checkpoint keys persisted, confirmation times advanced,
+and one PTS advanced. Observed deltas were three exchanges,24 events and one channel
+offset. New model-profile/follow-up tables were empty. Runs remained11; there were
+no new model attempts, grants, goals, people, conversations, drafts, approvals,
+delivery attempts, work cases, materials or Action proposals.
+
+The in-app dashboard was reloaded and inspected: exact verified release, read-only
+model fence, three readers, actual source freshness, revoked1/1 attention attempt,
+missing goal model profile and stale historical hypothesis were visible. No goal,
+profile, grant, capture or model request was created by opening these views.
+Screenshots and sanitized proofs remain in ignored `.cache` files, not public data
+exports. The generic model-connection and Audience notices were corrected after
+this process stopped; those copy changes still require the combined gate.
+
+Managed nonce-bound stop was accepted, then the final receipt independently showed
+`stopped`/`operator_stop`, the PID exited and Control Plane ownership was released.
+Attempting the same profile again refused with `CONTROL_ACTIVATION_STOPPED` before
+Store/credential/network activation. A202 alone was not used as shutdown proof.
+Native verification is complete at the feature SHA above; hosted verification
+must identify its exact tested head separately. Overall product work remains active.
+
+### Hosted Windows findings and independent red-team
+
+The first exact-head hosted run37228274492 failed at1503/1507 Node tests.
+Three fixture assertions/interceptors treated Windows8.3 temporary-directory names
+as different strings from their native resolved paths. Those real fixture paths
+are now canonicalized without removing exact-byte or credential-isolation checks.
+The fourth failure exposed a production binding error: preparation returned a
+resolved data directory, but activation retained its original alias spelling.
+Prepared activation now pins the resolved data/config targets while its immutable
+fingerprint still seals the owner's exact original profile. A changed same-ID
+profile remains a changed authority basis, even if two spellings refer to one path.
+
+The actual PowerShell launcher now uses Node's existing native realpath support to
+compare code roots. Its acceptance fixture supplies separate real code-root and
+data-parent junction aliases, then exercises actual launch, identity agreement,
+reuse, forged receipts, durable stop and non-rearming. The data-alias case failed
+before the production fix and passed after it. The combined real-launcher,
+lifecycle and UI group passed24/24 after the code-root alias change.
+
+A separate Luna review found that a new-state leaf junction was not resolved and
+could point into the release root. Existing leaves now resolve; dangling leaves
+and linked ancestors fail closed before credentials or directory creation. Three
+actual-filesystem kill tests pass. Replacing only this path resolver with the exact
+old implementation makes all three fail; the original fixed bytes were restored.
+The profile group passed27/27 without skips. No workflow, clean-code, SHA,
+ownership, authority, outbound or model-admission guard was weakened to obtain green.
+The next combined local run passed1509/1510 Node tests,25/25 Python tests and build;
+its only failure was the prior scoped-authority UI wording assertion. The notice
+now retains the verified scoped availability/billing wording while explicitly
+qualifying it by activation mode, freshness and budget. Both affected UI groups
+passed13/13, then the final combined local gate passed1510/1510 Node tests,
+25/25 Python tests, build and diff check, without skipped/cancelled Node tests.
+A second narrow Luna read-only audit found no additional concrete blocker in
+canonical target pinning, exact original fingerprint binding or the PowerShell
+identity checks; it did not run tests. The final hosted gate remains required
+before integration; the first hosted failure is not represented as a passing release.
 
 ### Limits retained
 

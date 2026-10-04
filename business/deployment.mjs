@@ -228,10 +228,21 @@ function assertMarkerOnlyNewState(directory, markerFile) {
 function canonicalExternal(value, root, { mustExist = true } = {}) {
   const resolved = path.resolve(value);
   let checked;
-  if (mustExist) checked = real(resolved);
+  if (mustExist || fs.existsSync(resolved)) checked = real(resolved);
   else {
-    let parent = path.dirname(resolved);
-    while (!fs.existsSync(parent) && path.dirname(parent) !== parent) parent = path.dirname(parent);
+    let parent = resolved;
+    while (!fs.existsSync(parent)) {
+      // existsSync follows links. A dangling leaf or ancestor must not be
+      // mistaken for an ordinary new directory and created behind our fence.
+      try {
+        if (fs.lstatSync(parent).isSymbolicLink()) fail('DEPLOYMENT_STATE_PATH_INVALID');
+      } catch (error) {
+        if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error;
+      }
+      const next = path.dirname(parent);
+      if (next === parent) fail('DEPLOYMENT_STATE_PATH_INVALID');
+      parent = next;
+    }
     checked = path.join(real(parent), path.relative(parent, resolved));
   }
   if (contained(root, checked)) fail('DEPLOYMENT_STATE_PATH_INVALID');
@@ -361,7 +372,7 @@ export function inspectDeployment(profileFile) {
 }
 
 export async function prepareDeployment(profileFile) {
-  const { profile, checked, config, identity } = inspectDeploymentProfileFile(profileFile);
+  const { profile, checked, configFile, config, identity } = inspectDeploymentProfileFile(profileFile);
 
   let credentialFile = null;
   try { if (profile.credentials_file !== null) credentialFile = canonicalExternal(profile.credentials_file, checked.identity.code_root); }
@@ -395,6 +406,8 @@ export async function prepareDeployment(profileFile) {
   } else fs.mkdirSync(directory, { recursive: true });
 
   installCredentials(selectedCredentials);
-  const activation = new RuntimeActivation(profile);
+  // The prepared runtime pins actual resolved targets. Its immutable fingerprint
+  // continues to bind the owner's exact original profile, including path spelling.
+  const activation = new RuntimeActivation({ ...profile, data_directory: directory, config_file: configFile });
   return { config: deepFreeze(config), directory, activation, identity: deepFreeze(identity) };
 }

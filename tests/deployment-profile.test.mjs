@@ -19,7 +19,7 @@ const safeConfig = () => {
 };
 
 async function fixture({ state = 'new', mode = 'scoped_reasoning', credentials = null } = {}) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'deployment-profile-'));
+  const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'deployment-profile-')));
   const root = path.join(dir, 'release');
   fs.mkdirSync(root);
   fs.cpSync(path.join(SOURCE_ROOT, 'business'), path.join(root, 'business'), { recursive: true });
@@ -125,6 +125,71 @@ test('config hash mismatch is rejected before data directory creation', async t 
   fs.appendFileSync(f.configPath, ' ');
   await assert.rejects(f.api.prepareDeployment(f.profilePath), { code: 'DEPLOYMENT_CONFIG_HASH_MISMATCH' });
   assert.equal(fs.existsSync(f.profile.data_directory), false);
+});
+
+test('new state rejects an external leaf junction into the release before credentials or writes', async t => {
+  const f = await fixture({ credentials: 'PARTNER_MODEL_API_KEY=fixture-must-not-install' });
+  t.after(() => fs.rmSync(f.dir, { recursive: true, force: true }));
+  const target = path.join(f.root, 'empty-state-target');
+  const link = path.join(f.dir, 'external-state-link');
+  fs.mkdirSync(target);
+  fs.symlinkSync(target, link, process.platform === 'win32' ? 'junction' : 'dir');
+  f.profile.data_directory = link;
+  f.writeProfile();
+
+  const previousKey = process.env.PARTNER_MODEL_API_KEY;
+  process.env.PARTNER_MODEL_API_KEY = 'ambient-must-remain';
+  t.after(() => {
+    if (previousKey === undefined) delete process.env.PARTNER_MODEL_API_KEY;
+    else process.env.PARTNER_MODEL_API_KEY = previousKey;
+  });
+  await assert.rejects(f.api.prepareDeployment(f.profilePath), { code: 'DEPLOYMENT_STATE_PATH_INVALID' });
+  assert.equal(process.env.PARTNER_MODEL_API_KEY, 'ambient-must-remain');
+  assert.deepEqual(fs.readdirSync(target), []);
+  assert.equal(fs.existsSync(path.join(target, 'partner.sqlite')), false);
+});
+
+test('new state rejects a dangling external leaf link before creating its release target', async t => {
+  const f = await fixture({ credentials: 'PARTNER_MODEL_API_KEY=fixture-must-not-install' });
+  t.after(() => fs.rmSync(f.dir, { recursive: true, force: true }));
+  const target = path.join(f.root, 'future-state-target');
+  const link = path.join(f.dir, 'dangling-state-link');
+  fs.symlinkSync(target, link, process.platform === 'win32' ? 'junction' : 'dir');
+  assert.equal(fs.existsSync(target), false);
+  assert.equal(fs.lstatSync(link).isSymbolicLink(), true);
+  f.profile.data_directory = link;
+  f.writeProfile();
+
+  const previousKey = process.env.PARTNER_MODEL_API_KEY;
+  process.env.PARTNER_MODEL_API_KEY = 'ambient-must-remain';
+  t.after(() => {
+    if (previousKey === undefined) delete process.env.PARTNER_MODEL_API_KEY;
+    else process.env.PARTNER_MODEL_API_KEY = previousKey;
+  });
+  await assert.rejects(f.api.prepareDeployment(f.profilePath), { code: 'DEPLOYMENT_STATE_PATH_INVALID' });
+  assert.equal(process.env.PARTNER_MODEL_API_KEY, 'ambient-must-remain');
+  assert.equal(fs.existsSync(target), false);
+});
+
+test('new state rejects a dangling linked ancestor before creating its release target', async t => {
+  const f = await fixture({ credentials: 'PARTNER_MODEL_API_KEY=fixture-must-not-install' });
+  t.after(() => fs.rmSync(f.dir, { recursive: true, force: true }));
+  const target = path.join(f.root, 'future-ancestor-target');
+  const link = path.join(f.dir, 'dangling-state-parent');
+  fs.symlinkSync(target, link, process.platform === 'win32' ? 'junction' : 'dir');
+  assert.equal(fs.existsSync(target), false);
+  f.profile.data_directory = path.join(link, 'state');
+  f.writeProfile();
+
+  const previousKey = process.env.PARTNER_MODEL_API_KEY;
+  process.env.PARTNER_MODEL_API_KEY = 'ambient-must-remain';
+  t.after(() => {
+    if (previousKey === undefined) delete process.env.PARTNER_MODEL_API_KEY;
+    else process.env.PARTNER_MODEL_API_KEY = previousKey;
+  });
+  await assert.rejects(f.api.prepareDeployment(f.profilePath), { code: 'DEPLOYMENT_STATE_PATH_INVALID' });
+  assert.equal(process.env.PARTNER_MODEL_API_KEY, 'ambient-must-remain');
+  assert.equal(fs.existsSync(target), false);
 });
 
 test('the verifier parses the exact config bytes whose digest it checked', async t => {

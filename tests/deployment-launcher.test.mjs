@@ -14,7 +14,7 @@ const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 async function fixture(t) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'deployment-launcher-'));
+  const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'deployment-launcher-')));
   const reservation = net.createServer();
   await new Promise((resolve,reject) => reservation.once('error',reject).listen(0,'127.0.0.1',resolve));
   const port = reservation.address().port;
@@ -46,8 +46,17 @@ async function fixture(t) {
   const configPath = path.join(dir,'managed-config.json');
   const configBytes = Buffer.from(JSON.stringify(config,null,2)); fs.writeFileSync(configPath,configBytes);
   const profilePath = path.join(dir,'deployment.json');
-  const profile = { version:1, id:randomUUID(), label:'Isolated launcher acceptance', code_root:root,
-    code_sha:codeSha, data_directory:path.join(dir,'state'), config_file:configPath, config_sha256:hash(configBytes),
+  const rootAlias = path.join(dir,'release-alias');
+  fs.symlinkSync(root,rootAlias,'junction');
+  // A sealed owner path may name the same directory through a junction. The
+  // verifier must pin the resolved data target, while its fingerprint still
+  // binds the exact original profile; string-only binding fails on Windows8.3 too.
+  const stateParent = path.join(dir,'state-parent');
+  const stateParentAlias = path.join(dir,'state-parent-alias');
+  fs.mkdirSync(stateParent);
+  fs.symlinkSync(stateParent,stateParentAlias,'junction');
+  const profile = { version:1, id:randomUUID(), label:'Isolated launcher acceptance', code_root:rootAlias,
+    code_sha:codeSha, data_directory:path.join(stateParentAlias,'state'), config_file:configPath, config_sha256:hash(configBytes),
     credentials_file:null, partner_id:config.partnerId,
     expires_at:new Date(Date.now()+30*60_000).toISOString(), mode:'read_only', state:'new' };
   const writeProfile = () => fs.writeFileSync(profilePath,JSON.stringify(profile));
