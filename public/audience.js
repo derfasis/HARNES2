@@ -189,13 +189,37 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
     const target = packet?.reassessment;
     const focused = target?.version === 1;
     const emptyReassessment = focused && Array.isArray(a.output?.needs) && a.output.needs.length === 0;
+    const retryOf = target?.retry_of;
+    const retry = a.retry;
+    const receipt = a.attempt_receipt;
+    const receiptInteger = value => Number.isSafeInteger(value) && value >= 0 ? String(value) : 'неизвестно';
+    const receiptHtml = receipt && typeof receipt === 'object' ? `<section class="context-review"><h3>Квитанция попытки модели</h3>
+      <p>Запуск ${esc(receipt.run_id ?? 'не указан')} · состояние ${esc(receipt.status ?? 'неизвестно')} · вызовы API: ${receiptInteger(receipt.model_api_calls)}.</p>
+      <p>Токены: вход ${receiptInteger(receipt.input_tokens)}, выход ${receiptInteger(receipt.output_tokens)}${receipt.usage_status === 'unknown' ? ' · использование неизвестно' : ''}.</p>
+      <p>${receipt.cost_status === 'unknown' || !Number.isFinite(receipt.estimated_cost_usd) || receipt.estimated_cost_usd < 0
+        ? 'Стоимость этой попытки неизвестна; её нельзя считать нулевой.'
+        : `Оценка стоимости: $${esc(receipt.estimated_cost_usd.toFixed(6))} (${esc(receipt.cost_status)}).`}</p>
+      ${receipt.failure_cause ? `<p>Нормализованная причина сбоя: ${esc(receipt.failure_cause.kind ?? 'неизвестно')}${receipt.failure_cause.provider_error_type ? ` · ${esc(receipt.failure_cause.provider_error_type)}` : ''}.</p>` : ''}
+      <p class="muted tiny">Эта попытка не разрешает отправку или другие внешние действия. Отображается только закрытая квитанция; текст ошибки провайдера не используется.</p>
+    </section>` : '';
+    const retryHtml = focused && ['interrupted','invalid','stale'].includes(a.status) && retry && typeof retry === 'object'
+      ? `<section class="context-review"><h3>Повтор неудачной оценки</h3>
+        ${retryOf ? `<p>Родительская оценка: ${esc(retryOf.assessment_id ?? 'не указана')} · отпечаток попытки ${esc(retryOf.basis_fingerprint ?? 'не указан')}.</p>` : ''}
+        ${retry.child_assessment?.id ? `<p>Дочерняя оценка: ${esc(retry.child_assessment.id)} · ${badge(retry.child_assessment.status)}</p>` : ''}
+        ${retry.available === true
+          ? '<p>Можно явно запросить одну новую ограниченную попытку без инструментов. Ответ модели останется инертным предложением.</p>'
+          : `<p>Повтор недоступен: ${esc((retry.reasons ?? []).join('; ') || 'причина не указана')}.</p>`}
+        ${retry.available === true ? button('Повторить оценку', 'audience-retry-reassessment', a.id, 'secondary') : ''}
+      </section>` : '';
     return panel(focused ? 'Пересмотр гипотезы' : 'Основание сбора', `<p>Состояние: ${badge(a.status)} · ID ${esc(a.id ?? '')}</p>
       ${focused ? `<p>Цель пересмотра: потребность ${esc(target.need_id ?? '—')} · ревизия ${esc(target.need_revision ?? '—')} · контекст ${esc(target.context_fingerprint ?? '—')}</p><p class="muted tiny">Новая оценка ограничена зафиксированным контекстом. Она не одобряет прежнюю гипотезу и не разрешает контакт.</p>` : ''}
+      ${retryOf ? `<p>Линия повтора: дочерняя оценка ${esc(a.id)} создана по явному запросу для родителя ${esc(retryOf.assessment_id ?? 'не указан')} (отпечаток родителя ${esc(retryOf.basis_fingerprint ?? 'не указан')}).</p>` : ''}
       ${packet ? `<p>Актуальность: ${a.current === true ? 'текущая' : a.current === false ? 'устарела' : 'не указана'}</p>
         <p><strong>Обмены (${exchanges.length}), свидетельства (${evidenceCount}):</strong></p>${exchanges.map(x => `<article class="workspace-evidence"><strong>Обмен ${esc(x.id)} · ${esc(x.source_ref)}</strong><p>${x.current === true ? 'Текущий' : 'Требует сверки'}${x.reasons?.length ? ` · ${esc(x.reasons.join('; '))}` : ''}</p>${(x.evidence ?? []).map(e => `<p>${esc(e.text ?? 'Свидетельство без текста')}<small>${esc(e.source_event_id ?? '')}${e.message_version ? ` · версия ${esc(e.message_version)}` : ''} · опубликовано ${esc(sourceDate(e.published_at))} · источник изменён ${esc(sourceDate(e.source_updated_at))} · наблюдалось ${esc(sourceDate(e.observed_at))}${e.confirmed_at ? ` · Browser подтвердил ${esc(sourceDate(e.confirmed_at))}` : ''}</small></p>`).join('')}</article>`).join('') || '<p>Свидетельства не приложены.</p>'}
         ${packet.unknowns?.length ? `<p><strong>Неизвестно:</strong> ${esc(packet.unknowns.join('; '))}</p>` : ''}` : '<p>Снимок основания не возвращён.</p>'}
       ${emptyReassessment ? '<p><strong>Новая интерпретация не предложена; прежняя находка не признана решённой.</strong></p>' : ''}
       ${a.output ? `<details><summary>Сохранённое предложение</summary><pre class="workspace-pre">${esc(JSON.stringify(a.output, null, 2))}</pre></details>` : ''}
+      ${receiptHtml}${retryHtml}
       <div class="actions">${focused && ['captured','running'].includes(a.status) ? button('Отменить пересмотр', 'audience-cancel-reassessment', a.id, 'danger') : ''}${!focused && a.status === 'captured' && a.current === true ? button('Внести гипотезу вручную', 'audience-propose', a.id, 'primary') : ''}</div>`);
   }
   function createGoal() {
@@ -280,6 +304,28 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
         // later source observations have advanced the live context.
         expected_basis_fingerprint: a.basis_fingerprint });
       await load(); return;
+    }
+    if (action === 'audience-retry-reassessment') {
+      const parent = assessment;
+      const target = parent?.packet?.reassessment;
+      if (!parent || parent.id !== id || target?.version !== 1
+        || !['interrupted','invalid','stale'].includes(parent.status) || parent.retry?.available !== true) {
+        throw new Error('Повтор недоступен: обновите оценку и проверьте её актуальность и разрешённость.');
+      }
+      // Freeze both identities from the selected historical parent before the operator opens
+      // the reason dialog. The server rechecks source and target freshness at acceptance.
+      const payload = { assessment_id: parent.id,
+        expected_basis_fingerprint: parent.basis_fingerprint,
+        expected_context_fingerprint: target.context_fingerprint };
+      modal('Явный повтор неудачной оценки', `<p>Будет создана одна новая ограниченная попытка без инструментов. Она может повлечь дополнительную оплату; неизвестная стоимость прошлой попытки не считается нулевой. Это не обещание бесплатного запуска или ровно одного HTTP-вызова. Результат останется инертным: повтор не принимает гипотезу и не создаёт работу, контакт или отправку.</p>${field('reason', 'Почему вы явно разрешаете новую попытку', 'textarea')}<small>Укажите причину длиной от 1 до 500 знаков.</small>`, async p => {
+        const reason = String(p.reason ?? '').trim();
+        if (!reason || reason.length > 500) throw new Error('Укажите причину повтора длиной от 1 до 500 знаков.');
+        const result = await command('audience.retry_reassessment', { ...payload, reason });
+        selectedAssessment = result.assessment_id ?? result.child_assessment?.id ?? result.id;
+        if (!selectedAssessment) throw new Error('Сервер не вернул дочернюю оценку. Обновите список оценок.');
+        selectedNeed = null;
+        await load();
+      }); return;
     }
     if (action === 'audience-propose') {
       const a = assessment;
