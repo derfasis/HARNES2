@@ -1,2 +1,4 @@
 # Historical mixed line endings are immutable test bytes, not source whitespace.
 tests/fixtures/deployed-011-source-scout.sql -text -diff -merge
+# New migration receipt bytes must be identical in Windows and Linux checkouts.
+business/migrations/013-audience-attention.sql text eol=lf

@@ -53,7 +53,7 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
       ? '<div class="section-note">Audience Intelligence выключен в конфигурации. Новые цели, сбор и принятие выключены; сохранённые записи доступны для просмотра и отклонения.</div>'
       : listing.model_enabled !== true
         ? '<div class="section-note">Модельные вызовы выключены. Сбор и предложение выполняются оператором вручную на выбранных разрешённых источниках.</div>'
-        : '<div class="section-note">Модельные оценки включены: когда модель доступна, серверный планировщик может запускать ограниченные оценки на свежих данных. Кнопка «Собрать основание» создаёт операторский снимок. Предложение не принимается автоматически.</div>';
+        : '<div class="section-note">Глобальная возможность модельных вызовов включена. Для каждой цели отдельно требуется действующее конечное разрешение на внимание и проверка свежести источников и бюджета. Кнопка «Собрать основание» создаёт операторский снимок. Предложение не принимается автоматически.</div>';
     let html = notice + panel('Рабочие цели', selectedRows(listing.items ?? [], 'goal', selectedGoal)
       || empty('Целей пока нет', 'Создайте ограниченную цель и укажите источники, уже разрешённые для чтения.'),
       !disabled ? button('+ Новая цель', 'audience-new', '', 'primary') : '');
@@ -79,6 +79,7 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
       <p class="muted tiny">Предложение о потребности не является фактом, согласием или разрешением на контакт.</p>
       <div class="actions">${!disabled && goal.status === 'OPEN' ? button('Приостановить цель', 'audience-pause', goal.id, 'danger') : ''}
       ${!disabled && goal.ready === true && goal.status === 'OPEN' && !capturePending ? button('Собрать основание', 'audience-capture', goal.id, 'primary') : ''}</div>`);
+    html += attentionPanel(goal);
     html += panel('Потребности и гипотезы', selectedRows(needs, 'need', selectedNeed)
       || empty('Потребностей пока нет', 'Соберите основание, чтобы вручную предложить гипотезу.'));
     if (need) html += needPanel(need);
@@ -94,6 +95,49 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
     const rows = [...(goal?.assessments ?? []), ...(assessment ? [assessment] : [])];
     return rows.some(a => ['captured','running'].includes(a.status)
       && (a.packet?.reassessment?.need_id ?? a.reassessment?.need_id) === needId);
+  }
+  function attentionPanel(g) {
+    const a = g.attention;
+    if (!a || typeof a !== 'object') return '';
+    const grants = Array.isArray(a.grants) ? a.grants : [];
+    const rows = grants.map(grant => `<article class="lesson">
+      <p><strong>Разрешение ${esc(grant.id ?? 'не указано')}</strong> · ${esc(grant.status ?? grant.state ?? 'состояние неизвестно')}</p>
+      <p>Попытки: использовано ${esc(grant.attempts_used ?? 'неизвестно')} из ${esc(grant.max_attempts ?? 'неизвестно')} · осталось ${esc(grant.remaining_attempts ?? 'неизвестно')} · до ${esc(grant.expires_at ?? 'неизвестно')}.</p>
+      ${grant.status !== 'revoked' && grant.state !== 'revoked' ? button('Отозвать разрешение', 'audience-attention-revoke', grant.id, 'danger') : ''}
+    </article>`).join('') || '<p>Разрешений на модельное внимание для этой цели нет.</p>';
+    return panel('Ограниченное модельное внимание', `<p><strong>Настройка модели:</strong> ${a.model_configured === true ? 'провайдер и модель настроены' : 'настройка провайдера не подтверждена'}.</p>
+      <p><strong>Готовность вызова:</strong> ${a.model_ready === true ? 'вызов готов при наличии отдельного разрешения' : 'готовность вызова не подтверждена'}.</p>
+      <p><strong>Глобальный переключатель:</strong> ${listing?.model_enabled === true ? 'включён' : 'выключен'}. Он независим от разрешения этой цели.</p>
+      <p><strong>Разрешение на чтение и актуальность источника:</strong> ${a.source_current === true ? 'подтверждены' : 'не подтверждены'}.</p>
+      <p><strong>Готовность цели:</strong> ${a.ready === true ? 'модельная оценка допущена условиями' : 'оценка сейчас не готова'}.</p>
+      ${a.block_reasons?.length ? `<p><strong>Ограничения:</strong> ${esc(a.block_reasons.join('; '))}</p>` : ''}
+      <p><strong>Отпечаток области действия:</strong> <code>${esc(a.scope_fingerprint ?? 'не указан')}</code></p>
+      ${rows}
+      ${a.can_grant === true ? button('Разрешить ограниченное внимание', 'audience-attention-grant', g.id, 'secondary') : '<p>Новое разрешение сейчас недоступно.</p>'}
+      <p class="muted tiny">Разрешение задаёт конечный предел только для этой цели. Оно не включает глобальную модель, не запускает её и не разрешает принятие гипотезы, работу, контакт или отправку. Стоимость может быть неизвестна.</p>`);
+  }
+
+  function openAssessmentRetry(a) {
+    const retry = a?.retry, target = a?.packet?.reassessment;
+    const kind = retry?.kind;
+    if (!a || a.id !== selectedAssessment || !['ordinary','focused'].includes(kind)
+      || retry.available !== true || !['interrupted','invalid','stale'].includes(a.status)
+      || (kind === 'focused') !== (target?.version === 1)
+      || !retry.context_fingerprint || !a.basis_fingerprint) {
+      throw new Error('Повтор недоступен: обновите оценку и проверьте её актуальность и разрешённость.');
+    }
+    const commandAction = kind === 'ordinary' ? 'audience.retry_assessment' : 'audience.retry_reassessment';
+    const payload = { assessment_id:a.id, expected_basis_fingerprint:a.basis_fingerprint,
+      expected_context_fingerprint:retry.context_fingerprint };
+    modal('Явный повтор неудачной оценки', `<p>Будет создана одна новая ограниченная попытка без инструментов. Она может повлечь дополнительную оплату; неизвестная стоимость прошлой попытки не считается нулевой. Это не обещание бесплатного запуска или ровно одного HTTP-вызова. Результат останется инертным: повтор не принимает гипотезу и не создаёт работу, контакт или отправку.</p>${field('reason', 'Почему вы явно разрешаете новую попытку', 'textarea')}<small>Укажите причину длиной от 1 до 500 знаков.</small>`, async p => {
+      const reason = String(p.reason ?? '').trim();
+      if (!reason || reason.length > 500) throw new Error('Укажите причину повтора длиной от 1 до 500 знаков.');
+      const result = await command(commandAction, { ...payload, reason });
+      selectedAssessment = result.assessment_id;
+      if (!selectedAssessment) throw new Error('Сервер не вернул дочернюю оценку. Обновите список оценок.');
+      selectedNeed = null;
+      await load();
+    });
   }
   function reassessmentContextPanel(n) {
     if (!reassessmentContext && !reassessmentError && !reassessmentLoading) {
@@ -188,9 +232,12 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
     const evidenceCount = exchanges.reduce((n, x) => n + (x.evidence?.length ?? 0), 0);
     const target = packet?.reassessment;
     const focused = target?.version === 1;
+    const ordinaryRetry = packet?.reasoning_retry?.version === 1;
     const emptyReassessment = focused && Array.isArray(a.output?.needs) && a.output.needs.length === 0;
-    const retryOf = target?.retry_of;
+    const retryOf = target?.retry_of ?? packet?.reasoning_retry?.retry_of;
     const retry = a.retry;
+    const retryAction = retry?.kind === 'ordinary' ? 'audience-retry-assessment'
+      : retry?.kind === 'focused' ? 'audience-retry-reassessment' : null;
     const receipt = a.attempt_receipt;
     const receiptInteger = value => Number.isSafeInteger(value) && value >= 0 ? String(value) : 'неизвестно';
     const receiptHtml = receipt && typeof receipt === 'object' ? `<section class="context-review"><h3>Квитанция попытки модели</h3>
@@ -202,14 +249,16 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
       ${receipt.failure_cause ? `<p>Нормализованная причина сбоя: ${esc(receipt.failure_cause.kind ?? 'неизвестно')}${receipt.failure_cause.provider_error_type ? ` · ${esc(receipt.failure_cause.provider_error_type)}` : ''}.</p>` : ''}
       <p class="muted tiny">Эта попытка не разрешает отправку или другие внешние действия. Отображается только закрытая квитанция; текст ошибки провайдера не используется.</p>
     </section>` : '';
-    const retryHtml = focused && ['interrupted','invalid','stale'].includes(a.status) && retry && typeof retry === 'object'
+    const retryDisplayable = retryAction || (focused && retry && retry.available !== true);
+    const retryHtml = ['interrupted','invalid','stale'].includes(a.status) && retryDisplayable && retry && typeof retry === 'object'
       ? `<section class="context-review"><h3>Повтор неудачной оценки</h3>
+        <p>Тип попытки: ${retry.kind === 'ordinary' ? 'обычная оценка цели' : 'пересмотр гипотезы'}.</p>
         ${retryOf ? `<p>Родительская оценка: ${esc(retryOf.assessment_id ?? 'не указана')} · отпечаток попытки ${esc(retryOf.basis_fingerprint ?? 'не указан')}.</p>` : ''}
         ${retry.child_assessment?.id ? `<p>Дочерняя оценка: ${esc(retry.child_assessment.id)} · ${badge(retry.child_assessment.status)}</p>` : ''}
         ${retry.available === true
           ? '<p>Можно явно запросить одну новую ограниченную попытку без инструментов. Ответ модели останется инертным предложением.</p>'
           : `<p>Повтор недоступен: ${esc((retry.reasons ?? []).join('; ') || 'причина не указана')}.</p>`}
-        ${retry.available === true ? button('Повторить оценку', 'audience-retry-reassessment', a.id, 'secondary') : ''}
+        ${retry.available === true && retryAction ? button('Повторить оценку', retryAction, a.id, 'secondary') : ''}
       </section>` : '';
     return panel(focused ? 'Пересмотр гипотезы' : 'Основание сбора', `<p>Состояние: ${badge(a.status)} · ID ${esc(a.id ?? '')}</p>
       ${focused ? `<p>Цель пересмотра: потребность ${esc(target.need_id ?? '—')} · ревизия ${esc(target.need_revision ?? '—')} · контекст ${esc(target.context_fingerprint ?? '—')}</p><p class="muted tiny">Новая оценка ограничена зафиксированным контекстом. Она не одобряет прежнюю гипотезу и не разрешает контакт.</p>` : ''}
@@ -220,7 +269,7 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
       ${emptyReassessment ? '<p><strong>Новая интерпретация не предложена; прежняя находка не признана решённой.</strong></p>' : ''}
       ${a.output ? `<details><summary>Сохранённое предложение</summary><pre class="workspace-pre">${esc(JSON.stringify(a.output, null, 2))}</pre></details>` : ''}
       ${receiptHtml}${retryHtml}
-      <div class="actions">${focused && ['captured','running'].includes(a.status) ? button('Отменить пересмотр', 'audience-cancel-reassessment', a.id, 'danger') : ''}${!focused && a.status === 'captured' && a.current === true ? button('Внести гипотезу вручную', 'audience-propose', a.id, 'primary') : ''}</div>`);
+      <div class="actions">${focused && ['captured','running'].includes(a.status) ? button('Отменить пересмотр', 'audience-cancel-reassessment', a.id, 'danger') : ''}${ordinaryRetry && ['captured','running'].includes(a.status) ? button('Отменить обычную попытку', 'audience-cancel-assessment', a.id, 'danger') : ''}${!focused && !ordinaryRetry && a.status === 'captured' && a.current === true ? button('Внести гипотезу вручную', 'audience-propose', a.id, 'primary') : ''}</div>`);
   }
   function createGoal() {
     const refs = listing.source_refs ?? [];
@@ -243,6 +292,44 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
     if (action === 'audience-assessment') { selectedAssessment = id; selectedNeed = null; await load(); return; }
     if (action === 'audience-next') { cursor = listing?.next_cursor ?? ''; await load(); return; }
     if (!goal) throw new Error('Сначала откройте цель.');
+    if (action === 'audience-attention-grant') {
+      const current = goal, attention = current.attention;
+      if (current.id !== id || attention?.can_grant !== true
+        || typeof attention.scope_fingerprint !== 'string' || !attention.scope_fingerprint) {
+        throw new Error('Разрешение недоступно: обновите цель и проверьте модель, источники и действующие разрешения.');
+      }
+      const frozen = { goal_id:current.id, expected_revision:current.revision,
+        expected_scope_fingerprint:attention.scope_fingerprint };
+      const defaultExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      modal('Ограниченное модельное внимание для цели', `<p>Это разрешение ограничено выбранной целью и числом попыток. Оно не включает глобальную модель и не запускает вызов; готовность модели, свежесть источника и ресурсный бюджет проверяются отдельно.</p>${field('max_attempts', 'Максимум попыток (1–50)', 'number', '1')}${field('expires_at', 'Истекает (ISO 8601 UTC, не более чем через 7 дней)', 'text', defaultExpiry)}${field('reason', 'Причина разрешения', 'textarea')}<p class="muted tiny">Модельный ответ остаётся предложением для владельца. Разрешение не допускает принятие гипотезы, создание работы, контакт или отправку.</p>`, async p => {
+        const maxAttempts = Number(p.max_attempts);
+        const expiresAt = String(p.expires_at ?? '').trim();
+        const expiresMs = Date.parse(expiresAt);
+        const reason = String(p.reason ?? '').trim();
+        if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 50) {
+          throw new Error('Укажите целое число попыток от 1 до 50.');
+        }
+        if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(expiresAt) || !Number.isFinite(expiresMs)
+          || expiresMs <= Date.now() || expiresMs > Date.now() + 7 * 24 * 60 * 60 * 1000) {
+          throw new Error('Укажите будущую дату ISO 8601 с часовым поясом, не более чем через семь дней.');
+        }
+        if (!reason || reason.length > 500) throw new Error('Укажите причину длиной от 1 до 500 знаков.');
+        await command('audience.attention_grant', { ...frozen, max_attempts:maxAttempts, expires_at:expiresAt, reason });
+        await load();
+      }); return;
+    }
+    if (action === 'audience-attention-revoke') {
+      const grant = (goal.attention?.grants ?? []).find(row => row.id === id);
+      if (!grant || grant.status === 'revoked' || grant.state === 'revoked' || typeof grant.grant_fingerprint !== 'string'
+        || !grant.grant_fingerprint) throw new Error('Это разрешение нельзя отозвать из текущего состояния цели.');
+      const frozen = { grant_id:grant.id, expected_grant_fingerprint:grant.grant_fingerprint };
+      modal('Отозвать разрешение модельному вниманию', `<p>Отзыв остаётся доступен, даже если модель выключена, источник изменился или разрешение истекло.</p>${field('reason', 'Причина отзыва', 'textarea')}`, async p => {
+        const reason = String(p.reason ?? '').trim();
+        if (!reason || reason.length > 500) throw new Error('Укажите причину отзыва длиной от 1 до 500 знаков.');
+        await command('audience.attention_revoke', { ...frozen, reason });
+        await load();
+      }); return;
+    }
     if (action === 'audience-pause') {
       modal('Приостановить цель аудитории', field('reason', 'Причина', 'textarea'), async p => {
         if (!p.reason.trim()) throw new Error('Укажите причину.');
@@ -305,27 +392,19 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
         expected_basis_fingerprint: a.basis_fingerprint });
       await load(); return;
     }
-    if (action === 'audience-retry-reassessment') {
-      const parent = assessment;
-      const target = parent?.packet?.reassessment;
-      if (!parent || parent.id !== id || target?.version !== 1
-        || !['interrupted','invalid','stale'].includes(parent.status) || parent.retry?.available !== true) {
-        throw new Error('Повтор недоступен: обновите оценку и проверьте её актуальность и разрешённость.');
+    if (action === 'audience-cancel-assessment') {
+      const a = assessment;
+      if (!a || a.id !== id || a.packet?.reasoning_retry?.version !== 1
+        || !['captured','running'].includes(a.status)) {
+        throw new Error('Отменить можно только ожидающую или выполняющуюся обычную попытку повтора.');
       }
-      // Freeze both identities from the selected historical parent before the operator opens
-      // the reason dialog. The server rechecks source and target freshness at acceptance.
-      const payload = { assessment_id: parent.id,
-        expected_basis_fingerprint: parent.basis_fingerprint,
-        expected_context_fingerprint: target.context_fingerprint };
-      modal('Явный повтор неудачной оценки', `<p>Будет создана одна новая ограниченная попытка без инструментов. Она может повлечь дополнительную оплату; неизвестная стоимость прошлой попытки не считается нулевой. Это не обещание бесплатного запуска или ровно одного HTTP-вызова. Результат останется инертным: повтор не принимает гипотезу и не создаёт работу, контакт или отправку.</p>${field('reason', 'Почему вы явно разрешаете новую попытку', 'textarea')}<small>Укажите причину длиной от 1 до 500 знаков.</small>`, async p => {
-        const reason = String(p.reason ?? '').trim();
-        if (!reason || reason.length > 500) throw new Error('Укажите причину повтора длиной от 1 до 500 знаков.');
-        const result = await command('audience.retry_reassessment', { ...payload, reason });
-        selectedAssessment = result.assessment_id ?? result.child_assessment?.id ?? result.id;
-        if (!selectedAssessment) throw new Error('Сервер не вернул дочернюю оценку. Обновите список оценок.');
-        selectedNeed = null;
-        await load();
-      }); return;
+      await command('audience.cancel_assessment', { assessment_id:a.id,
+        expected_basis_fingerprint:a.basis_fingerprint });
+      await load(); return;
+    }
+    if (action === 'audience-retry-reassessment' || action === 'audience-retry-assessment') {
+      if (!assessment || assessment.id !== id) throw new Error('Сначала откройте неудачную оценку.');
+      openAssessmentRetry(assessment); return;
     }
     if (action === 'audience-propose') {
       const a = assessment;

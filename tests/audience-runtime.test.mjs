@@ -34,6 +34,15 @@ async function observed(h, sourceId = SOURCE) {
   return goal.goal_id;
 }
 
+async function grantGoal(h, goalId) {
+  const detail = h.service.audience.detail(goalId);
+  assert.equal(typeof detail.attention?.scope_fingerprint, 'string', 'model fixtures grant one selected goal explicitly');
+  await h.command('audience.attention_grant', { goal_id:goalId, expected_revision:detail.revision,
+    expected_scope_fingerprint:detail.attention.scope_fingerprint, max_attempts:1,
+    expires_at:new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    reason:'Explicit finite permission for this offline runtime fixture.' });
+}
+
 function validResult(context, extra = {}) {
   return { completed: true, final_response: JSON.stringify(proposalFrom(context.packet)),
     usage: { input_tokens: 321, output_tokens: 87 }, model_identity: { model_id: 'offline-fake', model_version: '1' }, ...extra };
@@ -47,7 +56,7 @@ function runRow(h, assessmentId) {
 test('valid fake model receipt creates only a proposed need and never retries the considered batch', async t => {
   fakeKey(t);
   const h = audienceHarness(t); runtimeConfig(h);
-  await observed(h);
+  await grantGoal(h, await observed(h));
   let calls = 0;
   const runtime = { decide: async (_run, context) => { calls++; return validResult(context); } };
 
@@ -78,7 +87,7 @@ test('valid fake model receipt creates only a proposed need and never retries th
 test('tool-bearing result is refused and its usage remains recorded', async t => {
   fakeKey(t);
   const h = audienceHarness(t); runtimeConfig(h);
-  await observed(h);
+  await grantGoal(h, await observed(h));
   let calls = 0;
   const runtime = { decide: async (_run, context) => {
     calls++;
@@ -101,7 +110,7 @@ test('tool-bearing result is refused and its usage remains recorded', async t =>
 test('source edit during the model turn withholds the result but keeps usage', async t => {
   fakeKey(t);
   const h = audienceHarness(t); runtimeConfig(h);
-  await observed(h);
+  await grantGoal(h, await observed(h));
   const runtime = { decide: async (_run, context) => {
     await h.ingest({ message_id: 'question-1', version: 2, text: 'The source corrected its earlier question.' });
     return validResult(context);
@@ -121,7 +130,7 @@ test('source edit during the model turn withholds the result but keeps usage', a
 test('disabling Audience model reasoning while a call is in flight withholds its result', async t => {
   fakeKey(t);
   const h = audienceHarness(t); runtimeConfig(h);
-  await observed(h);
+  await grantGoal(h, await observed(h));
   const runtime = { decide: async (_run, context) => {
     h.config.audience.modelEnabled = false;
     return validResult(context);
@@ -140,7 +149,7 @@ test('disabling Audience model reasoning while a call is in flight withholds its
 test('a later fabricated quote rolls back every earlier need from the same model packet', async t => {
   fakeKey(t);
   const h = audienceHarness(t); runtimeConfig(h);
-  await observed(h);
+  await grantGoal(h, await observed(h));
   const runtime = { decide: async (_run, context) => {
     const valid = proposalFrom(context.packet).needs[0];
     const invalid = { ...structuredClone(valid), title: 'Second hypothesis', support_quotes: [
@@ -161,7 +170,7 @@ test('a later fabricated quote rolls back every earlier need from the same model
 test('failed result receipt persistence interrupts the same packet and prevents automatic repurchase', async t => {
   fakeKey(t);
   const h = audienceHarness(t); runtimeConfig(h);
-  await observed(h);
+  await grantGoal(h, await observed(h));
   let calls = 0, injected = false;
   const runtime = { decide: async (_run, context) => { calls++; return validResult(context); } };
   const originalRun = h.store.run.bind(h.store);
@@ -192,7 +201,7 @@ test('global run budget is checked before creating a run or invoking the model',
   fakeKey(t);
   const h = audienceHarness(t); runtimeConfig(h);
   h.config.runtime.maxRunsPerDay = 1;
-  await observed(h);
+  await grantGoal(h, await observed(h));
   h.store.run(`INSERT INTO runs(id,partner_id,status,runtime,model,context_json,created_at)
     VALUES(?,?,'failed','other-runtime','offline-test','{}',?)`, 'budget-fixture-run', h.config.partnerId, new Date().toISOString());
   let calls = 0;

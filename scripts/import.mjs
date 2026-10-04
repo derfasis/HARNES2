@@ -11,7 +11,7 @@ import { EXECUTIVE_TABLES } from '../business/executive-tables.mjs';
 import { OUTCOME_TABLES } from '../business/outcome-tables.mjs';
 import { WORK_TABLES, CONTROL_TABLES } from '../business/work-tables.mjs';
 import { SCOUT_TABLES } from '../business/scout-tables.mjs';
-import { AUDIENCE_TABLES } from '../business/audience-tables.mjs';
+import { AUDIENCE_TABLES, AUDIENCE_ATTENTION_TABLES } from '../business/audience-tables.mjs';
 import { BusinessService } from '../business/service.mjs';
 
 const [source,destinationArg] = process.argv.slice(2);
@@ -39,7 +39,8 @@ const inputCatalogues = new Map([
   [9, without(WORK_TABLES, CONTROL_TABLES)],
   [10, without()],
   [11, TABLES.filter(table => !AUDIENCE_TABLES.includes(table))],
-  [12, TABLES],
+  [12, TABLES.filter(table => !AUDIENCE_ATTENTION_TABLES.includes(table))],
+  [13, TABLES],
 ]);
 const inputTables = inputCatalogues.get(migrationCount);
 if (!inputTables) throw new Error('Migration version differs');
@@ -292,6 +293,9 @@ try {
       store.run("UPDATE audience_assessments SET status=CASE WHEN status='running' THEN 'interrupted' WHEN status IN ('captured','proposed') THEN 'stale' ELSE status END");
       store.run("UPDATE audience_needs SET status='stale',updated_at=? WHERE status IN ('proposed','accepted')", new Date().toISOString());
       store.run("DELETE FROM channel_offsets WHERE channel IN ('audience-reason-v1','public-reason-domain-v1')");
+    }
+    if (migrationCount >= 13) {
+      store.run("UPDATE audience_attention_grants SET status='revoked',revoked_at=?,revocation_reason='TRANSFER_AUTHORITY_REQUIRES_REVIEW'", new Date().toISOString());
     }
     // Observation cursors are local recovery progress, not transferable evidence.
     // Replaying committed intents is idempotent and never repeats a send.

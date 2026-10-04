@@ -4,6 +4,15 @@ import assert from 'node:assert/strict';
 import { processAudienceAssessment } from '../business/audience-reasoning.mjs';
 import { audienceHarness, proposalFrom } from './audience-test-helpers.mjs';
 
+async function grantGoal(h, goalId) {
+  const detail = h.service.audience.detail(goalId);
+  assert.equal(typeof detail.attention?.scope_fingerprint, 'string');
+  await h.command('audience.attention_grant', { goal_id:goalId, expected_revision:detail.revision,
+    expected_scope_fingerprint:detail.attention.scope_fingerprint, max_attempts:1,
+    expires_at:new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    reason:'Explicit finite permission for this offline contract fixture.' });
+}
+
 test('a new model assessment cannot return a legacy proposal or omit supplied context accounting', async t => {
   const before = process.env.PARTNER_MODEL_API_KEY;
   process.env.PARTNER_MODEL_API_KEY = 'offline-test-sentinel-never-sent';
@@ -12,8 +21,9 @@ test('a new model assessment cannot return a legacy proposal or omit supplied co
     const h = audienceHarness(t);
     h.config.audience.modelEnabled = true; h.config.audience.maxRunsPerDay = 3;
     Object.assign(h.config.runtime, { maxRunsPerDay: 20, baseUrl: 'https://never-contacted.invalid/v1', model: 'offline-fake', dailyBudgetUsd: null });
-    await h.open(); await h.ingest({ message_id: 'request', text: 'Could you explain how to get started?' });
+    const goal = await h.open(); await h.ingest({ message_id: 'request', text: 'Could you explain how to get started?' });
     h.service.audience.reconcile({ limit: 10 });
+    await grantGoal(h, goal.goal_id);
     let calls = 0;
     const runtime = { decide: async (_run, context) => {
       calls++;

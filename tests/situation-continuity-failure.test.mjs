@@ -9,8 +9,13 @@ for (const throws of [false, true]) test(`a ${throws ? 'thrown' : 'returned'} pr
   t.after(() => previous === undefined ? delete process.env.PARTNER_MODEL_API_KEY : process.env.PARTNER_MODEL_API_KEY = previous);
   Object.assign(h.config.runtime, { baseUrl: 'https://unused-situation.invalid/v1', model: 'offline-failure', maxRunsPerDay: 20, dailyBudgetUsd: null });
   Object.assign(h.config.audience, { modelEnabled: true, maxRunsPerDay: 20 });
-  await h.open(); await h.ingest({ message_id: 'failure-root', text: 'Can someone explain this setup?' });
+  const goal = await h.open(); await h.ingest({ message_id: 'failure-root', text: 'Can someone explain this setup?' });
   h.service.audience.reconcile();
+  const detail = h.service.audience.detail(goal.goal_id);
+  await h.command('audience.attention_grant', { goal_id:goal.goal_id,
+    expected_revision:detail.revision, expected_scope_fingerprint:detail.attention.scope_fingerprint,
+    max_attempts:1, expires_at:new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    reason:'Explicit finite permission for this offline failure fixture.' });
   const secret = 'PRIVATE_RAW_PROVIDER_RESPONSE_NOT_TO_PERSIST';
   const cause = { kind: 'provider_error', provider_error_type: 'timeout', retryable: true, attempt_count: 1,
     http_status: null, timed_out: false, stdout_json_valid: true, raw_provider_body: secret };

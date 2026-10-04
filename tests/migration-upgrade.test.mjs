@@ -84,7 +84,7 @@ test('schema 11 with the deployed receipt upgrades to 012 and preserves scout ro
   for (let restart = 0; restart < 3; restart++) {
     const store = new Store(directory);
     try {
-      assert.equal(store.get('SELECT COUNT(*) AS n FROM schema_migrations').n, 12);
+      assert.equal(store.get('SELECT COUNT(*) AS n FROM schema_migrations').n, 13);
       assert.equal(store.get('SELECT checksum FROM schema_migrations WHERE version=?', migrationVersion).checksum, fixtureChecksum,
         'the historical receipt remains byte-for-byte unchanged');
       assert.equal(store.get("SELECT COUNT(*) AS n FROM schema_migrations WHERE version='012-audience-intelligence.sql'").n, 1);

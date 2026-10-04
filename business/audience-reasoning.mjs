@@ -49,13 +49,14 @@ function prepare(service) {
         'audience-reason-v1', cfg.partnerId, cursor);
       // Only a focused packet explicitly requested for a model may resume from
       // captured. Existing manual captures remain manual and retain their fence.
+      let grant = null;
       let row = db.get("SELECT * FROM audience_assessments WHERE goal_id=? AND status='captured' ORDER BY rowid LIMIT 1", goalId);
       if (row) {
         try {
           const capturedPacket = JSON.parse(row.packet_json);
           if (!capturedPacket || typeof capturedPacket !== 'object' || Array.isArray(capturedPacket))
             throw new AppError('Invalid audience packet', 409, 'AUDIENCE_RECORD_INVALID');
-          if (!capturedPacket.reassessment) continue;
+          if (!capturedPacket.reassessment && !capturedPacket.reasoning_retry) continue;
           audience.assertAssessmentCurrent(row);
         } catch (error) {
           if (!(error instanceof AppError) && !(error instanceof SyntaxError)) throw error;
@@ -64,6 +65,8 @@ function prepare(service) {
           continue;
         }
       } else {
+        grant = service.attention.eligible(goalId);
+        if (!grant) continue;
         const packet = audience.detail(goalId, { hypothesisMemory: true });
         if (!packet.ready) continue;
         try {
@@ -85,7 +88,9 @@ function prepare(service) {
       db.run(`INSERT INTO runs(id,partner_id,status,runtime,model,context_json,created_at)
         VALUES(?,?,'running',?,?,?,?)`, runId, cfg.partnerId, RUNTIME, cfg.runtime.model,
         JSON.stringify({ assessment_id: assessmentId, goal_id: goalId, owner_language: OWNER_LANGUAGE, packet: assessmentPacket,
+          ...(grant ? { attention_grant: { id: grant.id, grant_fingerprint: grant.grant_fingerprint } } : {}),
           model_config: cfg.runtime, prompt_fingerprint: digest(INSTRUCTIONS), contract_fingerprint: digest(contract) }), now());
+      if (grant) service.attention.bind(grant, row, runId);
       if (service.control) service.control.bindRun(runId);
       const changed = db.run("UPDATE audience_assessments SET status='running',producer='model',run_id=? WHERE id=? AND status='captured'", runId, assessmentId);
       if (changed.changes !== 1) {
@@ -130,7 +135,13 @@ async function processAudienceInternal(service, runtime) {
           if (service.config.controlPlane?.enabled !== true)
             throw new AppError('Audience model reasoning requires Control Plane admission', 409, 'AUDIENCE_CONTROL_REQUIRED');
           automaticBoundary(service);
+          const frozen = JSON.parse(prepared.run.context_json);
+          if (assessment.run_id !== prepared.run.id || assessment.goal_id !== frozen.goal_id
+            || digest(JSON.parse(assessment.packet_json)) !== digest(frozen.packet))
+            throw new AppError('Audience run packet changed', 409, 'AUDIENCE_RECORD_INVALID');
           service.audience.assertAssessmentCurrent(assessment);
+          const packet = JSON.parse(assessment.packet_json);
+          if (!packet.reassessment && !packet.reasoning_retry) service.attention.assertRun(prepared.run.id, assessment, frozen.attention_grant);
           const output = JSON.parse(result.final_response);
           // The audience proposal validates and writes several needs in one call. Keep a bad
           // later need from leaving earlier partial proposals behind when we record invalid.

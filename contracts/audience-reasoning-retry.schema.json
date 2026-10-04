@@ -1,0 +1,16 @@
+{
+  "type": "object", "additionalProperties": false,
+  "required": ["version", "model_requested", "retry_of", "context_fingerprint"],
+  "properties": {
+    "version": {"const": 1}, "model_requested": {"const": true},
+    "context_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "retry_of": {
+      "type": "object", "additionalProperties": false,
+      "required": ["assessment_id", "basis_fingerprint"],
+      "properties": {
+        "assessment_id": {"type": "string", "minLength": 1, "maxLength": 36},
+        "basis_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      }
+    }
+  }
+}

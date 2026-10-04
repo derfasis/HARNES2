@@ -16,6 +16,7 @@ const validator = new Ajv({ strict: true, allowUnionTypes: true });
 export const validateOutput = validator.compile(storedOutputSchema);
 const validateModelOutput = validator.compile(outputSchema);
 const validateReassessment = validator.compile(readJson(path.join(ROOT, 'contracts/audience-reassessment.schema.json')));
+const validateReasoningRetry = validator.compile(readJson(path.join(ROOT, 'contracts/audience-reasoning-retry.schema.json')));
 const check = (ok, code, status = 409) => ensure(ok, code, status, code);
 const fields = (p, keys) => check(p && typeof p === 'object' && !Array.isArray(p)
   && Object.keys(p).every(k => keys.includes(k)), 'AUDIENCE_FIELDS_INVALID', 400);
@@ -62,9 +63,21 @@ export class AudienceLoop {
     this.partnerId, p.channelId, p.accountId, now()) : [];
     return digest({ policy: this.service.continuity.policyHash(sourceRef), grants });
   }
-  health(watch) {
+  watchAuthority(watch) {
     if (watch.status === 'revoked') return { current: false, reason: watch.reason ?? 'AUDIENCE_SOURCE_REVOKED' };
-    if (this.policyHash(watch.source_ref) !== watch.policy_hash) return { current: false, reason: 'AUDIENCE_SOURCE_POLICY_CHANGED' };
+    const allowed = effectiveSourceConfig(this.service).opportunity.allowedSourceRefs;
+    const reason = !allowed.includes(watch.source_ref) ? 'SOURCE_NOT_ALLOWED'
+      : this.policyHash(watch.source_ref) !== watch.policy_hash ? 'AUDIENCE_SOURCE_POLICY_CHANGED' : null;
+    if (reason) {
+      const changed = this.store.run("UPDATE audience_watches SET status='revoked',reason=? WHERE goal_id=? AND source_ref=? AND status='active'", reason, watch.goal_id, watch.source_ref);
+      if (changed.changes) this.record('watch_revoked', { goal_id: watch.goal_id, source_ref: watch.source_ref, reason });
+      return { current: false, reason };
+    }
+    return { current: true, reason: null };
+  }
+  health(watch) {
+    const authority = this.watchAuthority(watch);
+    if (!authority.current) return authority;
     // Continuity owns the common source transport/freshness boundary.
     return this.service.continuity.health({ ...watch, policy_hash: this.service.continuity.policyHash(watch.source_ref) });
   }
@@ -343,7 +356,9 @@ export class AudienceLoop {
     if (!this.enabled()) reasons.push('AUDIENCE_DISABLED');
     if (this.service.config.audience?.modelEnabled !== true) reasons.push('AUDIENCE_MODEL_DISABLED');
     if (this.service.config.controlPlane?.enabled !== true) reasons.push('AUDIENCE_CONTROL_REQUIRED');
-    return { eligible, available: eligible && reasons.length === 0, reasons: [...new Set(reasons)], child_assessment: child };
+    return { kind: 'focused', context_fingerprint: row.packet?.reassessment?.context_fingerprint
+      ?? (() => { try { return parse(row.packet_json).reassessment?.context_fingerprint ?? null; } catch { return null; } })(),
+      eligible, available: eligible && reasons.length === 0, reasons: [...new Set(reasons)], child_assessment: child };
   }
   assertRetryRequest(p) {
     this.requireEnabled(); fields(p, ['assessment_id','expected_basis_fingerprint','expected_context_fingerprint','reason']);
@@ -374,6 +389,102 @@ export class AudienceLoop {
       parent_basis_fingerprint: row.basis_fingerprint, context_fingerprint: context.context_fingerprint,
       reason: p.reason.trim(), max_model_turns: 1 }, 'operator');
     return { assessment_id: assessmentId, retry_of: row.id, ...AUTHORITY };
+  }
+  ordinaryAttemptFingerprint(packet) {
+    const context = digest(packet.scope);
+    return packet.reasoning_retry ? digest({ purpose: 'explicit_audience_retry_v1', context_fingerprint: context,
+      retry_of: packet.reasoning_retry.retry_of }) : context;
+  }
+  ordinaryPacketProof(row) {
+    let packet;
+    try { packet = row.packet ?? parse(row.packet_json); } catch { check(false, 'AUDIENCE_RECORD_INVALID'); }
+    check(packet && typeof packet === 'object' && !Array.isArray(packet) && !packet.reassessment && packet.scope, 'AUDIENCE_RECORD_INVALID');
+    if (packet.reasoning_retry !== undefined) check(validateReasoningRetry(packet.reasoning_retry)
+      && packet.reasoning_retry.context_fingerprint === digest(packet.scope), 'AUDIENCE_RECORD_INVALID');
+    check(packet.id === row.goal_id
+      && packet.assessment_id === row.id && packet.proposal_contract_version === 2
+      && packet.basis_fingerprint === row.basis_fingerprint
+      && this.ordinaryAttemptFingerprint(packet) === row.basis_fingerprint, 'AUDIENCE_RECORD_INVALID');
+    return packet;
+  }
+  failedOrdinary(row) {
+    check(['interrupted','invalid'].includes(row.status) && row.producer === 'model', 'AUDIENCE_RETRY_UNAVAILABLE');
+    const packet = this.ordinaryPacketProof(row);
+    const run = this.store.get('SELECT * FROM runs WHERE id=? AND partner_id=?', row.run_id, this.partnerId);
+    check(run && run.runtime === 'hermes-audience-v1', 'AUDIENCE_RECORD_INVALID');
+    check(['failed','interrupted'].includes(run.status), 'AUDIENCE_RETRY_UNAVAILABLE');
+    let frozen, receipt;
+    try { frozen = parse(run.context_json); receipt = run.result_json ? parse(run.result_json) : null; }
+    catch { check(false, 'AUDIENCE_RECORD_INVALID'); }
+    check(frozen?.assessment_id === row.id && frozen.goal_id === row.goal_id && frozen.packet && digest(frozen.packet) === digest(packet)
+      && (!receipt || typeof receipt === 'object' && !Array.isArray(receipt)
+        && !['proposal_created','no_revision_proposed'].includes(receipt.disposition)), 'AUDIENCE_RECORD_INVALID');
+    if (!packet.reasoning_retry) this.service.attention.assertHistory(run.id, row, frozen.attention_grant);
+    else check(!frozen.attention_grant && !this.store.get('SELECT run_id FROM audience_attention_attempts WHERE run_id=?', run.id), 'AUDIENCE_RECORD_INVALID');
+    return { row, packet, run };
+  }
+  ordinaryRetryState(row) {
+    const reasons = []; let eligible = false, child = null, context = null;
+    try {
+      const parent = this.failedOrdinary(row); context = digest(parent.packet.scope);
+      this.assertAssessmentCurrent(row);
+      check(this.service.attention.scope(row.goal_id).fingerprint !== null, 'AUDIENCE_STALE_BASIS'); eligible = true;
+      const packet = { ...parent.packet, reasoning_retry: { version: 1, model_requested: true,
+        retry_of: { assessment_id: row.id, basis_fingerprint: row.basis_fingerprint }, context_fingerprint: context } };
+      child = this.store.get('SELECT id,status FROM audience_assessments WHERE goal_id=? AND basis_fingerprint=?', row.goal_id, this.ordinaryAttemptFingerprint(packet)) ?? null;
+      if (child) reasons.push('AUDIENCE_ALREADY_CONSIDERED');
+      if (this.store.get("SELECT id FROM audience_assessments WHERE goal_id=? AND status IN ('captured','running') LIMIT 1", row.goal_id)) reasons.push('AUDIENCE_ASSESSMENT_PENDING');
+      this.service.control.assertModelBudget({ runtime: 'hermes-audience-v1', maxRunsPerDay: this.service.config.audience.maxRunsPerDay });
+    } catch (error) {
+      if (!(error instanceof AppError) && !(error instanceof SyntaxError)) throw error;
+      reasons.push(error.code ?? 'AUDIENCE_RECORD_INVALID');
+    }
+    if (!this.enabled()) reasons.push('AUDIENCE_DISABLED');
+    if (this.service.config.audience?.modelEnabled !== true) reasons.push('AUDIENCE_MODEL_DISABLED');
+    if (this.service.config.controlPlane?.enabled !== true) reasons.push('AUDIENCE_CONTROL_REQUIRED');
+    return { kind: 'ordinary', context_fingerprint: context, eligible, available: eligible && reasons.length === 0,
+      reasons: [...new Set(reasons)], child_assessment: child };
+  }
+  assertOrdinaryRetryRequest(p) {
+    this.requireEnabled(); fields(p, ['assessment_id','expected_basis_fingerprint','expected_context_fingerprint','reason']);
+    check(this.service.config.audience?.modelEnabled === true, 'AUDIENCE_MODEL_DISABLED');
+    check(this.service.config.controlPlane?.enabled === true, 'AUDIENCE_CONTROL_REQUIRED');
+    check(typeof p.assessment_id === 'string' && p.assessment_id.length > 0 && p.assessment_id.length <= 36
+      && typeof p.expected_context_fingerprint === 'string'
+      && typeof p.reason === 'string' && p.reason.trim().length > 0 && p.reason.length <= 500, 'AUDIENCE_FIELDS_INVALID', 400);
+    const parent = this.failedOrdinary(this.assessmentRecord(p.assessment_id));
+    check(parent.row.basis_fingerprint === p.expected_basis_fingerprint, 'AUDIENCE_STALE_BASIS');
+    this.assertAssessmentCurrent(parent.row);
+    check(digest(parent.packet.scope) === p.expected_context_fingerprint, 'AUDIENCE_STALE_BASIS');
+    check(this.service.attention.scope(parent.row.goal_id).fingerprint !== null, 'AUDIENCE_STALE_BASIS');
+    return parent;
+  }
+  retryAssessment(p) {
+    const { row, packet: previous } = this.assertOrdinaryRetryRequest(p);
+    const packet = structuredClone(previous), assessmentId = id();
+    packet.assessment_id = assessmentId;
+    packet.reasoning_retry = { version: 1, model_requested: true,
+      retry_of: { assessment_id: row.id, basis_fingerprint: row.basis_fingerprint }, context_fingerprint: digest(packet.scope) };
+    const basis = this.ordinaryAttemptFingerprint(packet);
+    check(!this.store.get('SELECT id FROM audience_assessments WHERE goal_id=? AND basis_fingerprint=?', row.goal_id, basis), 'AUDIENCE_ALREADY_CONSIDERED');
+    check(!this.store.get("SELECT id FROM audience_assessments WHERE goal_id=? AND status IN ('captured','running')", row.goal_id), 'AUDIENCE_ASSESSMENT_PENDING');
+    this.service.control.assertModelBudget({ runtime: 'hermes-audience-v1', maxRunsPerDay: this.service.config.audience.maxRunsPerDay });
+    packet.basis_fingerprint = basis;
+    packet.reasoning_model_fingerprint = digest(this.service.attention.modelScope());
+    this.store.run("INSERT INTO audience_assessments VALUES(?,?,?,?,'captured','operator',NULL,NULL,?)", assessmentId, row.goal_id, basis, JSON.stringify(packet), now());
+    this.record('assessment_retry_requested', { assessment_id: assessmentId, retry_of: row.id,
+      parent_basis_fingerprint: row.basis_fingerprint, context_fingerprint: digest(packet.scope),
+      reason: p.reason.trim(), max_model_turns: 1 }, 'operator');
+    return { assessment_id: assessmentId, retry_of: row.id, ...AUTHORITY };
+  }
+  cancelAssessment(p) {
+    fields(p, ['assessment_id','expected_basis_fingerprint']); const row = this.assessmentRecord(p.assessment_id);
+    this.ordinaryPacketProof(row);
+    check(row.basis_fingerprint === p.expected_basis_fingerprint, 'AUDIENCE_STALE_BASIS');
+    check(['captured','running'].includes(row.status), 'AUDIENCE_ASSESSMENT_UNAVAILABLE');
+    this.store.run("UPDATE audience_assessments SET status='interrupted' WHERE id=?", row.id);
+    this.record('assessment_canceled', { assessment_id: row.id }, 'operator');
+    return { assessment_id: row.id, ...AUTHORITY };
   }
   reassessmentContext(needId) {
     const need = this.need(needId, { includeWorkCase: false }), goal = this.goal(need.goal_id);
@@ -489,6 +600,7 @@ export class AudienceLoop {
         catch { return { ...a, reason: 'AUDIENCE_RECORD_INVALID' }; }
       });
     return { ...goal, watches: projected, exchanges, needs, assessments, backlog,
+      ...(!hypothesisMemory ? { attention: this.service.attention.summary(goalId) } : {}),
       withheld_exchanges: queues.flat().filter(e => !e.current).slice(0, BATCH),
       basis_fingerprint: digest(basis), ready: this.enabled() && goal.status === 'OPEN' && exchanges.length > 0,
       coverage: { batch_exchanges: BATCH, max_messages_per_exchange: MEMBERS, source_capacity: this.service.config.audience?.maxExchangesPerSource ?? 100,
@@ -554,6 +666,25 @@ export class AudienceLoop {
           && Array.isArray(packet.needs) && packet.needs.length === 1
           && digest(packet.needs[0]) === digest(this.hypothesisMemory(need)), 'AUDIENCE_RECORD_INVALID');
       }
+    } else if (packet.reasoning_retry !== undefined) {
+      this.ordinaryPacketProof(row);
+      check(packet.reasoning_model_fingerprint === digest(this.service.attention.modelScope()), 'AUDIENCE_STALE_BASIS');
+      check(digest(this.observationHeads(goal.id)) === digest(packet.observation_heads), 'AUDIENCE_STALE_BASIS');
+      if (row.status !== 'proposed') {
+        const parent = this.failedOrdinary(this.assessmentRecord(packet.reasoning_retry.retry_of.assessment_id));
+        check(parent.row.id !== row.id && parent.row.goal_id === row.goal_id
+          && parent.row.basis_fingerprint === packet.reasoning_retry.retry_of.basis_fingerprint
+          && digest(parent.packet.scope) === packet.reasoning_retry.context_fingerprint
+          && digest(parent.packet.observation_heads) === digest(packet.observation_heads), 'AUDIENCE_RECORD_INVALID');
+      }
+    }
+    if (!packet.reassessment && (packet.reasoning_retry !== undefined || ['interrupted','invalid'].includes(row.status) && row.producer === 'model')) {
+      check(digest(this.observationHeads(goal.id)) === digest(packet.observation_heads), 'AUDIENCE_STALE_BASIS');
+      const canonical = packet.scope.exchanges.map(e => this.exchangeState(goal,
+        this.store.get('SELECT * FROM audience_exchanges WHERE id=? AND goal_id=?', e.id, goal.id)));
+      const sourceContent = exchanges => exchanges.map(e => ({ id: e.id, source_ref: e.source_ref,
+        fingerprint: e.fingerprint, evidence: e.evidence, unsupported_count: e.unsupported_count }));
+      check(Array.isArray(packet.exchanges) && digest(sourceContent(packet.exchanges)) === digest(sourceContent(canonical)), 'AUDIENCE_RECORD_INVALID');
     }
     return goal;
   }
@@ -563,7 +694,7 @@ export class AudienceLoop {
     const { packet_json, output_json, ...rest } = row;
     const packet = parse(packet_json);
     return { ...rest, packet, output: output_json ? parse(output_json) : null,
-      ...(packet.reassessment ? { retry: this.retryState(row), attempt_receipt: this.attemptReceipt(row) } : {}),
+      retry: packet.reassessment ? this.retryState(row) : this.ordinaryRetryState(row), attempt_receipt: this.attemptReceipt(row),
       current, reviewable: current && ['captured', 'running', 'proposed'].includes(row.status), ...AUTHORITY };
   }
   propose(p, producer = 'operator') {
@@ -773,7 +904,7 @@ export class AudienceLoop {
       try {
       const packet = parse(a.packet_json), state = this.basisState(packet.scope);
       if (state.reasons.some(r => !TEMPORARY.has(r))) this.store.run("UPDATE audience_assessments SET status='stale' WHERE id=?", a.id);
-      else if (state.current && packet.reassessment && a.status === 'captured') this.assertAssessmentCurrent(a);
+      else if (state.current && (packet.reassessment || packet.reasoning_retry) && a.status === 'captured') this.assertAssessmentCurrent(a);
       } catch (error) {
         if (!(error instanceof AppError) && !(error instanceof SyntaxError)) throw error;
         this.store.run("UPDATE audience_assessments SET status='stale' WHERE id=?", a.id);
@@ -829,6 +960,10 @@ export class AudienceLoop {
     if (action === 'audience.reassess') return this.reassess(p);
     if (action === 'audience.retry_reassessment') return this.retryReassessment(p);
     if (action === 'audience.cancel_reassessment') return this.cancelReassessment(p);
+    if (action === 'audience.retry_assessment') return this.retryAssessment(p);
+    if (action === 'audience.cancel_assessment') return this.cancelAssessment(p);
+    if (action === 'audience.attention_grant') return this.service.attention.grant(p);
+    if (action === 'audience.attention_revoke') return this.service.attention.revoke(p);
     if (action === 'audience.propose') return this.propose(p);
     if (action === 'audience.review') return this.review(p);
     if (action === 'audience.open_work') return this.openWork(p);
