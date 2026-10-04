@@ -12,6 +12,7 @@ import { OUTCOME_TABLES } from '../business/outcome-tables.mjs';
 import { WORK_TABLES, CONTROL_TABLES } from '../business/work-tables.mjs';
 import { SCOUT_TABLES } from '../business/scout-tables.mjs';
 import { AUDIENCE_TABLES, AUDIENCE_ATTENTION_TABLES } from '../business/audience-tables.mjs';
+import { MODEL_PROFILE_TABLES } from '../business/model-profile-tables.mjs';
 import { BusinessService } from '../business/service.mjs';
 
 const [source,destinationArg] = process.argv.slice(2);
@@ -23,7 +24,7 @@ if (fs.existsSync(destination)) throw new Error('Destination already exists. Cho
 if (bundle.format !== 'digital-ai-partner' || bundle.schema_version !== 1 || !bundle.tables) throw new Error('Unsupported bundle');
 const migrationCount = Array.isArray(bundle.migrations) ? bundle.migrations.length : -1;
 const without = (...groups) => {
-  const excluded = new Set([...groups.flat(),...SCOUT_TABLES,...AUDIENCE_TABLES]);
+  const excluded = new Set([...groups.flat(),...SCOUT_TABLES,...AUDIENCE_TABLES,...MODEL_PROFILE_TABLES]);
   return TABLES.filter(table => !excluded.has(table));
 };
 // These are historical export catalogues. Deriving them from the current list alone silently
@@ -38,9 +39,10 @@ const inputCatalogues = new Map([
   [8, without(WORK_TABLES, CONTROL_TABLES)],
   [9, without(WORK_TABLES, CONTROL_TABLES)],
   [10, without()],
-  [11, TABLES.filter(table => !AUDIENCE_TABLES.includes(table))],
-  [12, TABLES.filter(table => !AUDIENCE_ATTENTION_TABLES.includes(table))],
-  [13, TABLES],
+  [11, TABLES.filter(table => !AUDIENCE_TABLES.includes(table) && !MODEL_PROFILE_TABLES.includes(table))],
+  [12, TABLES.filter(table => !AUDIENCE_ATTENTION_TABLES.includes(table) && !MODEL_PROFILE_TABLES.includes(table))],
+  [13, TABLES.filter(table => !MODEL_PROFILE_TABLES.includes(table))],
+  [14, TABLES],
 ]);
 const inputTables = inputCatalogues.get(migrationCount);
 if (!inputTables) throw new Error('Migration version differs');
@@ -296,6 +298,9 @@ try {
     }
     if (migrationCount >= 13) {
       store.run("UPDATE audience_attention_grants SET status='revoked',revoked_at=?,revocation_reason='TRANSFER_AUTHORITY_REQUIRES_REVIEW'", new Date().toISOString());
+    }
+    if (migrationCount >= 14) {
+      store.run("UPDATE model_profiles SET status='revoked',revoked_at=?,revocation_reason='TRANSFER_AUTHORITY_REQUIRES_REVIEW' WHERE status='available'", new Date().toISOString());
     }
     // Observation cursors are local recovery progress, not transferable evidence.
     // Replaying committed intents is idempotent and never repeats a send.

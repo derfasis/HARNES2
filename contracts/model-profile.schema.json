@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "label", "provider", "api_mode", "base_url", "model", "max_output_tokens",
+    "input_usd_per_million", "output_usd_per_million"
+  ],
+  "properties": {
+    "label": { "type": "string", "minLength": 1, "maxLength": 100 },
+    "provider": { "enum": ["custom"] },
+    "api_mode": { "enum": ["chat_completions", "responses"] },
+    "base_url": { "type": "string", "minLength": 8, "maxLength": 500 },
+    "model": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "max_output_tokens": { "type": "integer", "minimum": 128, "maximum": 16000 },
+    "input_usd_per_million": { "type": ["number", "null"], "minimum": 0, "maximum": 1000000 },
+    "output_usd_per_million": { "type": ["number", "null"], "minimum": 0, "maximum": 1000000 }
+  }
+}

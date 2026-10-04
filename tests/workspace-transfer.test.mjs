@@ -10,6 +10,7 @@ import { exportPartner } from '../business/export.mjs';
 import { WORK_TABLES, CONTROL_TABLES } from '../business/work-tables.mjs';
 import { SCOUT_TABLES } from '../business/scout-tables.mjs';
 import { AUDIENCE_TABLES } from '../business/audience-tables.mjs';
+import { MODEL_PROFILE_TABLES } from '../business/model-profile-tables.mjs';
 import { BusinessService } from '../business/service.mjs';
 import { workspaceHarness } from './helpers/workspace-harness.mjs';
 
@@ -37,6 +38,9 @@ function addPrivateHistory(h) {
 
 function importBundle(t, h, destinationName, { migrationCount = 12 } = {}) {
   const bundle = exportPartner(h.store);
+  if (migrationCount < 14) {
+    for (const table of MODEL_PROFILE_TABLES) delete bundle.tables[table];
+  }
   if (migrationCount < 13) {
     delete bundle.tables.audience_attention_grants;
     delete bundle.tables.audience_attention_attempts;
@@ -50,7 +54,7 @@ function importBundle(t, h, destinationName, { migrationCount = 12 } = {}) {
   if (migrationCount < 10) {
     for (const table of [...WORK_TABLES, ...CONTROL_TABLES]) delete bundle.tables[table];
   }
-  if (migrationCount < 13) {
+  if (migrationCount < 14) {
     bundle.migrations = bundle.migrations.slice(0, migrationCount);
     bundle.tables_sha256 = hash(JSON.stringify(bundle.tables));
   }
@@ -149,7 +153,7 @@ test('schema-9 bundle remains a supported positive control with Outcome transfer
   assert.equal(Object.keys(bundle.tables).some(table => [...WORK_TABLES, ...CONTROL_TABLES].includes(table)), false);
   const store = new Store(path.join(destination, 'data'));
   try {
-    assert.equal(store.all('SELECT * FROM schema_migrations').length, 13);
+    assert.equal(store.all('SELECT * FROM schema_migrations').length, 14);
     assert.equal(store.get('SELECT COUNT(*) n FROM work_cases').n, 0);
     assert.equal(store.get('SELECT COUNT(*) n FROM control_tickets').n, 0);
     assert.deepEqual(store.all('PRAGMA foreign_key_check'), []);
@@ -163,7 +167,7 @@ test('schema-10 historical bundle has work/control state but excludes later Scou
   assert.equal(Object.hasOwn(bundle.tables,'work_cases'),true);
   const store=new Store(path.join(destination,'data'));
   try{
-    assert.equal(store.all('SELECT * FROM schema_migrations').length,13);
+    assert.equal(store.all('SELECT * FROM schema_migrations').length,14);
     assert.equal(store.get('SELECT COUNT(*) n FROM work_cases WHERE id=?',caseId).n,1);
     assert.equal(store.get('SELECT COUNT(*) n FROM scout_campaigns').n,0);
     assert.deepEqual(store.all('PRAGMA foreign_key_check'),[]);

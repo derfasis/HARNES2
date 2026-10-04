@@ -35,7 +35,7 @@ test('schema-12 transfer preserves audience work scope while revoking its author
   assert.ok(opened.case_id);
 
   const bundle = exportPartner(h.store), file = path.join(h.directory, 'audience-transfer.json');
-  assert.equal(bundle.migrations.length, 13);
+  assert.equal(bundle.migrations.length, 14);
   assert.equal(bundle.tables.audience_needs.find(row => row.id === need.id).status, 'accepted');
   assert.equal(bundle.tables.audience_work_links.find(row => row.thread_id === work.thread_id).need_id, need.id);
   fs.writeFileSync(file, JSON.stringify(bundle), { flag: 'wx' });

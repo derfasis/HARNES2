@@ -40,7 +40,7 @@ export function audienceModelPacket(packet) {
     executable:false,contact_permission:false,allowed_effects:[] });
 }
 
-export function assessmentDecision({ row, packet, output, run, current, validateOutput }) {
+export function assessmentDecision({ row, packet, output, run, current, validateOutput, validateAuthority }) {
   const envelope = {scope:'supplied_packet_only',epistemic_status:'unverified_model_interpretation',resolution:'unknown',
     state:'not_recorded',review:null};
   if (!output?.decision_review) {
@@ -69,6 +69,7 @@ export function assessmentDecision({ row, packet, output, run, current, validate
     check(receipt.disposition === (output.needs.length ? 'proposal_created' : packet.reassessment ? 'no_revision_proposed' : 'no_need_proposed'),
       'AUDIENCE_DECISION_RECEIPT_INVALID');
     decisionBindings(output,packet);
+    if (validateAuthority) validateAuthority(frozen);
     return {...envelope,state:current ? 'current' : 'stale',review:output.decision_review};
   } catch {
     return {...envelope,state:'invalid',reason:'AUDIENCE_DECISION_RECEIPT_INVALID'};

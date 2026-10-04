@@ -21,7 +21,10 @@ export class HermesAdapter {
   constructor(service, tokens) { this.service = service; this.tokens = tokens; this.children = new Map(); }
   decide(run, context) { automaticBoundary(this.service); return this.run(run, context, true); }
   async run(run, context, decision = false) {
-    const config = this.service.config, controlEnabled = config.controlPlane?.enabled === true || !!this.service.control?.ticket(run.id);
+    const globalConfig = this.service.config;
+    const config = decision && run.runtime === 'hermes-audience-v1' && JSON.parse(run.context_json).model_profile
+      ? { ...globalConfig, runtime: this.service.attention.runtimeForRun(run) } : globalConfig;
+    const controlEnabled = config.controlPlane?.enabled === true || !!this.service.control?.ticket(run.id);
     let ticket = null;
     if (decision) {
       automaticBoundary(this.service);

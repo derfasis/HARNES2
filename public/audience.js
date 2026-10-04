@@ -52,7 +52,7 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
     const notice = disabled
       ? '<div class="section-note">Audience Intelligence выключен в конфигурации. Новые цели, сбор и принятие выключены; сохранённые записи доступны для просмотра и отклонения.</div>'
       : listing.model_enabled !== true
-        ? '<div class="section-note">Модельные вызовы выключены. Сбор и предложение выполняются оператором вручную на выбранных разрешённых источниках.</div>'
+        ? '<div class="section-note">Глобальные модельные вызовы выключены. Обычная Audience-оценка может выполняться по отдельному конечному разрешению цели и профиля; это может повлечь оплату. Без такого разрешения сбор и предложение выполняются оператором вручную.</div>'
         : '<div class="section-note">Глобальная возможность модельных вызовов включена. Для каждой цели отдельно требуется действующее конечное разрешение на внимание и проверка свежести источников и бюджета. Кнопка «Собрать основание» создаёт операторский снимок. Предложение не принимается автоматически.</div>';
     let html = notice + panel('Рабочие цели', selectedRows(listing.items ?? [], 'goal', selectedGoal)
       || empty('Целей пока нет', 'Создайте ограниченную цель и укажите источники, уже разрешённые для чтения.'),
@@ -100,21 +100,52 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
     const a = g.attention;
     if (!a || typeof a !== 'object') return '';
     const grants = Array.isArray(a.grants) ? a.grants : [];
-    const rows = grants.map(grant => `<article class="lesson">
-      <p><strong>Разрешение ${esc(grant.id ?? 'не указано')}</strong> · ${esc(grant.status ?? grant.state ?? 'состояние неизвестно')}</p>
-      <p>Попытки: использовано ${esc(grant.attempts_used ?? 'неизвестно')} из ${esc(grant.max_attempts ?? 'неизвестно')} · осталось ${esc(grant.remaining_attempts ?? 'неизвестно')} · до ${esc(grant.expires_at ?? 'неизвестно')}.</p>
-      ${grant.status !== 'revoked' && grant.state !== 'revoked' ? button('Отозвать разрешение', 'audience-attention-revoke', grant.id, 'danger') : ''}
-    </article>`).join('') || '<p>Разрешений на модельное внимание для этой цели нет.</p>';
+    const profiles = Array.isArray(a.profile_options) ? a.profile_options : [];
+    const profileRows = profiles.map(profile => {
+      const config = profile.model_config && typeof profile.model_config === 'object' ? profile.model_config : {};
+      const profileModel = config.model ?? config.model_id ?? 'модель не указана';
+      const profileProvider = config.provider ?? 'провайдер не указан';
+      const profileEndpoint = config.base_url ?? config.baseUrl ?? 'endpoint не указан';
+      return `<article class="lesson">
+        <p><strong>Профиль ${esc(profile.label ?? profile.profile_id ?? 'без названия')}</strong> · ${esc(profile.state ?? 'состояние неизвестно')}</p>
+        <p>ID: <code>${esc(profile.profile_id ?? 'не указан')}</code> · отпечаток определения: <code>${esc(profile.definition_hash ?? 'не указан')}</code></p>
+        <p>Модель: ${esc(profileProvider)} · ${esc(profileModel)} · ${esc(profileEndpoint)}</p>
+        <p>Готовность вызова: ${profile.model_ready === true ? 'готов при отдельном разрешении' : 'не готова'} · область цели: <code>${esc(profile.scope_fingerprint ?? 'не указана')}</code></p>
+        ${profile.block_reasons?.length ? `<p><strong>Ограничения:</strong> ${esc(profile.block_reasons.join('; '))}</p>` : ''}
+        ${profile.state !== 'revoked' && profile.state !== 'stale' && typeof profile.definition_hash === 'string' && profile.definition_hash
+          ? button('Отозвать профиль', 'audience-attention-profile-revoke', profile.profile_id, 'danger') : ''}
+      </article>`;
+    }).join('') || '<p>Профилей для этой цели нет.</p>';
+    const rows = grants.map(grant => {
+      const boundId = grant.model_profile?.id ?? null;
+      const boundProfile = boundId ? profiles.find(profile => profile.profile_id === boundId) : null;
+      const boundHash = grant.model_profile?.definition_hash ?? boundProfile?.definition_hash ?? (boundId ? 'не указан' : 'глобальная legacy-модель');
+      return `<article class="lesson">
+        <p><strong>Разрешение ${esc(grant.id ?? 'не указано')}</strong> · ${esc(grant.status ?? grant.state ?? 'состояние неизвестно')}</p>
+        <p>Попытки: использовано ${esc(grant.attempts_used ?? 'неизвестно')} из ${esc(grant.max_attempts ?? 'неизвестно')} · осталось ${esc(grant.remaining_attempts ?? 'неизвестно')} · до ${esc(grant.expires_at ?? 'неизвестно')}.</p>
+        <p>Привязка модели: ${boundId ? `профиль ${esc(boundId)} · отпечаток ${esc(boundHash)}` : esc(boundHash)}</p>
+        ${grant.status !== 'revoked' && grant.state !== 'revoked' ? button('Отозвать разрешение', 'audience-attention-revoke', grant.id, 'danger') : ''}
+      </article>`;
+    }).join('') || '<p>Разрешений на модельное внимание для этой цели нет.</p>';
+    const allowedBaseUrls = Array.isArray(a.allowed_base_urls) ? a.allowed_base_urls.filter(url => typeof url === 'string' && url.trim()) : [];
+    const grantableProfiles = profiles.filter(profile => profile.can_grant === true && profile.model_ready === true
+      && profile.state !== 'revoked' && typeof profile.profile_id === 'string'
+      && typeof profile.scope_fingerprint === 'string' && profile.scope_fingerprint);
+    const canOfferGrant = a.can_grant === true || grantableProfiles.length > 0;
     return panel('Ограниченное модельное внимание', `<p><strong>Настройка модели:</strong> ${a.model_configured === true ? 'провайдер и модель настроены' : 'настройка провайдера не подтверждена'}.</p>
       <p><strong>Готовность вызова:</strong> ${a.model_ready === true ? 'вызов готов при наличии отдельного разрешения' : 'готовность вызова не подтверждена'}.</p>
       <p><strong>Глобальный переключатель:</strong> ${listing?.model_enabled === true ? 'включён' : 'выключен'}. Он независим от разрешения этой цели.</p>
+      <p><strong>Локальный credential readiness:</strong> ${a.credential_ready === true ? 'учётные данные готовы; значение ключа скрыто' : a.credential_ready === false ? 'учётные данные не готовы; ключ не запрашивается здесь' : 'готовность учётных данных неизвестна'}.</p>
+      <p><strong>Разрешённые model endpoints:</strong> ${allowedBaseUrls.length ? allowedBaseUrls.map(url => esc(url)).join('; ') : 'не указаны'}.</p>
       <p><strong>Разрешение на чтение и актуальность источника:</strong> ${a.source_current === true ? 'подтверждены' : 'не подтверждены'}.</p>
       <p><strong>Готовность цели:</strong> ${a.ready === true ? 'модельная оценка допущена условиями' : 'оценка сейчас не готова'}.</p>
       ${a.block_reasons?.length ? `<p><strong>Ограничения:</strong> ${esc(a.block_reasons.join('; '))}</p>` : ''}
       <p><strong>Отпечаток области действия:</strong> <code>${esc(a.scope_fingerprint ?? 'не указан')}</code></p>
+      <h3>Неизменяемые профили модели</h3>${profileRows}
+      ${allowedBaseUrls.length ? button('Создать профиль модели', 'audience-attention-profile-create', g.id, 'secondary') : '<p>Создать профиль нельзя: сервер не сообщил разрешённые endpoints.</p>'}
       ${rows}
-      ${a.can_grant === true ? button('Разрешить ограниченное внимание', 'audience-attention-grant', g.id, 'secondary') : '<p>Новое разрешение сейчас недоступно.</p>'}
-      <p class="muted tiny">Разрешение задаёт конечный предел только для этой цели. Оно не включает глобальную модель, не запускает её и не разрешает принятие гипотезы, работу, контакт или отправку. Стоимость может быть неизвестна.</p>`);
+      ${canOfferGrant ? button('Разрешить ограниченное внимание', 'audience-attention-grant', g.id, 'secondary') : '<p>Новое разрешение сейчас недоступно.</p>'}
+      <p class="muted tiny">Разрешение задаёт конечный предел только для этой цели и выбранного профиля. Подтверждение может разрешить платную обычную Audience-оценку; создание профиля само по себе вызовов не делает. Результат остаётся предложением и не принимает гипотезу, не создаёт работу, контакт или отправку. Стоимость может быть неизвестна.</p>`);
   }
 
   function openAssessmentRetry(a) {
@@ -397,16 +428,75 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
     if (action === 'audience-assessment') { selectedAssessment = id; selectedNeed = null; await load(); return; }
     if (action === 'audience-next') { cursor = listing?.next_cursor ?? ''; await load(); return; }
     if (!goal) throw new Error('Сначала откройте цель.');
+    if (action === 'audience-attention-profile-create') {
+      const current = goal, attention = current.attention;
+      const allowed = Array.isArray(attention?.allowed_base_urls)
+        ? [...new Set(attention.allowed_base_urls.filter(url => typeof url === 'string' && url.trim()))] : [];
+      if (current.id !== id || !allowed.length) throw new Error('Нет разрешённого сервером endpoint для профиля. Обновите цель.');
+      const frozen = { goal_id:current.id, expected_revision:current.revision };
+      const content = '<p>Профиль — неизменяемая запись настроек. Его создание не запускает модель и не списывает средства. Секреты и произвольные адреса здесь не принимаются.</p>'
+        + field('label', 'Название профиля') + field('provider', 'Совместимый endpoint', 'select', 'custom', [['custom','OpenAI-compatible / CLIProxyAPI']])
+        + field('api_mode', 'Режим API', 'select', 'chat_completions', [['chat_completions','Chat Completions'],['responses','Responses']])
+        + field('base_url', 'Разрешённый endpoint', 'select', allowed[0], allowed.map(url => [url,url]))
+        + field('model', 'Модель') + field('max_output_tokens', 'Лимит выходных токенов', 'number', '2048')
+        + field('input_usd_per_million', 'Цена входа USD за миллион токенов (необязательно)', 'number')
+        + field('output_usd_per_million', 'Цена выхода USD за миллион токенов (необязательно)', 'number')
+        + '<p class="muted tiny">Учётные данные не вводятся и остаются в локальной конфигурации. Настройки глобальной модели не меняются.</p>';
+      modal('Создать неизменяемый профиль модели', content, async p => {
+        const baseUrl = String(p.base_url ?? '').trim();
+        if (!allowed.includes(baseUrl)) throw new Error('Выберите endpoint из актуального серверного списка.');
+        const label = String(p.label ?? '').trim(), provider = String(p.provider ?? '').trim();
+        const model = String(p.model ?? '').trim(), apiMode = String(p.api_mode ?? '');
+        const maxOutputTokens = Number(p.max_output_tokens);
+        const optionalPrice = value => value === '' || value == null ? null : Number(value);
+        const inputPrice = optionalPrice(p.input_usd_per_million), outputPrice = optionalPrice(p.output_usd_per_million);
+        if (!label || label.length > 100 || provider !== 'custom'
+          || !model || model.length > 200 || !['chat_completions','responses'].includes(apiMode)
+          || !Number.isInteger(maxOutputTokens) || maxOutputTokens < 128 || maxOutputTokens > 16000
+          || [inputPrice,outputPrice].some(price => price !== null && (!Number.isFinite(price) || price < 0 || price > 1000000))) {
+          throw new Error('Проверьте название, провайдера, режим, модель, лимит и необязательные цены.');
+        }
+        if (goal?.id !== frozen.goal_id || goal?.revision !== frozen.expected_revision) throw new Error('Цель изменилась. Обновите её перед созданием профиля.');
+        await command('model.profile_create', { label, provider, api_mode:apiMode, base_url:baseUrl,
+          model, max_output_tokens:maxOutputTokens, input_usd_per_million:inputPrice,
+          output_usd_per_million:outputPrice });
+        await load();
+      }); return;
+    }
+    if (action === 'audience-attention-profile-revoke') {
+      const profile = (goal.attention?.profile_options ?? []).find(row => row.profile_id === id);
+      if (!profile || !profile.definition_hash || ['revoked','stale'].includes(profile.state)) {
+        throw new Error('Этот профиль нельзя отозвать из текущего состояния цели.');
+      }
+      const frozen = { profile_id:profile.profile_id, expected_definition_hash:profile.definition_hash };
+      modal('Отозвать профиль модели', '<p>Отзыв запретит использовать профиль в новых разрешениях и вызовах. Исторические записи сохранятся.</p>'
+        + field('reason', 'Причина отзыва', 'textarea'), async p => {
+        const reason = String(p.reason ?? '').trim();
+        if (!reason || reason.length > 500) throw new Error('Укажите причину отзыва длиной от 1 до 500 знаков.');
+        await command('model.profile_revoke', { ...frozen, reason });
+        await load();
+      }); return;
+    }
     if (action === 'audience-attention-grant') {
       const current = goal, attention = current.attention;
-      if (current.id !== id || attention?.can_grant !== true
-        || typeof attention.scope_fingerprint !== 'string' || !attention.scope_fingerprint) {
-        throw new Error('Разрешение недоступно: обновите цель и проверьте модель, источники и действующие разрешения.');
-      }
-      const frozen = { goal_id:current.id, expected_revision:current.revision,
-        expected_scope_fingerprint:attention.scope_fingerprint };
+      if (current.id !== id || !attention) throw new Error('Разрешение недоступно: обновите цель.');
+      const profiles = Array.isArray(attention.profile_options) ? attention.profile_options : [];
+      const choices = profiles.filter(profile => profile.can_grant === true && profile.model_ready === true
+        && profile.state !== 'revoked' && typeof profile.profile_id === 'string'
+        && typeof profile.scope_fingerprint === 'string' && profile.scope_fingerprint);
+      const legacyAvailable = attention.can_grant === true && typeof attention.scope_fingerprint === 'string' && attention.scope_fingerprint;
+      if (!choices.length && !legacyAvailable) throw new Error('Нет готовой модели с актуальным основанием для разрешения.');
+      const options = [
+        ['', 'Выберите модель для этого разрешения'],
+        ...(legacyAvailable ? [['legacy','Глобальная legacy-модель']] : []),
+        ...choices.map(profile => [profile.profile_id, `${profile.label ?? profile.profile_id} · ${profile.profile_id} · ${profile.definition_hash ?? 'без хеша'}`]),
+      ];
+      // Preserve the existing one-click legacy path only when there is no
+      // scoped profile to choose; when profiles exist the operator must pick.
+      const defaultProfile = choices.length === 0 && legacyAvailable ? 'legacy' : '';
+      const frozen = { goal_id:current.id, expected_revision:current.revision };
       const defaultExpiry = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-      modal('Ограниченное модельное внимание для цели', `<p>Это разрешение ограничено выбранной целью и числом попыток. Оно не включает глобальную модель и не запускает вызов; готовность модели, свежесть источника и ресурсный бюджет проверяются отдельно.</p>${field('max_attempts', 'Максимум попыток (1–50)', 'number', '1')}${field('expires_at', 'Истекает (ISO 8601 UTC, не более чем через 7 дней)', 'text', defaultExpiry)}${field('reason', 'Причина разрешения', 'textarea')}<p class="muted tiny">Модельный ответ остаётся предложением для владельца. Разрешение не допускает принятие гипотезы, создание работы, контакт или отправку.</p>`, async p => {
+      modal('Ограниченное модельное внимание для цели', `<p>Разрешение привязано к выбранной цели, профилю и числу попыток. Подтверждение само не отправляет запрос напрямую, но может допустить модельный вызов при ближайшем обычном Audience-проходе. Он может повлечь оплату. Глобальные переключатели не меняются; свежесть источника и бюджеты проверяются отдельно.</p>${field('model_profile_id', 'Модельный профиль', 'select', defaultProfile, options)}${field('max_attempts', 'Максимум попыток (1–50)', 'number', '1')}${field('expires_at', 'Истекает (ISO 8601 UTC, не более чем через 7 дней)', 'text', defaultExpiry)}${field('reason', 'Причина разрешения', 'textarea')}<p class="muted tiny">Стоимость может быть неизвестна. Результат остаётся предложением владельцу: это не принимает гипотезу, не создаёт работу, контакт и не разрешает отправку.</p>`, async p => {
         const maxAttempts = Number(p.max_attempts);
         const expiresAt = String(p.expires_at ?? '').trim();
         const expiresMs = Date.parse(expiresAt);
@@ -419,7 +509,20 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
           throw new Error('Укажите будущую дату ISO 8601 с часовым поясом, не более чем через семь дней.');
         }
         if (!reason || reason.length > 500) throw new Error('Укажите причину длиной от 1 до 500 знаков.');
-        await command('audience.attention_grant', { ...frozen, max_attempts:maxAttempts, expires_at:expiresAt, reason });
+        const selectedProfileId = String(p.model_profile_id ?? defaultProfile);
+        if (!selectedProfileId) throw new Error('Выберите модель для этого ограниченного разрешения.');
+        const payload = { ...frozen, max_attempts:maxAttempts, expires_at:expiresAt, reason };
+        if (selectedProfileId === 'legacy') {
+          if (!legacyAvailable) throw new Error('Глобальное разрешение устарело. Обновите цель.');
+          payload.expected_scope_fingerprint = attention.scope_fingerprint;
+        } else {
+          const selected = choices.find(profile => profile.profile_id === selectedProfileId);
+          if (!selected) throw new Error('Выбранный профиль больше не готов. Обновите цель.');
+          payload.model_profile_id = selected.profile_id;
+          payload.expected_scope_fingerprint = selected.scope_fingerprint;
+        }
+        if (goal?.id !== frozen.goal_id || goal?.revision !== frozen.expected_revision) throw new Error('Цель изменилась. Обновите её перед разрешением.');
+        await command('audience.attention_grant', payload);
         await load();
       }); return;
     }

@@ -164,7 +164,9 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // All other applied-migration checks remain strict; 009 is additive.
     // Actual old database upgrade/import: outcome-transfer-kill.test.mjs.
     // Narrow deployed 011 encoding compatibility; immutable fixture + real upgrade/restart tests.
-    "business/store.mjs": "3da374d9ba1b4f76d730c49828556b38ec50624c",
+    // Scoped profiles add two export tables. Exact v13/v14 staging transfer tests
+    // preserve metadata and revoke all model/attention authority after import.
+    "business/store.mjs": "22da5fea45fa1aa500eadafd3952084255a2e405",
     "adapters/hermes/credentials.py": "2797bd89081eaf4a950178cec3d637015ee8f45f",
     "adapters/hermes/runner.py": "e631237829d9b7a4521799b4a19c4c500b33f5aa",
     // Deliberate v0 extension: existing worker, no-tool envelope tested in opportunity-runtime.test.mjs.
@@ -172,7 +174,10 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // Hermes empty-response ladder can actually re-enter the loop after an empty response.
     // Same tested no-tool runtime with trusted instructions removed from the
     // duplicated user payload. Credential, tool and sending fences stay covered.
-    "business/runtime.mjs": "f2d986a80a64d6efa9c0c1c396832ca4e8ebf8d8",
+    // A profile-bound Audience turn uses its validated frozen model, without
+    // global retargeting. The real adapter/child envelope remains no-tools;
+    // scoped-audience-activation-boundary.test.mjs proves that boundary.
+    "business/runtime.mjs": "e9d2e75a88b92e06c5d0d0e3fb4cac9384b8cdd2",
     // Outcome completion projects provider time and versions message-record
     // identities by partner. Delivery gates remain unchanged; real stub adapter
     // races and crash/receipt replay are in outcome-timing/redteam-kill tests.

@@ -353,7 +353,7 @@ export class Scheduler {
     this.reasonBusy = true;
     try {
       const cfg = this.service.config;
-      if (cfg.audience?.enabled === true && cfg.audience?.modelEnabled === true) {
+      if (cfg.audience?.enabled === true && this.service.attention.modelEnabled()) {
         await this.audienceReasonTick();
         return;
       }
@@ -394,19 +394,21 @@ export class Scheduler {
   }
   async audienceReasonTick() {
     const cfg = this.service.config;
-    if (cfg.audience?.modelEnabled === true && this.audienceHealthy !== true)
+    const audienceEnabled = cfg.audience?.enabled === true && this.service.attention.modelEnabled();
+    const globalPublicReady = cfg.audience?.modelEnabled === true || runtimeReadiness(cfg, { decision: true }).ready;
+    if (audienceEnabled && this.audienceHealthy !== true)
       this.audienceState = { disposition: this.audienceHealthy === false ? 'reconciliation_failed' : 'waiting_reconciliation' };
     // Audience, continuity, executive and opportunity share one public inference slot. Persist
     // the cursor so restart does not repeatedly favor whichever domain sorts first.
     const ring = ['continuity', 'audience', 'executive', 'opportunity'];
     const eligible = new Set([
-      ...(cfg.continuity?.enabled === true && cfg.opportunity?.automatic === true && this.continuityHealthy === true ? ['continuity'] : []),
-      ...(cfg.audience?.modelEnabled === true && this.audienceHealthy === true ? ['audience'] : []),
-      ...(cfg.executive?.enabled === true && this.executiveHealthy === true ? ['executive'] : []),
-      ...(cfg.opportunity?.automatic === true && this.continuityHealthy === true ? ['opportunity'] : []),
+      ...(globalPublicReady && cfg.continuity?.enabled === true && cfg.opportunity?.automatic === true && this.continuityHealthy === true ? ['continuity'] : []),
+      ...(audienceEnabled && this.audienceHealthy === true ? ['audience'] : []),
+      ...(globalPublicReady && cfg.executive?.enabled === true && this.executiveHealthy === true ? ['executive'] : []),
+      ...(globalPublicReady && cfg.opportunity?.automatic === true && this.continuityHealthy === true ? ['opportunity'] : []),
     ]);
     if (!eligible.size) {
-      if (cfg.audience?.modelEnabled !== true) this.audienceState = { disposition: 'disabled' };
+      if (!audienceEnabled) this.audienceState = { disposition: 'disabled' };
       else if (this.audienceHealthy === true) this.audienceState = { disposition: 'waiting_domain_health' };
       return;
     }

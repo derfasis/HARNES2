@@ -8,6 +8,7 @@
     "inputUsdPerMillion": null,
     "outputUsdPerMillion": null
   },
+  "modelProfiles": { "allowedBaseUrls": [] },
   "telegram": { "enabled": false, "liveSending": false, "transport": "bot_api", "allowedChatIds": [] },
   "scheduler": { "dailyPlanning": false },
   "actions": {

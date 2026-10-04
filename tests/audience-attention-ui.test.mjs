@@ -96,7 +96,7 @@ test('authenticated goal attention UI grants then revokes its frozen grant witho
   const goal = await api(`/api/audience/${goalId}`);
   assert.ok(goal.attention?.scope_fingerprint, 'the server returns the exact goal attention scope');
   assert.equal(app.service.config.audience.modelEnabled, false);
-  assert.match(view.render(), /Модельные вызовы выключены|модель выключена/i);
+  assert.match(view.render(), /Глобальные модельные вызовы выключены/i);
   assert.match(view.render(), /data-do="audience-attention-grant"/);
 
   await view.act('audience-attention-grant', goalId);

@@ -150,6 +150,16 @@ export function loadConfig() {
     const url = new URL(cfg.runtime.baseUrl);
     if (url.username || url.password || url.search || url.hash || !(url.protocol === 'https:' || (url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)))) throw new Error('Model URL must use HTTPS, or local HTTP, without credentials/query.');
   }
+  const profileUrls = cfg.modelProfiles?.allowedBaseUrls;
+  if (!Array.isArray(profileUrls) || profileUrls.length > 20 || new Set(profileUrls).size !== profileUrls.length)
+    throw new Error('Invalid modelProfiles.allowedBaseUrls');
+  for (const value of profileUrls) {
+    if (typeof value !== 'string' || value.length > 500) throw new Error('Invalid model profile endpoint');
+    const url = new URL(value);
+    if (url.username || url.password || url.search || url.hash || !(url.protocol === 'https:' ||
+      url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)))
+      throw new Error('Model profile endpoint must use HTTPS or local HTTP without credentials/query.');
+  }
   if (typeof cfg.engagement?.enabled !== 'boolean') throw new Error('Invalid engagement.enabled');
   if (typeof cfg.continuity?.enabled !== 'boolean' || typeof cfg.continuity?.modelEnabled !== 'boolean'
     || cfg.continuity.modelEnabled && !cfg.continuity.enabled) throw new Error('Invalid continuity configuration');

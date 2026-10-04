@@ -57,6 +57,9 @@
     "maxAgeSeconds": 86400
   },
   "partnerId": "partner-001",
+  "modelProfiles": {
+    "allowedBaseUrls": []
+  },
   "engagement": {
     "enabled": false
   },

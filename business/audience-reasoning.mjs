@@ -18,10 +18,10 @@ const modelIdentity = value => value && typeof value === 'object' && Object.keys
 
 function prepare(service) {
   const cfg = service.config, db = service.store, audience = service.audience;
-  if (cfg.audience?.enabled !== true || cfg.audience?.modelEnabled !== true) return { disposition: 'disabled' };
+  if (cfg.audience?.enabled !== true || !service.attention.modelEnabled()) return { disposition: 'disabled' };
   if (cfg.controlPlane?.enabled !== true) throw new AppError('Audience model reasoning requires Control Plane admission', 409, 'AUDIENCE_CONTROL_REQUIRED');
   automaticBoundary(service);
-  if (!runtimeReadiness(cfg, { decision: true }).ready) return { disposition: 'waiting_model' };
+  if (!service.attention.hasScopedGrant() && !runtimeReadiness(cfg, { decision: true }).ready) return { disposition: 'waiting_model' };
   const counts = db.get(`SELECT COUNT(*) n,COALESCE(SUM(estimated_cost_usd),0) cost,
     COALESCE(SUM(CASE WHEN cost_status='unknown' AND (status NOT IN ('running','analyzed') OR NOT EXISTS
       (SELECT 1 FROM control_tickets t WHERE t.run_id=runs.id AND t.status IN ('reserved','running'))) THEN 1 ELSE 0 END),0) unknown,
@@ -32,6 +32,8 @@ function prepare(service) {
 
   let cursor = db.get('SELECT cursor FROM channel_offsets WHERE channel=? AND account_id=?', 'audience-reason-v1', cfg.partnerId)?.cursor ?? '';
   const seen = new Set();
+  let waitingModel = false;
+  const withheldGoals = [];
   // The domain cursor chooses which public plane gets a turn. This inner cursor fairly rotates
   // through goals, with wraparound, and an assessment itself fixes the exact evidence batch.
   for (let pageNo = 0; pageNo < 2; pageNo++) {
@@ -50,9 +52,12 @@ function prepare(service) {
         'audience-reason-v1', cfg.partnerId, cursor);
       // Only a focused packet explicitly requested for a model may resume from
       // captured. Existing manual captures remain manual and retain their fence.
-      let grant = null;
+      let grant = null, jobConfig = cfg;
       let row = db.get("SELECT * FROM audience_assessments WHERE goal_id=? AND status='captured' ORDER BY rowid LIMIT 1", goalId);
       if (row) {
+        // A scoped ordinary grant never supplies authority for focused/retry requests.
+        if (cfg.audience?.modelEnabled !== true) continue;
+        if (!runtimeReadiness(cfg, { decision: true }).ready) { waitingModel = true; continue; }
         try {
           const capturedPacket = JSON.parse(row.packet_json);
           if (!capturedPacket || typeof capturedPacket !== 'object' || Array.isArray(capturedPacket))
@@ -66,9 +71,19 @@ function prepare(service) {
           continue;
         }
       } else {
-        grant = service.attention.eligible(goalId);
+        grant = service.attention.eligible(goalId, { dispatch: true });
         if (!grant) continue;
-        const packet = audience.detail(goalId, { hypothesisMemory: true });
+        jobConfig = service.attention.configurationFor(grant);
+        if (!runtimeReadiness(jobConfig, { decision: true }).ready) { waitingModel = true; continue; }
+        let packet;
+        try { packet = audience.detail(goalId, { hypothesisMemory: true }); }
+        catch (error) {
+          if (!(error instanceof AppError)) throw error;
+          // Invalid dependent history withholds this goal, not the rotating
+          // cursor or a neighboring goal with its own evidence and authority.
+          withheldGoals.push({ goal_id: goalId, reason: error.code });
+          continue;
+        }
         if (!packet.ready) continue;
         try {
           const capture = audience.capture({ goal_id: goalId, expected_revision: packet.revision,
@@ -88,10 +103,12 @@ function prepare(service) {
         packet: audienceModelPacket(assessmentPacket),
         output_contract: contract, router_instructions: INSTRUCTIONS };
       db.run(`INSERT INTO runs(id,partner_id,status,runtime,model,context_json,created_at)
-        VALUES(?,?,'running',?,?,?,?)`, runId, cfg.partnerId, RUNTIME, cfg.runtime.model,
+        VALUES(?,?,'running',?,?,?,?)`, runId, cfg.partnerId, RUNTIME, jobConfig.runtime.model,
         JSON.stringify({ assessment_id: assessmentId, goal_id: goalId, owner_language: OWNER_LANGUAGE, packet: assessmentPacket,
           ...(grant ? { attention_grant: { id: grant.id, grant_fingerprint: grant.grant_fingerprint } } : {}),
-          model_config: cfg.runtime, prompt_fingerprint: digest(INSTRUCTIONS), contract_fingerprint: digest(contract),
+          ...(grant && service.attention.binding(grant) ? { model_profile: { id: service.attention.binding(grant).model_profile_id,
+            definition_hash: service.attention.binding(grant).definition_hash } } : {}),
+          model_config: jobConfig.runtime, prompt_fingerprint: digest(INSTRUCTIONS), contract_fingerprint: digest(contract),
           decision_contract_version:1,model_input_fingerprint:digest(context),model_projection_version:1 }), now());
       if (grant) service.attention.bind(grant, row, runId);
       if (service.control) service.control.bindRun(runId);
@@ -106,7 +123,8 @@ function prepare(service) {
     if (next) { cursor = next; continue; }
     cursor = '';
   }
-  return { disposition: seen.size ? 'waiting_evidence' : 'idle' };
+  return { disposition: waitingModel ? 'waiting_model' : withheldGoals.length ? 'history_withheld' : seen.size ? 'waiting_evidence' : 'idle',
+    ...(withheldGoals.length ? { withheld_goals: withheldGoals } : {}) };
 }
 
 async function processAudienceInternal(service, runtime) {
@@ -133,7 +151,7 @@ async function processAudienceInternal(service, runtime) {
         try {
           if (service.control && !service.control.canApply(prepared.run.id))
             throw new AppError('Control-plane result is no longer applicable', 409, 'CONTROL_RESULT_WITHHELD');
-          if (service.config.audience?.enabled !== true || service.config.audience?.modelEnabled !== true)
+          if (service.config.audience?.enabled !== true || !JSON.parse(prepared.run.context_json).model_profile && service.config.audience?.modelEnabled !== true)
             throw new AppError('Audience model reasoning disabled', 409, 'AUDIENCE_MODEL_DISABLED');
           if (service.config.controlPlane?.enabled !== true)
             throw new AppError('Audience model reasoning requires Control Plane admission', 409, 'AUDIENCE_CONTROL_REQUIRED');
@@ -149,6 +167,7 @@ async function processAudienceInternal(service, runtime) {
           service.audience.assertAssessmentCurrent(assessment);
           const packet = JSON.parse(assessment.packet_json);
           if (!packet.reassessment && !packet.reasoning_retry) service.attention.assertRun(prepared.run.id, assessment, frozen.attention_grant);
+          if (frozen.model_profile) service.attention.runtimeForRun(prepared.run);
           const output = JSON.parse(result.final_response);
           // The audience proposal validates and writes several needs in one call. Keep a bad
           // later need from leaving earlier partial proposals behind when we record invalid.
@@ -181,6 +200,7 @@ async function processAudienceInternal(service, runtime) {
         ...(applied ? {decision_contract_version:1,model_projection_version:1,model_input_fingerprint:digest(prepared.context),
           output_fingerprint:digest(JSON.parse(db.get('SELECT output_json FROM audience_assessments WHERE id=?',prepared.assessmentId).output_json))} : {}),
         run_id: prepared.run.id, model_identity: modelIdentity(result?.model_identity),
+        ...(JSON.parse(prepared.run.context_json).model_profile ? { model_profile: JSON.parse(prepared.run.context_json).model_profile } : {}),
         model_identity_reason: modelIdentity(result?.model_identity) ? null : 'runtime_identity_missing_or_invalid',
         model_api_calls: Number.isInteger(result?.api_calls) && result.api_calls >= 0 && result.api_calls <= 1000 ? result.api_calls : null,
         failure_cause: result?.completed !== true && result?.failure_cause ? normalizeFailureCause(result.failure_cause) : null };

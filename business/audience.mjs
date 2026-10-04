@@ -691,6 +691,13 @@ export class AudienceLoop {
     }
     return goal;
   }
+  decisionState(row, packet, output, current) {
+    return assessmentDecision({ row, packet, output, current,
+      run:row.run_id ? this.store.get('SELECT * FROM runs WHERE id=?',row.run_id) : null,validateOutput:validateModelOutput,
+      validateAuthority:frozen => {
+        if (!packet.reassessment && !packet.reasoning_retry) this.service.attention.assertHistory(row.run_id, row, frozen.attention_grant);
+      } });
+  }
   assessment(assessmentId) {
     const row = this.assessmentRecord(assessmentId);
     let current = false; try { this.assertAssessmentCurrent(row); current = true; } catch { /* historical packet */ }
@@ -699,8 +706,7 @@ export class AudienceLoop {
     let output = null;
     try { output = output_json ? parse(output_json) : null; } catch { /* malformed output has no displayable interpretation */ }
     return { ...rest, packet, output,
-      decision_review:assessmentDecision({row,packet,output,current,
-        run:row.run_id ? this.store.get('SELECT * FROM runs WHERE id=?',row.run_id) : null,validateOutput:validateModelOutput}),
+      decision_review:this.decisionState(row, packet, output, current),
       retry: packet.reassessment ? this.retryState(row) : this.ordinaryRetryState(row), attempt_receipt: this.attemptReceipt(row),
       current, reviewable: current && ['captured', 'running', 'proposed'].includes(row.status), ...AUTHORITY };
   }
@@ -762,6 +768,18 @@ export class AudienceLoop {
         const { selected } = proposalBindings(output, packet);
         check(original.needs.some(n => digest(n) === digest(output))
           && digest(basis) === digest(frozenProposalBasis(packet, selected)), 'AUDIENCE_RECORD_INVALID');
+        if (assessment.producer === 'model') {
+          const run = assessment.run_id && this.store.get('SELECT * FROM runs WHERE id=? AND partner_id=?', assessment.run_id, this.partnerId);
+          const frozen = run && parse(run.context_json);
+          if (!packet.reassessment && !packet.reasoning_retry && (frozen?.attention_grant ||
+            this.store.get('SELECT run_id FROM audience_attention_attempts WHERE run_id=?', assessment.run_id))) {
+            // Admission authenticity is independent of source freshness and of the
+            // review-only rationale. A corrupt audit summary cannot rewrite a valid
+            // need basis; a broken grant/profile proof cannot become accepted Work.
+            check(run.status === 'completed', 'AUDIENCE_RECORD_INVALID');
+            this.service.attention.assertHistory(run.id, assessment, frozen.attention_grant);
+          }
+        }
       } catch { throw new AppError('AUDIENCE_RECORD_INVALID', 409, 'AUDIENCE_RECORD_INVALID'); }
     }
     const reasons = [...this.basisState(basis).reasons];

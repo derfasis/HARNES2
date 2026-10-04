@@ -2,6 +2,7 @@
   "type": "object", "additionalProperties": false,
   "required": ["goal_id", "expected_revision", "expected_scope_fingerprint", "max_attempts", "expires_at", "reason"],
   "properties": {
+    "model_profile_id": {"type": "string", "minLength": 1, "maxLength": 36},
     "goal_id": {"type": "string", "minLength": 1, "maxLength": 36},
     "expected_revision": {"type": "integer", "minimum": 1},
     "expected_scope_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},

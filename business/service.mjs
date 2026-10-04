@@ -23,6 +23,8 @@ import { ControlPlane } from './control-plane.mjs';
 import { SourceScout, SCOUT_COMMANDS } from './scout.mjs';
 import { AudienceLoop } from './audience.mjs';
 import { AudienceAttention } from './audience-attention.mjs';
+import { ModelProfiles } from './model-profiles.mjs';
+import { MODEL_PROFILE_COMMANDS } from './model-profile-tables.mjs';
 import { AUDIENCE_ACTIONS } from './audience-tables.mjs';
 import { effectiveSourceConfig } from './scout-policy.mjs';
 import { discoveryCommand, discoveryDecisionQueue, discoveryDetail, discoveryPresentationDetail, discoveryReasonStates, ensureDiscoveryApplied, hasDiscoveryPending, invalidateDiscoveryOffers, markDiscoveryPending, reconcileDiscoveryPending, recordDiscoveryFailure, staleMaterialEvidence, DISCOVERY_ACTIONS, DISCOVERY_REVIEW_TASK } from './discovery.mjs';
@@ -31,7 +33,7 @@ import { discoveryCommand, discoveryDecisionQueue, discoveryDetail, discoveryPre
 // manual path would also have accepted, or promotion becomes a way around that refusal.
 const OUTCOMES = new Set(OUTCOME_KINDS);
 export class BusinessService {
-  constructor(store, config) { this.store = store; this.config = config; this.tail = Promise.resolve(); this.telegramAccountId = null; this.engagement = new EngagementLoop(this); this.continuity = new ContinuityLoop(this); this.executive = new ExecutiveLoop(this); this.actions = new ActionLoop(this); this.outcomes = new OutcomeLoop(this); this.control = new ControlPlane(this); this.work = new WorkCore(this); this.scout = new SourceScout(this); this.audience = new AudienceLoop(this); this.attention = new AudienceAttention(this); this.discoveryApply = ensureDiscoveryApplied; this.reconcileDiscovery = () => reconcileDiscoveryPending(this, 50); }
+  constructor(store, config) { this.store = store; this.config = config; this.tail = Promise.resolve(); this.telegramAccountId = null; this.engagement = new EngagementLoop(this); this.continuity = new ContinuityLoop(this); this.executive = new ExecutiveLoop(this); this.actions = new ActionLoop(this); this.outcomes = new OutcomeLoop(this); this.control = new ControlPlane(this); this.work = new WorkCore(this); this.scout = new SourceScout(this); this.audience = new AudienceLoop(this); this.modelProfiles = new ModelProfiles(this); this.attention = new AudienceAttention(this); this.discoveryApply = ensureDiscoveryApplied; this.reconcileDiscovery = () => reconcileDiscoveryPending(this, 50); }
   exclusive(fn) { const job = this.tail.then(fn); this.tail = job.catch(() => {}); return job; }
   partner() { return this.store.get('SELECT * FROM partners WHERE id=?', this.config.partnerId); }
   person(personId) {
@@ -114,6 +116,7 @@ export class BusinessService {
     // Check audience ownership before looking up a receipt. A reused receipt must not
     // disclose the result of an operator-only operation to an agent or channel caller.
     if (AUDIENCE_ACTIONS.has(action)) ensure(actor?.kind === 'operator', 'AUDIENCE_OPERATOR_REQUIRED', 403, 'AUDIENCE_OPERATOR_REQUIRED');
+    if (MODEL_PROFILE_COMMANDS.has(action)) ensure(actor?.kind === 'operator', 'MODEL_PROFILE_OPERATOR_REQUIRED', 403, 'MODEL_PROFILE_OPERATOR_REQUIRED');
     if (WORK_COMMANDS.has(action)) ensure(actor.kind === 'operator', 'WORK_OPERATOR_REQUIRED', 403, 'WORK_OPERATOR_REQUIRED');
     if (SCOUT_COMMANDS.has(action)) ensure(actor.kind === 'operator', 'SCOUT_OPERATOR_REQUIRED', 403, 'SCOUT_OPERATOR_REQUIRED');
     if (actor.kind === 'agent' && (this.config.controlPlane?.enabled === true || this.control.ticket(actor.runId))) {
@@ -153,7 +156,9 @@ export class BusinessService {
       ensure(!['fact.propose','task.propose','lesson.propose','capability.propose'].includes(action),'Use engagement-scoped proposals',403);
     }
     let result;
-    if (SCOUT_COMMANDS.has(action)) {
+    if (MODEL_PROFILE_COMMANDS.has(action)) {
+      result = action === 'model.profile_create' ? this.modelProfiles.create(p) : this.modelProfiles.revoke(p);
+    } else if (SCOUT_COMMANDS.has(action)) {
       result = this.scout.command(action, p, actor);
     } else if (AUDIENCE_ACTIONS.has(action)) {
       result = this.audience.command(action, p, actor);
