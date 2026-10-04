@@ -93,7 +93,7 @@ provider integration or generic retry-authority framework was introduced. A
 runtime/configured cost estimate retains its provenance; absent pricing stays
 unknown and never becomes zero. Existing ordinary discovery remains separate.
 
-Local full verification passes 1,283 Node tests, 15 Python credential
+Local full verification on `44d4801` passes 1,284 Node tests, 15 Python credential
 isolation tests and build. Five independent copied-snapshot mutations were
 killed: removing frozen-parent proof, replay freshness, child source-head
 freshness, child lineage validation or pre-write budget admission each makes
@@ -102,3 +102,12 @@ and any finite provider verification are recorded in the release handoff; a
 green local gate alone does not prove live provider availability or usefulness
 of the proposal. Browser rendering remains unverified: UI witnesses exercise
 the actual view logic through authenticated loopback endpoints.
+
+Hosted Windows verification on `44d4801` passed (run `37158782067`). A finite
+native check subsequently reopened the original three-source pilot with its
+existing grants and unchanged expiry. The historical failed assessment was
+now stale, so preflight refused before child capture, cap reservation or model
+purchase. No old attempt was reset and no fresh evidence was invented to make
+a retry pass. This is a live refusal witness, not a claim of successful provider
+execution or useful model output. Successful retry/application behavior is
+proved by the offline runtime and authenticated UI witnesses.
