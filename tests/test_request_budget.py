@@ -346,7 +346,7 @@ class WorkerRequestBudgetIntegrationTests(unittest.TestCase):
                                  "HOME": isolated_home, "USERPROFILE": isolated_home,
                                  "APPDATA": isolated_home, "LOCALAPPDATA": isolated_home})
                 completed = subprocess.run(
-                    command, input=json.dumps(envelope), text=True, capture_output=True,
+                    command, input=json.dumps(envelope), text=True, encoding="utf-8", capture_output=True,
                     timeout=45, env=safe_env, check=False,
                 )
             self.assertEqual(completed.returncode, 0, (completed.stderr + completed.stdout)[-1000:])
@@ -374,7 +374,7 @@ class WorkerRequestBudgetIntegrationTests(unittest.TestCase):
         self.assertNotIn("offline-test-key", completed.stdout + completed.stderr)
 
     def test_valid_hermes_stream_is_not_mistaken_for_budget_exhaustion(self):
-        answer = "The packet supports no confirmed proposal."
+        answer = "По предоставленным данным подтверждённого предложения нет."
         completed, result, generation_paths, _metadata_requests = self._run_worker(answer)
         self.assertEqual(len(generation_paths), 1)
         self.assertTrue(result.get("completed"))
