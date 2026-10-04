@@ -178,7 +178,8 @@ async function processAudienceInternal(service, runtime) {
         db.run('UPDATE audience_assessments SET status=? WHERE id=? AND status=\'running\'', status, assessment.id);
       }
       const receipt = { disposition, goal_id: prepared.goalId, assessment_id: prepared.assessmentId,
-        ...(applied ? {output_fingerprint:digest(JSON.parse(db.get('SELECT output_json FROM audience_assessments WHERE id=?',prepared.assessmentId).output_json))} : {}),
+        ...(applied ? {decision_contract_version:1,model_projection_version:1,model_input_fingerprint:digest(prepared.context),
+          output_fingerprint:digest(JSON.parse(db.get('SELECT output_json FROM audience_assessments WHERE id=?',prepared.assessmentId).output_json))} : {}),
         run_id: prepared.run.id, model_identity: modelIdentity(result?.model_identity),
         model_identity_reason: modelIdentity(result?.model_identity) ? null : 'runtime_identity_missing_or_invalid',
         model_api_calls: Number.isInteger(result?.api_calls) && result.api_calls >= 0 && result.api_calls <= 1000 ? result.api_calls : null,

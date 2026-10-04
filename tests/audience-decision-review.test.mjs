@@ -81,6 +81,21 @@ function fake(outputFactory, { before = async () => {} } = {}) {
 
 async function run(h, model) { return processAudienceAssessment(h.service, model.runtime); }
 
+async function completedNoNeed(t) {
+  const { h } = await prepared(t);
+  const model = fake(packet => outputFor(packet));
+  const result = await run(h, model);
+  assert.equal(model.calls, 1, 'positive control reaches one successful injected model turn');
+  assert.equal(result.disposition, 'no_need_proposed');
+  const assessment = h.service.audience.assessment(result.assessment_id);
+  assert.equal(assessment.current, true, 'source/basis currentness is unchanged before record mutation');
+  assert.equal(assessment.decision_review.state, 'current');
+  const runRow = h.store.get('SELECT * FROM runs WHERE id=?', assessment.run_id);
+  assert.equal(runRow.status, 'completed');
+  assert.equal(runRow.input_tokens, 37); assert.equal(runRow.output_tokens, 19);
+  return { h, assessment, runRow };
+}
+
 test('honest empty result is inspectable, scoped, inert, and cannot rebill after restart', async t => {
   const { h } = await prepared(t);
   const model = fake(packet => outputFor(packet));
@@ -224,6 +239,52 @@ test('deleting the frozen run decision-contract marker during inference cannot d
   const closed = h.store.get('SELECT status,input_tokens,output_tokens FROM runs WHERE id=?', runId);
   assert.equal(closed.status, 'failed');
   assert.equal(closed.input_tokens, 37); assert.equal(closed.output_tokens, 19);
+});
+
+const persistedInputMutations = [
+  ['model input fingerprint corruption', context => { context.model_input_fingerprint = '0'.repeat(64); }],
+  ['projection version removal', context => { delete context.model_projection_version; }],
+  ['decision contract version removal', context => { delete context.decision_contract_version; }],
+];
+
+for (const [name, mutate] of persistedInputMutations) test(`completed model decision rejects ${name}`, async t => {
+  const { h, assessment, runRow } = await completedNoNeed(t);
+  const context = JSON.parse(runRow.context_json);
+  mutate(context);
+  h.store.run('UPDATE runs SET context_json=? WHERE id=?', JSON.stringify(context), runRow.id);
+  const after = h.service.audience.assessment(assessment.id);
+  assert.equal(after.current, true, 'only model-run provenance changed; source and assessment basis remain current');
+  assert.equal(after.status, 'proposed');
+  assert.equal(after.decision_review.state, 'invalid', 'tampered frozen model-input provenance cannot remain a current interpretation');
+  const receipt = h.store.get('SELECT status,input_tokens,output_tokens FROM runs WHERE id=?', runRow.id);
+  assert.equal(receipt.status, 'completed');
+  assert.equal(receipt.input_tokens, 37); assert.equal(receipt.output_tokens, 19);
+});
+
+const inputReceiptMutations = [
+  ['input fingerprint mismatch', receipt => { receipt.model_input_fingerprint = '0'.repeat(64); }],
+  ['input fingerprint removal', receipt => { delete receipt.model_input_fingerprint; }],
+  ['projection version mismatch', receipt => { receipt.model_projection_version = 2; }],
+  ['projection version removal', receipt => { delete receipt.model_projection_version; }],
+  ['decision contract version mismatch', receipt => { receipt.decision_contract_version = 2; }],
+  ['decision contract version removal', receipt => { delete receipt.decision_contract_version; }],
+];
+
+for (const [name, mutate] of inputReceiptMutations) test(`closed run receipt rejects ${name}`, async t => {
+  const { h, assessment, runRow } = await completedNoNeed(t);
+  const context = JSON.parse(runRow.context_json), receipt = JSON.parse(runRow.result_json);
+  assert.equal(receipt.model_input_fingerprint, context.model_input_fingerprint,
+    'positive control: successful receipt binds its exact model-input fingerprint');
+  assert.equal(receipt.model_projection_version, context.model_projection_version,
+    'positive control: successful receipt binds its projection version');
+  assert.equal(receipt.decision_contract_version, context.decision_contract_version,
+    'positive control: successful receipt binds its decision contract version');
+  mutate(receipt);
+  h.store.run('UPDATE runs SET result_json=? WHERE id=?', JSON.stringify(receipt), runRow.id);
+  const after = h.service.audience.assessment(assessment.id);
+  assert.equal(after.current, true, 'the source and assessment basis remain current');
+  assert.equal(after.decision_review.state, 'invalid');
+  assert.equal(after.decision_review.review, null);
 });
 
 test('transferred completed decision stays historical and cannot restore live attention authority', async t => {

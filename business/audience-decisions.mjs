@@ -49,7 +49,8 @@ export function assessmentDecision({ row, packet, output, run, current, validate
     try {
       const frozen = run && JSON.parse(run.context_json), receipt = run?.result_json && JSON.parse(run.result_json);
       requiresReview = frozen?.decision_contract_version === 1 || frozen?.model_projection_version === 1
-        || receipt?.output_fingerprint !== undefined;
+        || receipt?.decision_contract_version === 1 || receipt?.model_projection_version === 1
+        || receipt?.model_input_fingerprint !== undefined || receipt?.output_fingerprint !== undefined;
     } catch { return {...envelope,state:'invalid'}; }
     if (!requiresReview) return envelope;
     return {...envelope,state:!current ? 'stale' : row.status === 'invalid' || run.status === 'completed' ? 'invalid' : 'not_recorded'};
@@ -57,7 +58,11 @@ export function assessmentDecision({ row, packet, output, run, current, validate
   try {
     check(row.producer === 'model' && ['proposed','stale'].includes(row.status) && run?.status === 'completed', 'AUDIENCE_DECISION_RECEIPT_INVALID');
     const frozen = JSON.parse(run.context_json), receipt = JSON.parse(run.result_json);
-    check(frozen.decision_contract_version === 1 && frozen.assessment_id === row.id && frozen.goal_id === row.goal_id
+    check(frozen.decision_contract_version === 1 && frozen.model_projection_version === 1
+      && receipt.decision_contract_version === 1 && receipt.model_projection_version === 1
+      && typeof frozen.model_input_fingerprint === 'string' && /^[a-f0-9]{64}$/.test(frozen.model_input_fingerprint)
+      && receipt.model_input_fingerprint === frozen.model_input_fingerprint
+      && frozen.assessment_id === row.id && frozen.goal_id === row.goal_id
       && row.run_id === run.id && receipt.run_id === run.id && receipt.assessment_id === row.id && receipt.goal_id === row.goal_id
       && digest(frozen.packet) === digest(packet) && receipt.output_fingerprint === digest(output)
       && validateOutput(output), 'AUDIENCE_DECISION_RECEIPT_INVALID');
