@@ -52,6 +52,57 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
     const parsed = new Date(value);
     return Number.isNaN(parsed.getTime()) ? 'неизвестно' : parsed.toLocaleString('ru-RU');
   };
+  const canonicalJson = value => {
+    if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+    if (value && typeof value === 'object') return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`;
+    return JSON.stringify(value);
+  };
+  const sourceRenewalRoute = (goalId, sourceRef) => `/api/audience/goals/${encodeURIComponent(goalId)}/source-renewal?source_ref=${encodeURIComponent(sourceRef)}`;
+  async function openSourceRenewal(sourceRef) {
+    const currentGoal = goal;
+    const watch = currentGoal?.watches?.find(row => (row?.source_ref ?? row?.source_id) === sourceRef && row.status === 'revoked');
+    if (!currentGoal || currentGoal.id !== selectedGoal || !watch || !Number.isInteger(currentGoal.revision)) {
+      throw new Error('Возобновить можно только отозванный источник открытой цели. Обновите цель.');
+    }
+    const frozenGoalId = currentGoal.id;
+    const frozenSourceRef = sourceRef;
+    const previewRoute = sourceRenewalRoute(frozenGoalId, frozenSourceRef);
+    const frozen = await api(previewRoute);
+    if (frozen?.version !== 1 || frozen?.purpose !== 'audience_source_renewal_preview_v1'
+      || frozen.goal_id !== frozenGoalId || frozen.source_ref !== frozenSourceRef
+      || frozen.expected_revision !== currentGoal.revision || frozen.gap !== true
+      || typeof frozen.preview_sha256 !== 'string' || !frozen.preview_sha256) {
+      throw new Error('Сервер не вернул полную сверку разрыва для этой цели и источника. Обновите цель.');
+    }
+    if (goal?.id !== frozenGoalId || selectedGoal !== frozenGoalId
+        || !goal.watches?.some(row => (row?.source_ref ?? row?.source_id) === frozenSourceRef && row.status === 'revoked')) {
+      throw new Error('Цель или состояние источника изменились. Откройте цель и проверьте её снова.');
+    }
+    const show = value => value === null || value === undefined || value === '' ? 'неизвестно' : String(value);
+    const content = `<p><strong>Цель:</strong> ${esc(currentGoal.title ?? currentGoal.id)}</p>
+        <p><strong>Задача:</strong> ${esc(currentGoal.objective ?? 'не указана')}</p>
+        <p><strong>Источник:</strong> <code>${esc(frozen.source_ref)}</code></p>
+        <p><strong>Разрыв наблюдений:</strong> полнота за пропущенный период неизвестна · прежний указатель: ${esc(show(frozen.old_cursor))} · верхняя граница: ${esc(show(frozen.head))} · нижняя граница новых наблюдений: ${esc(show(frozen.observation_floor))}.</p>
+        <p><strong>Транспорт сейчас:</strong> ${frozen.transport_current === true ? 'доступность подтверждена' : 'доступность не подтверждена'}${frozen.transport_reason ? ` · ${esc(frozen.transport_reason)}` : ''}</p>
+        <p><strong>Политика источника:</strong> прежняя <code>${esc(show(frozen.prior_policy_hash))}</code> · текущая <code>${esc(show(frozen.current_source_policy_hash))}</code></p>
+        <p>Старые материалы и выводы по этому источнику останутся устаревшими. Проверка только показывает состояние, она не читает источник и не создаёт нового разрешения, профиля модели или новой задачи.</p>
+        <label class="research-choice"><input type="checkbox" name="acknowledge_gap" value="true"> Я понимаю, что между прежним указателем и новыми наблюдениями есть разрыв, и подтверждаю его.</label>
+        <p class="muted tiny">Предпросмотр ${esc(frozen.preview_sha256)} · ревизия цели ${esc(frozen.expected_revision)}. Подтверждение отправит только команду возобновления чтения этого источника.</p>`;
+    modal('Проверить и подтвердить возобновление источника', content, async p => {
+        if (!['true','on',true].includes(p.acknowledge_gap)) throw new Error('Подтвердите разрыв наблюдений перед возобновлением.');
+        if (goal?.id !== frozenGoalId || selectedGoal !== frozenGoalId
+          || !goal.watches?.some(row => (row?.source_ref ?? row?.source_id) === frozenSourceRef && row.status === 'revoked')) {
+          throw new Error('Цель или состояние источника изменились. Обновите цель перед подтверждением.');
+        }
+        const latest = await api(previewRoute);
+        if (canonicalJson(latest) !== canonicalJson(frozen)) {
+          throw new Error('Сверка изменилась после просмотра. Закройте окно и заново проверьте возобновление.');
+        }
+        await command('audience.renew_source', { goal_id:frozenGoalId, source_ref:frozenSourceRef,
+          expected_revision:frozen.expected_revision, preview_sha256:frozen.preview_sha256, acknowledge_gap:true });
+        await load();
+    });
+  }
   const selectedRows = (rows, type, selected) => rows.map(row => `<button class="person-card ${row.id === selected?'active':''}" data-do="audience-${type}" data-id="${esc(row.id)}">
     <strong>${esc(row.title ?? row.id)}</strong><small>${badge(row.status)} · ревизия ${esc(row.revision ?? '—')}</small>
     ${row.objective ? `<small>${esc(row.objective)}</small>` : ''}</button>`).join('');
@@ -73,6 +124,8 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
     const needs = goal.needs ?? [];
     const assessments = goal.assessments ?? [];
     const capturePending = assessments.some(a => ['captured','running'].includes(a.status));
+    const revokedWatches = (goal.watches ?? []).filter(w => typeof w === 'object'
+      && w?.status === 'revoked' && typeof (w.source_ref ?? w.source_id) === 'string');
     html += panel(goal.title ?? 'Цель', `<p>${esc(goal.objective ?? '')}</p>
       <p>${badge(goal.status)} · ревизия ${esc(goal.revision ?? '—')}</p>
       <p><strong>Источники и доступность:</strong> ${esc((goal.watches ?? []).map(w => {
@@ -83,6 +136,8 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
         const cursor = w.cursor ?? 'неизвестен', head = w.head ?? 'неизвестен';
         return `${ref}: ${state}${health.reason ? ` (${health.reason})` : ''}; указатель ${cursor}, верхняя граница ${head}`;
       }).filter(Boolean).join('; ') || 'не указаны')}</p>
+      ${revokedWatches.length ? `<div class="section-note"><strong>Отозванные источники.</strong> Возобновление чтения требует отдельной сверки политики и явного подтверждения разрыва наблюдений. Исторические заключения останутся устаревшими; только новые наблюдения после указанной границы смогут стать текущими.
+        ${listing.enabled === true ? revokedWatches.map(w => button(`Проверить возобновление: ${w.source_ref ?? w.source_id}`, 'audience-renew-source', w.source_ref ?? w.source_id)).join('') : ''}</div>` : ''}
       <p><strong>Текущие данные:</strong> ${goal.ready === true ? 'есть основание для ограниченного сбора' : 'основание для сбора не подтверждено'} · очередь обновлений: ${goal.backlog === true ? 'есть необработанные события' : goal.backlog === false ? 'не обнаружена' : 'состояние неизвестно'}. Это не означает полного охвата источников.</p>
       ${goal.coverage ? `<p class="muted tiny">Охват: ${esc(goal.coverage.selection)} · лимит снимка: ${esc(goal.coverage.batch_exchanges ?? 'неизвестен')} обменов · лимит на источник: ${esc(goal.coverage.source_capacity ?? 'неизвестен')} · полнота источника: ${esc(goal.coverage.source_completeness)} · независимость авторов не подтверждена.</p>` : ''}
       ${goal.reasons?.length ? `<p><strong>Актуальность:</strong> ${esc(goal.reasons.join('; '))}</p>` : ''}
@@ -622,6 +677,7 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
     if (action === 'audience-assessment') { selectedAssessment = id; selectedNeed = null; followupContext = followupContextGuard = null; followupError = ''; await load(); return; }
     if (action === 'audience-next') { cursor = listing?.next_cursor ?? ''; await load(); return; }
     if (!goal) throw new Error('Сначала откройте цель.');
+    if (action === 'audience-renew-source') { await openSourceRenewal(id); return; }
     if (action === 'audience-followup-context') {
       if (!need || need.id !== id || selectedNeed !== id) throw new Error('Сначала откройте гипотезу.');
       followupLoading = true; followupError = '';

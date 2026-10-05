@@ -387,7 +387,7 @@ test('real schema-5 database upgrades in place without changing existing source 
   const before = db.prepare('SELECT * FROM events').all(); db.close();
   const migrated = new Store(directory);
   try {
-    assert.equal(migrated.all('SELECT * FROM schema_migrations').length, 15);
+    assert.equal(migrated.all('SELECT * FROM schema_migrations').length, 16);
     assert.deepEqual(migrated.all('SELECT * FROM events'), before);
     assert.equal(migrated.get('SELECT mission FROM partners').mission, 'Keep this mission');
     assert.equal(migrated.get('SELECT COUNT(*) n FROM research_intents').n, 0);

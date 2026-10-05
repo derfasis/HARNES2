@@ -84,7 +84,7 @@ function running(h, conversationId = null, extra = {}) {
 
 test('existing Store migrations, foreign keys and transaction rollback', t => {
   const { store } = harness(t);
-  assert.equal(store.all('SELECT * FROM schema_migrations').length, 15);
+  assert.equal(store.all('SELECT * FROM schema_migrations').length, 16);
   assert.deepEqual(store.all('PRAGMA foreign_key_check'), []);
   assert.throws(() => store.transaction(() => {
     store.run('UPDATE partners SET mission=?', 'rolled back');

@@ -11,9 +11,10 @@ import { EXECUTIVE_TABLES } from '../business/executive-tables.mjs';
 import { OUTCOME_TABLES } from '../business/outcome-tables.mjs';
 import { WORK_TABLES, CONTROL_TABLES } from '../business/work-tables.mjs';
 import { SCOUT_TABLES } from '../business/scout-tables.mjs';
-import { AUDIENCE_TABLES, AUDIENCE_ATTENTION_TABLES } from '../business/audience-tables.mjs';
+import { AUDIENCE_TABLES, AUDIENCE_ATTENTION_TABLES, AUDIENCE_SOURCE_EPOCH_TABLES } from '../business/audience-tables.mjs';
 import { MODEL_PROFILE_TABLES } from '../business/model-profile-tables.mjs';
 import { AUDIENCE_FOLLOWUP_TABLES } from '../business/audience-followup-tables.mjs';
+import { validateWatchEpochs } from '../business/audience-source-renewal.mjs';
 import { BusinessService } from '../business/service.mjs';
 
 const [source,destinationArg] = process.argv.slice(2);
@@ -41,10 +42,13 @@ const inputCatalogues = new Map([
   [9, without(WORK_TABLES, CONTROL_TABLES)],
   [10, without()],
   [11, TABLES.filter(table => !AUDIENCE_TABLES.includes(table) && !MODEL_PROFILE_TABLES.includes(table) && !AUDIENCE_FOLLOWUP_TABLES.includes(table))],
-  [12, TABLES.filter(table => !AUDIENCE_ATTENTION_TABLES.includes(table) && !MODEL_PROFILE_TABLES.includes(table) && !AUDIENCE_FOLLOWUP_TABLES.includes(table))],
-  [13, TABLES.filter(table => !MODEL_PROFILE_TABLES.includes(table) && !AUDIENCE_FOLLOWUP_TABLES.includes(table))],
-  [14, TABLES.filter(table => !AUDIENCE_FOLLOWUP_TABLES.includes(table))],
-  [15, TABLES],
+  // These releases predate immutable source-watch epochs. Keep their catalogues
+  // fixed even though Store.TABLES now includes the schema-16 table.
+  [12, TABLES.filter(table => !AUDIENCE_ATTENTION_TABLES.includes(table) && !MODEL_PROFILE_TABLES.includes(table) && !AUDIENCE_FOLLOWUP_TABLES.includes(table) && !AUDIENCE_SOURCE_EPOCH_TABLES.includes(table))],
+  [13, TABLES.filter(table => !MODEL_PROFILE_TABLES.includes(table) && !AUDIENCE_FOLLOWUP_TABLES.includes(table) && !AUDIENCE_SOURCE_EPOCH_TABLES.includes(table))],
+  [14, TABLES.filter(table => !AUDIENCE_FOLLOWUP_TABLES.includes(table) && !AUDIENCE_SOURCE_EPOCH_TABLES.includes(table))],
+  [15, TABLES.filter(table => !AUDIENCE_SOURCE_EPOCH_TABLES.includes(table))],
+  [16, TABLES],
 ]);
 const inputTables = inputCatalogues.get(migrationCount);
 if (!inputTables) throw new Error('Migration version differs');
@@ -272,6 +276,7 @@ try {
           statement.run(...columns.map(c=>row[c]));
       }
     }
+    if (migrationCount >= 16) validateWatchEpochs(store);
     if (migrationCount >= 9) {
       const profile = bundle.assets.find(asset => asset.path === 'partner/profile.json');
       const partnerId = JSON.parse(profile.content).id;
@@ -293,6 +298,8 @@ try {
       store.run("DELETE FROM channel_offsets WHERE channel IN ('scout-monitor-v1','telegram-source-start-v1')");
     }
     if (migrationCount >= 12) {
+      // Schema-16 epoch history remains auditable; its current watch projection
+      // is local executable authority and is always revoked across transfer.
       store.run("UPDATE audience_watches SET status='revoked',reason='TRANSFER_AUTHORITY_REQUIRES_REVIEW' WHERE status='active'");
       store.run("UPDATE audience_assessments SET status=CASE WHEN status='running' THEN 'interrupted' WHEN status IN ('captured','proposed') THEN 'stale' ELSE status END");
       store.run("UPDATE audience_needs SET status='stale',updated_at=? WHERE status IN ('proposed','accepted')", new Date().toISOString());

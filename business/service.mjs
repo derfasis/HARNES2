@@ -136,6 +136,7 @@ export class BusinessService {
         'Источник требует transactional Telegram intake', 409, 'SOURCE_TRANSPORT_INGEST_REQUIRED');
     }
     const previous = this.store.get('SELECT * FROM command_receipts WHERE id=?', requestId);
+    if (action === 'audience.renew_source') this.audience.assertSourceRenewalRequest(p,previous?.fingerprint === fingerprint ? previous : null);
     // A receipt acknowledges an earlier import; it cannot authorize use after the
     // selected context, review, case or source authority has changed.
     if (action === 'audience.import_preview') this.audience.assertPreviewImport(p, { replay: previous?.fingerprint === fingerprint });

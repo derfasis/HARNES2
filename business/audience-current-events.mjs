@@ -27,6 +27,7 @@ export function currentExchange(a, goal, row, eventIds) {
   const latest = sourceRows(a.service, row.source_ref, members), byMessage = new Map(latest.map(e => [e.message.message_id, e]));
   const byEvent = new Map(latest.map(e => [e.event_id, e])), structural = new Map();
   const selected = eventIds.map(id => byEvent.get(id));
+  if (watch && eventIds.some(id => Number(id) <= a.watchObservationFloor(watch))) reasons.push('AUDIENCE_EVIDENCE_BEFORE_RENEWAL');
   for (const start of selected) {
     if (!start) { reasons.push('AUDIENCE_EXCHANGE_CHANGED'); continue; }
     let cursor = start; const seen = new Set();
@@ -99,7 +100,7 @@ export function currentBasisState(a, basis) {
         || digest(current.structural_event_ids) !== digest(e.structural_event_ids)) reasons.push('AUDIENCE_EXCHANGE_CHANGED');
     }
     if (!basis.policies.every(([ref,hash]) => a.watches(goal.id).some(w => w.source_ref === ref
-      && w.status === 'active' && w.policy_hash === hash && a.policyHash(ref) === hash))) reasons.push('AUDIENCE_SOURCE_REVOKED');
+      && w.status === 'active' && w.policy_hash === hash && a.watchAuthority(w).current))) reasons.push('AUDIENCE_SOURCE_REVOKED');
   } catch (error) { if (!(error instanceof AppError)) throw error; reasons.push(error.code); }
   return {current:reasons.length === 0,reasons:[...new Set(reasons)]};
 }

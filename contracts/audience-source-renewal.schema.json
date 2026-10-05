@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["goal_id", "source_ref", "expected_revision", "preview_sha256", "acknowledge_gap"],
+  "properties": {
+    "goal_id": { "type": "string", "minLength": 1, "maxLength": 100 },
+    "source_ref": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "expected_revision": { "type": "integer", "minimum": 1 },
+    "preview_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "acknowledge_gap": { "type": "boolean" }
+  }
+}

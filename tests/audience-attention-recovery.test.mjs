@@ -538,6 +538,7 @@ test('transfer retires grants and pending retry requests without losing historic
   delete legacy.tables.audience_attention_attempts;
   delete legacy.tables.model_profiles;
   delete legacy.tables.audience_attention_models;
+  delete legacy.tables.audience_watch_epochs;
   legacy.tables_sha256 = hash(JSON.stringify(legacy.tables));
   const legacyFile = path.join(h.directory, 'attention-transfer-v12.json');
   fs.writeFileSync(legacyFile, JSON.stringify(legacy), { flag: 'wx' });
@@ -550,7 +551,7 @@ test('transfer retires grants and pending retry requests without losing historic
   try {
     assert.equal(restoredLegacy.get('SELECT COUNT(*) n FROM audience_attention_grants').n, 0);
     assert.equal(restoredLegacy.get('SELECT COUNT(*) n FROM audience_attention_attempts').n, 0);
-    assert.equal(restoredLegacy.get('SELECT COUNT(*) n FROM schema_migrations').n, 15,
+    assert.equal(restoredLegacy.get('SELECT COUNT(*) n FROM schema_migrations').n, 16,
       'a pre-013 bundle is restored into the current schema without inventing authority');
   } finally { restoredLegacy.close(); }
 });

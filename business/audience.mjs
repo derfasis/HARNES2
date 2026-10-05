@@ -11,6 +11,7 @@ import { normalizeFailureCause } from './failure-cause.mjs';
 import { decisionBindings, assessmentDecision } from './audience-decisions.mjs';
 import { currentBasis, currentBasisState } from './audience-current-events.mjs';
 import { FOLLOWUP_TEMPORARY } from './audience-followup.mjs';
+import { watchEpoch, sourceRenewalPreview, assertRenewalRequest, renewSource } from './audience-source-renewal.mjs';
 
 const storedOutputSchema = readJson(path.join(ROOT, 'contracts/audience-assessment.schema.json'));
 export const outputSchema = structuredClone(storedOutputSchema);
@@ -68,11 +69,20 @@ export class AudienceLoop {
     this.partnerId, p.channelId, p.accountId, now()) : [];
     return digest({ policy: this.service.continuity.policyHash(sourceRef), grants });
   }
+  sourceRenewalPreview(p) { return sourceRenewalPreview(this,p); }
+  assertSourceRenewalRequest(p,previous = null) { return assertRenewalRequest(this,p,previous); }
+  watchObservationFloor(watch) {
+    try { return watchEpoch(this,watch)?.observation_floor ?? 0; }
+    catch (error) { if (!(error instanceof AppError)) throw error; return Number.MAX_SAFE_INTEGER; }
+  }
   watchAuthority(watch) {
     if (watch.status === 'revoked') return { current: false, reason: watch.reason ?? 'AUDIENCE_SOURCE_REVOKED' };
     const allowed = effectiveSourceConfig(this.service).opportunity.allowedSourceRefs;
-    const reason = !allowed.includes(watch.source_ref) ? 'SOURCE_NOT_ALLOWED'
-      : this.policyHash(watch.source_ref) !== watch.policy_hash ? 'AUDIENCE_SOURCE_POLICY_CHANGED' : null;
+    let epoch, invalid = false;
+    try { epoch = watchEpoch(this,watch); }
+    catch (error) { if (!(error instanceof AppError)) throw error; invalid = true; }
+    const reason = invalid ? 'AUDIENCE_WATCH_EPOCH_INVALID' : !allowed.includes(watch.source_ref) ? 'SOURCE_NOT_ALLOWED'
+      : this.policyHash(watch.source_ref) !== (epoch?.source_policy_hash ?? watch.policy_hash) ? 'AUDIENCE_SOURCE_POLICY_CHANGED' : null;
     if (reason) {
       const changed = this.store.run("UPDATE audience_watches SET status='revoked',reason=? WHERE goal_id=? AND source_ref=? AND status='active'", reason, watch.goal_id, watch.source_ref);
       if (changed.changes) this.record('watch_revoked', { goal_id: watch.goal_id, source_ref: watch.source_ref, reason });
@@ -237,10 +247,13 @@ export class AudienceLoop {
     if (goal.status !== 'OPEN') reasons.push('AUDIENCE_GOAL_PAUSED');
     if (!this.enabled()) reasons.push('AUDIENCE_DISABLED');
     // The immutable evidence versions are rechecked even before the projection cursor catches up.
+    const floor = watch ? this.watchObservationFloor(watch) : Number.MAX_SAFE_INTEGER;
+    const selectedIds = state.evidence.filter(ref => Number(ref) > floor);
+    if (state.evidence.length && !selectedIds.length) reasons.push('AUDIENCE_EVIDENCE_BEFORE_RENEWAL');
     const evidence = [...this.service.continuity.evidenceStates({ max_age_seconds: goal.max_age_seconds },
-      watch ? [{ ...watch, policy_hash: this.service.continuity.policyHash(watch.source_ref) }] : [], state.evidence).values()];
+      watch ? [{ ...watch, policy_hash: this.service.continuity.policyHash(watch.source_ref) }] : [], selectedIds).values()];
     if (!evidence.length) reasons.push('AUDIENCE_NO_SUPPORTED_EVIDENCE');
-    if (evidence.length !== state.evidence.length) reasons.push('AUDIENCE_EVIDENCE_STALE');
+    if (evidence.length !== selectedIds.length) reasons.push('AUDIENCE_EVIDENCE_STALE');
     for (const e of evidence) if (!e.current) reasons.push(...e.reasons);
     if (watch && this.service.continuity.head(watch.source_ref) > watch.cursor) reasons.push('AUDIENCE_SCOPE_BACKLOG');
     return { id: exchange.id, source_ref: exchange.source_ref, anchor_id: exchange.anchor_id,
@@ -279,7 +292,7 @@ export class AudienceLoop {
       if (row) reasons.push(...this.exchangeState(goal, row).reasons);
     }
     if (!basis.policies.every(([ref, policy]) => this.watches(goal.id).some(w => w.source_ref === ref
-      && w.status === 'active' && w.policy_hash === policy && this.policyHash(ref) === policy))) reasons.push('AUDIENCE_SOURCE_REVOKED');
+      && w.status === 'active' && w.policy_hash === policy && this.watchAuthority(w).current))) reasons.push('AUDIENCE_SOURCE_REVOKED');
     return { current: reasons.length === 0, reasons: [...new Set(reasons)] };
   }
   assertBasis(basis) {
@@ -1012,6 +1025,7 @@ export class AudienceLoop {
   command(action, p, actor) {
     check(actor?.kind === 'operator', 'AUDIENCE_OPERATOR_REQUIRED', 403);
     if (action === 'audience.open') return this.open(p);
+    if (action === 'audience.renew_source') return renewSource(this,p);
     if (action === 'audience.pause') return this.pause(p);
     if (action === 'audience.capture') return this.capture(p);
     if (action === 'audience.reassess') return this.reassess(p);

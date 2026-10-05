@@ -2,3 +2,4 @@
 tests/fixtures/deployed-011-source-scout.sql -text -diff -merge
 # New migration receipt bytes must be identical in Windows and Linux checkouts.
 business/migrations/013-audience-attention.sql text eol=lf
+business/migrations/016-audience-source-epochs.sql text eol=lf

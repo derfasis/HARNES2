@@ -193,6 +193,11 @@ export async function start({ config = loadConfig(), directory = DATA, deploymen
           ensure(cursor === '' || CURSOR_ID.test(cursor), 'Invalid audience cursor', 400);
           return send(200, service.audience.list({ limit: Number(rawLimit ?? 20), cursor }));
         }
+        const renewalMatch = /^\/api\/audience\/goals\/([0-9a-f-]{36})\/source-renewal$/.exec(url.pathname);
+        if (renewalMatch) {
+          ensure([...url.searchParams].length === 1 && url.searchParams.has('source_ref'), 'Invalid audience renewal query',400);
+          return send(200,service.audience.sourceRenewalPreview({goal_id:renewalMatch[1],source_ref:url.searchParams.get('source_ref')}));
+        }
         ensure([...url.searchParams].length === 0, 'Invalid audience query', 400);
         const followupContextMatch = /^\/api\/audience\/needs\/([0-9a-f-]{36})\/followup-context$/.exec(url.pathname);
         if (followupContextMatch) return send(200, service.followup.context(followupContextMatch[1]));
