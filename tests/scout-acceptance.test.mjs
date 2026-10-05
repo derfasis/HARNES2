@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { id } from '../business/store.mjs';
 import { sourceCheckpoint } from '../business/source-ingestion.mjs';
 import { processScoutAssessment } from '../business/scout-reasoning.mjs';
+import { SCOUT_EVALUATOR_VERSION } from '../business/scout.mjs';
 import { ACCOUNT, channel, message, noHistory, scoutHarness } from './scout-test-helpers.mjs';
 
 const grantArgs=(campaign,candidate,sample,extra={})=>({campaign_id:campaign.id,revision:campaign.revision,candidate_id:candidate.id,sample_id:sample.id,
@@ -84,7 +85,7 @@ test('topic revision retires old authority, work and assessment; a new campaign 
   await h.command('scout.request_assessment',{campaign_id:second.id,revision:second.revision,candidate_id:secondCandidate.id,sample_id:sample.id});
   const assessmentJob=h.store.get("SELECT * FROM scout_jobs WHERE campaign_id=? AND kind='assessment'",second.id);
   assert.equal(JSON.parse(assessmentJob.cursor_json).topic_hash,h.store.get('SELECT topic_hash FROM scout_campaigns WHERE id=?',second.id).topic_hash);
-  assert.equal(JSON.parse(assessmentJob.cursor_json).evaluator_version,'scout-assessment-v1');
+  assert.equal(JSON.parse(assessmentJob.cursor_json).evaluator_version,SCOUT_EVALUATOR_VERSION);
 });
 
 test('revoking authority while history RPC is pending withholds the page and keeps its cursor',async t=>{

@@ -48,6 +48,23 @@ test('disabled model assessment stays disabled and cannot enqueue a command thro
   assert.deepEqual(h.calls.filter(x=>x.method==='POST'),[]);
 });
 
+test('assessment failures explain a closed diagnostic without exposing model/provider data or retrying', async()=>{
+  const h=makeHarness();
+  h.detail.jobs=[
+    {kind:'assessment',status:'failed',reason:'SCOUT_OUTPUT_INVALID',diagnostic:{stage:'format',code:'SCOUT_JSON_MARKDOWN_FENCE',raw_response:'private-model-text',provider_error:hostile}},
+    {kind:'assessment',status:'failed',diagnostic:{stage:'schema',code:'SCOUT_SCHEMA_INVALID',schema_keywords:['private-schema-key']}},
+    {kind:'assessment',status:'failed',diagnostic:{stage:'format',code:hostile,private:'private-provider-text'}},
+    {kind:'assessment',status:'failed',diagnostic:{stage:'format',code:'constructor'}},
+  ];
+  await h.view.load();const html=h.view.render();
+  assert.match(html,/Модель обернула JSON в Markdown/);
+  assert.match(html,/обязательной структуре оценки/);
+  assert.doesNotMatch(html,/private-model-text|private-schema-key|private-provider-text/);
+  assert.doesNotMatch(html,/function Object|\[object Object\]/);
+  assert.equal(html.includes(hostile),false);
+  assert.deepEqual(h.calls.filter(x=>x.method==='POST'),[]);
+});
+
 test('monitor admission requires explicit historical-gap consent and sends API checkpoint authority unchanged', async()=>{
   const checkpoint={pts:731}; const h=makeHarness({checkpoint}); await h.view.load();
   await h.view.act('scout-admit',candidateId); const form=h.dialogs.at(-1);

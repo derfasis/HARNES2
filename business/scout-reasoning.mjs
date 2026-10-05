@@ -1,14 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import Ajv from 'ajv';
-import { ROOT, readJson, runtimeReadiness, usageAccounting } from './config.mjs';
+import { ROOT, runtimeReadiness, usageAccounting } from './config.mjs';
 import { id } from './store.mjs';
 import { now, AppError, ensure } from './errors.mjs';
 import { scoutSignals } from './scout-signals.mjs';
 import { SCOUT_EVALUATOR_VERSION } from './scout.mjs';
-const contract=readJson(path.join(ROOT,'contracts/scout-assessment.schema.json'));
-const validate=new Ajv({strict:true}).compile(contract);
-const instructions=fs.readFileSync(path.join(ROOT,'partner/scout-assessment.md'),'utf8');
+import { digest } from './source-ingestion.mjs';
+import { normalizeFailureCause } from './failure-cause.mjs';
+import { SCOUT_ASSESSMENT_CONTRACT as contract, scoutAssessmentOutput } from './scout-assessment-output.mjs';
+const instructions=fs.readFileSync(path.join(ROOT,'partner/scout-assessment.md'),'utf8').replace(/\r\n/g,'\n');
 const check=(ok,code)=>ensure(ok,code,409,code);
 export async function processScoutAssessment(service,runtime){
  const scout=service.scout,db=service.store;
@@ -26,35 +26,30 @@ export async function processScoutAssessment(service,runtime){
          const {campaign}=scout.jobAuthority(job),candidate=scout.candidate(job.candidate_id,campaign.id),sample=scout.sample(job.sample_id,candidate),cursor=JSON.parse(job.cursor_json);scout.sampleFresh(sample);
          check(cursor.sample_digest===sample.digest&&cursor.topic_hash===campaign.topic_hash&&cursor.evaluator_version===SCOUT_EVALUATOR_VERSION,'SCOUT_ASSESSMENT_STALE');
          const signals=scoutSignals(JSON.parse(sample.messages_json));check(signals.groups.length>0,'SCOUT_SEMANTIC_SAMPLE_EMPTY');
-         const runId=id();db.run("INSERT INTO runs(id,partner_id,status,runtime,model,context_json,created_at) VALUES(?,?,'running','hermes-scout-v1',?,?,?)",runId,scout.partnerId,service.config.runtime.model,JSON.stringify({job_id:job.id,campaign_id:campaign.id,campaign_revision:campaign.revision,sample_id:sample.id,sample_digest:sample.digest,evaluator_version:SCOUT_EVALUATOR_VERSION,model_config:service.config.runtime}),now());
+         const runId=id();db.run("INSERT INTO runs(id,partner_id,status,runtime,model,context_json,created_at) VALUES(?,?,'running','hermes-scout-v1',?,?,?)",runId,scout.partnerId,service.config.runtime.model,JSON.stringify({job_id:job.id,campaign_id:campaign.id,campaign_revision:campaign.revision,campaign_config:JSON.parse(campaign.config_json),sample_id:sample.id,sample_digest:sample.digest,evaluator_version:SCOUT_EVALUATOR_VERSION,instructions_digest:digest(instructions),output_contract_digest:digest(contract),model_config:service.config.runtime}),now());
          service.control.bindRun(runId);db.run("UPDATE scout_jobs SET status='running',run_id=?,owner_id=?,attempts=attempts+1,updated_at=? WHERE id=?",runId,service.control.ownerId,now(),job.id);
          return {job,campaign,sample,signals,run:db.get('SELECT * FROM runs WHERE id=?',runId),context:{packet:{campaign:JSON.parse(campaign.config_json),sample:{id:sample.id,digest:sample.digest,coverage:sample.coverage,from:sample.requested_from,until:sample.requested_until},...signals,contact_permission:false},input:{situation_id:job.id},output_contract:contract,router_instructions:instructions}};
        }catch(e){if(!(e instanceof AppError)&&!(e instanceof SyntaxError))throw e;db.run("UPDATE scout_jobs SET status='stale',reason=?,updated_at=? WHERE id=?",e.code??'SCOUT_RECORD_INVALID',now(),job.id);}
      }return null;
    }));
    if(!prepared)return {disposition:'idle_or_budget'};
-   let result;try{result=await runtime.decide(prepared.run,prepared.context);}catch{result={completed:false};}
+   let result;try{result=await runtime.decide(prepared.run,prepared.context);}catch(error){result={completed:false,failure_cause:normalizeFailureCause(error?.failure_cause)};}
    try{return await service.exclusive(()=>db.transaction(()=>{
      // Lost processes must not write even usage into a successor's state.
      if(!service.control.processCurrent())return {disposition:'ownership_lost'};
      const current=db.get('SELECT * FROM scout_jobs WHERE id=?',prepared.job.id),spent=usageAccounting(JSON.parse(prepared.run.context_json).model_config,result?.usage);
-     let assessmentId=null,reason='SCOUT_MODEL_FAILED';
-     const tools=result?.tool_calls!=null&&(!Array.isArray(result.tool_calls)||result.tool_calls.length)
-       ||result?.messages!=null&&(!Array.isArray(result.messages)||result.messages.some(m=>m?.role==='tool'||m?.tool_calls?.length||m?.function_call));
+     let assessmentId=null,reason='SCOUT_MODEL_FAILED',diagnostic=null;
      try{
        check(current?.status==='running'&&current.owner_id===service.control.ownerId&&scout.enabled&&scout.cfg.modelEnabled===true&&service.control.canApply(prepared.run.id),'SCOUT_RESULT_RETIRED');
        const {campaign}=scout.jobAuthority(current),sample=scout.sample(current.sample_id);scout.sampleFresh(sample);
        check(campaign.topic_hash===prepared.campaign.topic_hash&&sample.digest===prepared.sample.digest,'SCOUT_ASSESSMENT_STALE');
-       check(result?.completed===true&&!result.error&&!tools&&typeof result.final_response==='string'&&Buffer.byteLength(result.final_response)<=24000,'SCOUT_OUTPUT_INVALID');
-       const output=JSON.parse(result.final_response);check(validate(output),'SCOUT_OUTPUT_INVALID');
-       const refs=new Set(prepared.signals.groups.flatMap(g=>g.evidence_refs));
-       check([...output.evidence_refs,...output.opportunities.flatMap(o=>o.evidence_refs)].every(ref=>refs.has(ref)),'SCOUT_EVIDENCE_INVALID');
-       check(output.recommendation!=='consider'||output.evidence_refs.length>0,'SCOUT_EVIDENCE_REQUIRED');
+       const checked=scoutAssessmentOutput(result,prepared.signals.groups);diagnostic=checked.diagnostic;
+       check(checked.output,checked.reason);const output=checked.output;
        assessmentId=id();db.run("INSERT INTO scout_assessments(id,campaign_id,campaign_revision,candidate_id,sample_id,sample_digest,topic_hash,evaluator_version,output_json,run_id,status,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,'proposed',?)",assessmentId,campaign.id,campaign.revision,current.candidate_id,sample.id,sample.digest,campaign.topic_hash,SCOUT_EVALUATOR_VERSION,JSON.stringify(output),prepared.run.id,now());reason='SCOUT_ASSESSMENT_PROPOSED';
      }catch(e){if(!(e instanceof AppError)&&!(e instanceof SyntaxError))throw e;reason=e.code??'SCOUT_OUTPUT_INVALID';}
      db.run('UPDATE scout_jobs SET status=?,reason=?,updated_at=? WHERE id=? AND status=\'running\' AND owner_id=?',assessmentId?'completed':'failed',reason,now(),prepared.job.id,service.control.ownerId);
-     db.run('UPDATE runs SET status=?,result_json=?,error=?,input_tokens=?,output_tokens=?,estimated_cost_usd=?,cost_status=?,finished_at=? WHERE id=?',assessmentId?'completed':'failed',JSON.stringify({assessment_id:assessmentId,reason}),assessmentId?null:reason,spent.input,spent.output,spent.cost,spent.costStatus,now(),prepared.run.id);
-     return {disposition:assessmentId?'assessment_proposed':'withheld',assessment_id:assessmentId,reason};
+     db.run('UPDATE runs SET status=?,result_json=?,error=?,input_tokens=?,output_tokens=?,estimated_cost_usd=?,cost_status=?,finished_at=? WHERE id=?',assessmentId?'completed':'failed',JSON.stringify({assessment_id:assessmentId,reason,diagnostic}),assessmentId?null:reason,spent.input,spent.output,spent.cost,spent.costStatus,now(),prepared.run.id);
+     return {disposition:assessmentId?'assessment_proposed':'withheld',assessment_id:assessmentId,reason,diagnostic};
    }));}catch(error){
      // A model result without a durable receipt is not a successful assessment.
      // Do not repeat a billable job automatically; leave explicit retry to the owner.

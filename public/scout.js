@@ -14,6 +14,18 @@ export function createScoutView({ api, command, esc, modal, refresh, openAudienc
   const input = (name,title,value='',type='text') => `<label>${esc(title)}<input name="${esc(name)}" type="${type}" value="${esc(value)}"></label>`;
   const area = (name,title,value='') => `<label>${esc(title)}<textarea name="${esc(name)}">${esc(value)}</textarea></label>`;
   const campaign = () => (detail?.campaign ?? detail ?? data?.campaigns?.find(x=>x.id===selectedId));
+  const assessmentFailures = {
+    SCOUT_MODEL_INCOMPLETE:'Модель не завершила оценку. Успешный результат не подтверждён.',
+    SCOUT_TOOLS_FORBIDDEN:'Модель попыталась использовать инструменты. Оценка отклонена.',
+    SCOUT_OUTPUT_NOT_TEXT:'Модель не вернула текст оценки.',
+    SCOUT_OUTPUT_TOO_LARGE:'Ответ превысил допустимый размер. Оценка отклонена.',
+    SCOUT_JSON_MARKDOWN_FENCE:'Модель обернула JSON в Markdown. Оценка отклонена.',
+    SCOUT_JSON_INVALID:'Модель вернула некорректный JSON. Оценка отклонена.',
+    SCOUT_SCHEMA_INVALID:'Ответ не соответствует обязательной структуре оценки.',
+    SCOUT_EVIDENCE_INVALID:'Модель сослалась на сообщения вне прочитанного образца.',
+    SCOUT_EVIDENCE_REQUIRED:'Модель предложила источник без подтверждающих сообщений.',
+  };
+  const assessmentFailure = diagnostic => typeof diagnostic?.code==='string'&&Object.hasOwn(assessmentFailures,diagnostic.code)?assessmentFailures[diagnostic.code]:'';
   const safeGrant = grant => grant ? `<div class="scout-grant"><strong>${esc(grant.purpose||'Разрешение выдано')}</strong><small>Истекает: ${esc(date(grant.expires_at))} · ${esc(label(grant.status||'active'))}${typeof grant.current==='boolean'?` · ${grant.current?'Действует сейчас':'Сейчас не действует'}`:''}</small>${grant.id?button('Отозвать разрешение','scout-revoke',grant.id,'danger'):''}</div>` : `<span class="muted">Разрешение отсутствует</span>`;
   const readGateMarkup = (gate, limits) => {
     if (!gate || typeof gate !== 'object') return '';
@@ -73,7 +85,7 @@ export function createScoutView({ api, command, esc, modal, refresh, openAudienc
         ${a?`<div class="scout-audit"><strong>Оценка · ${esc(a.id||'')}</strong><p>${esc(a.reason||'')}</p><p>Возможности: ${esc((a.opportunities??[]).map(o=>`${o.description} [${(o.evidence_refs??[]).join(', ')}]`).join('; ')||'не указаны')}</p><p>Неопределённость: ${esc((a.uncertainty??[]).join('; ')||'не указана')}</p>${a.status==='pending'||a.status==='proposed'?button('Одобрить оценку','scout-review-approve',a.id)+button('Отклонить оценку','scout-review-reject',a.id):''}</div>`:''}
         <div class="actions">${button('Проверить источник','scout-audit',x.id)}${s?button('Запросить оценку','scout-assess',x.id,'secondary',data?.model_enabled!==true):''}${s&&data?.model_enabled!==true?'<small class="muted">Оценка отключена в конфигурации; кнопка не ставит запрос в очередь.</small>':''}${s?button('Выдать разрешение мониторинга','scout-admit',x.id):''}${liveMonitor&&openAudienceGoal?button('Добавить цель Audience','scout-audience-handoff',x.id,'secondary'):''}</div></article>`;
     }).join(''):empty('Кандидатов пока нет','Добавьте известный источник вручную или запустите поиск после отдельной выдачи разрешения.');
-    const jobsMarkup=jobs.length?jobs.map(j=>`<div class="feature"><div>${esc(j.kind)}<small>${esc(j.reason||'')} · Следующий запуск: ${esc(date(j.next_at))}</small></div>${badge(j.status)}</div>`).join(''):empty('Очередь пуста','Новые задания появятся после явного запуска поиска или проверки.');
+    const jobsMarkup=jobs.length?jobs.map(j=>`<div class="feature"><div>${esc(j.kind)}<small>${esc(j.reason||'')} · Следующий запуск: ${esc(date(j.next_at))}</small>${assessmentFailure(j.diagnostic)?`<small>${esc(assessmentFailure(j.diagnostic))}</small>`:''}</div>${badge(j.status)}</div>`).join(''):empty('Очередь пуста','Новые задания появятся после явного запуска поиска или проверки.');
     const unknown=(c.unknown??[]).length?`<ul>${c.unknown.map(v=>`<li>${esc(v)}</li>`).join('')}</ul>`:empty('Неизвестных состояний нет','');
     const queries=(cfg.queries??[]).join('\n');
     return `${panel(`Тема: ${c.title||c.topic||'Кампания'}`,`<div class="feature"><div>Состояние<small>Ревизия ${esc(c.revision)}</small></div>${badge(c.status)}</div><p>Тема: ${esc(cfg.topic??c.topic??'')}<br>Аудитория: ${esc(cfg.audience??'')}<br>Язык: ${esc(cfg.language??'')}<br>География: ${esc(cfg.geography??'')}</p><details><summary>Поисковые запросы и основание</summary><pre class="workspace-pre">${esc(queries||'Запросов нет')}</pre></details><div class="scout-audit"><strong>Разрешение на ограниченный поиск и чтение истории</strong>${safeGrant(scoutGrant)}</div><div class="actions">${!disabled&&!auditCurrent?button('Выдать разрешение поиска','scout-authorize',c.id,'primary'):''}${!disabled&&auditCurrent?button('Запустить поиск','scout-search',c.id,'primary'):''}${button('Изменить тему','scout-revise',c.id)}${c.status==='active'?button('Приостановить кампанию','scout-pause',c.id,'danger'):''}</div>`,button('Открыть Partner Workspace','scout-workspace'))}${panel('Кандидаты и доказательства',candidateMarkup,button('Добавить источник вручную','scout-seed',c.id))}${panel('Задания и повторы',jobsMarkup)}${panel('Неизвестное / требует проверки',unknown)}`;
