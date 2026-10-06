@@ -1,6 +1,7 @@
 import { AppError } from '../errors.mjs';
 import { digest, sourceCheckpoint } from '../source-ingestion.mjs';
 import { bootstrapTelegramSource, disconnectTelegramSource, telegramSourcePolicy, telegramUpdateReceipt, telegramUpdateKey, telegramRecoveryCoverage, telegramRecoveryAuthorization } from './telegram-readonly.mjs';
+import { telegramRebaselineAuthorization, commitTelegramRebaseline, finishTelegramRebaseline } from '../source-observation-epochs.mjs';
 import { Api, decimal, nativeCheck, nativeInt, mapTelegramUpdate, mapChannelDifference, mapTelegramControl } from './telegram-public-mapper.mjs';
 import { createRequire } from 'node:module';
 const { UpdateConnectionState }=createRequire(import.meta.url)('telegram/network');
@@ -15,12 +16,14 @@ export async function telegramReadDeadline(operation,abandon) {
 
 export class TelegramPublicSourceReader {
   #service; #p; #rpc; #peer; #pending=new Map(); #baseline=null; #epoch=0; #confirmed=null; #watermark=null; #final=false; #blocked=false; #closed=false; #retryAt=0; #closing; #health; #authorization; #peerDirty=false; #ptsHint=0; #username;
-  #joinedPeer;
+  #joinedPeer; #baselineHash; #rebaselineAuthorization;
   constructor(service,sourceId,rpc,peer,username=null,{joinedPeer=false}={}) {
     this.#service=service;this.#p=structuredClone(telegramSourcePolicy(service,sourceId));this.#rpc=rpc;this.#peer=peer;
+    this.#baselineHash=sourceCheckpoint(service,sourceId)?.baseline_hash??null;
     nativeCheck(peer instanceof Api.InputChannel && decimal(peer.channelId)===this.#p.channelId);
     nativeCheck(typeof joinedPeer==='boolean' && (!joinedPeer || username===null));
     this.#joinedPeer=joinedPeer;this.#username=username;this.#authorization=telegramRecoveryAuthorization(service,this.#p);
+    this.#rebaselineAuthorization=telegramRebaselineAuthorization(service,this.#p);
     this.#peerDirty=sourceCheckpoint(service,this.#p.sourceId)!==null;
     this.#health=()=>this.confirmCurrent();service.sourceTransportHealth??=new Map();service.sourceTransportHealth.set(sourceId,this.#health);
     rpc.subscribe(update=>this.receive(update),()=>this.fault());
@@ -32,10 +35,14 @@ export class TelegramPublicSourceReader {
     let owned=false;
     try{
       const control=this.#service.control;
+      const checkpoint=sourceCheckpoint(this.#service,this.#p.sourceId);
+      const rebaseline=telegramRebaselineAuthorization(this.#service,this.#p);
       owned=this.#service.sourceTransportHealth.get(this.#p.sourceId)===this.#health
         && !control?.stopped && (!control || control.processCurrent())
         && (!this.#rpc.ownsResource || this.#rpc.ownsResource()===true)
-        && digest(telegramSourcePolicy(this.#service,this.#p.sourceId))===digest(this.#p);
+        && digest(telegramSourcePolicy(this.#service,this.#p.sourceId))===digest(this.#p)
+        && (this.#baselineHash===null || checkpoint?.baseline_hash===this.#baselineHash)
+        && digest(rebaseline)===digest(this.#rebaselineAuthorization);
     }catch{ /* Missing execution authority cannot preserve an earlier confirmation. */ }
     if(!owned){this.#confirmed=null;this.#final=false;}
     return owned;
@@ -62,7 +69,10 @@ export class TelegramPublicSourceReader {
   async #invalidate(integrity=false) {
     if(!this.#owns())return;
     const state=sourceCheckpoint(this.#service,this.#p.sourceId);
-    if(integrity || state?.reason===INTEGRITY && !this.recoveryAuthorization())this.#blocked=true;
+    let hasRebaselineAuthorization=false;
+    try {hasRebaselineAuthorization=!!this.#rebaselineAuthorization
+      && digest(telegramRebaselineAuthorization(this.#service,this.#p))===digest(this.#rebaselineAuthorization);}catch{}
+    if(integrity || state?.reason===INTEGRITY && !this.recoveryAuthorization() && !hasRebaselineAuthorization)this.#blocked=true;
     if(state && state.reason!==INTEGRITY) await disconnectTelegramSource(this.#service,this.#p.sourceId,
       integrity?INTEGRITY:'DISCONNECTED',()=>this.#owns());
   }
@@ -93,10 +103,12 @@ export class TelegramPublicSourceReader {
     nativeCheck(!this.#closed && this.#owns());
     telegramSourcePolicy(this.#service,this.#p.sourceId);
     const existing=sourceCheckpoint(this.#service,this.#p.sourceId);
+    if(existing && this.#rebaselineAuthorization) return this.#bootstrapRebaseline(existing);
     if(existing) {
-      const row=this.#service.store.get("SELECT payload_json FROM events WHERE partner_id=? AND kind='source.telegram.baseline' AND json_extract(payload_json,'$.source_id')=? ORDER BY id LIMIT 1",
-        this.#service.config.partnerId,this.#p.sourceId);
+      const row=this.#service.store.get("SELECT payload_json FROM events WHERE partner_id=? AND kind='source.telegram.baseline' AND json_extract(payload_json,'$.source_id')=? AND json_extract(payload_json,'$.fingerprint')=? ORDER BY id DESC LIMIT 1",
+        this.#service.config.partnerId,this.#p.sourceId,existing.baseline_hash);
       nativeCheck(row);this.#baseline=JSON.parse(row.payload_json).pts;nativeCheck(nativeInt(this.#baseline));
+      this.#baselineHash=existing.baseline_hash;
       await this.#invalidate();return {duplicate:true,pts:existing.pts};
     }
     const response=await this.#read(new Api.channels.GetFullChannel({channel:this.#peer}));
@@ -108,9 +120,63 @@ export class TelegramPublicSourceReader {
     const result=await bootstrapTelegramSource(this.#service,this.#p.sourceId,{pts:response.fullChat.pts,history:[]},
       ()=>!this.#blocked,()=>this.ownsSource());
     nativeCheck(!this.#closed && !this.#blocked && this.#owns());
-    this.#baseline=response.fullChat.pts;
+    this.#baseline=response.fullChat.pts;this.#baselineHash=sourceCheckpoint(this.#service,this.#p.sourceId)?.baseline_hash??null;
+    nativeCheck(this.#owns());
     for(const [key,u] of this.#pending)if(u.pts<=this.#baseline)this.#pending.delete(key);
     return result;
+  }
+  async #bootstrapRebaseline(existing) {
+    const authorization=this.#rebaselineAuthorization,p=this.#p,epoch=this.#epoch;
+    try {
+      nativeCheck(!this.#closed && this.#owns() && !this.#blocked && authorization
+        && digest(telegramSourcePolicy(this.#service,p.sourceId))===digest(p)
+        && existing.reason===INTEGRITY && existing.pts===sourceCheckpoint(this.#service,p.sourceId)?.pts);
+      const full=await this.#read(new Api.channels.GetFullChannel({channel:this.#peer}));
+      nativeCheck(!this.#closed && !this.#blocked && this.#epoch===epoch && this.#owns() && full.fullChat instanceof Api.ChannelFull
+        && decimal(full.fullChat.id)===p.channelId && nativeInt(full.fullChat.pts) && !full.fullChat.ttlPeriod
+        && Array.isArray(full.chats));
+      const channel=full.chats.find(c=>c instanceof Api.Channel && decimal(c.id)===p.channelId);
+      nativeCheck(this.#allowedChannel(channel));
+      nativeCheck(this.#epoch===epoch && !this.#blocked && this.#owns()
+        && sourceCheckpoint(this.#service,p.sourceId)?.pts===existing.pts);
+      this.#peerDirty=false;
+      const response=await this.#read(new Api.updates.GetChannelDifference({channel:this.#peer,
+        filter:new Api.ChannelMessagesFilterEmpty(),pts:existing.pts,limit:100,force:false}));
+      nativeCheck(!this.#closed && !this.#blocked && this.#epoch===epoch && !this.#peerDirty && this.#owns()
+        && digest(telegramSourcePolicy(this.#service,p.sourceId))===digest(p)
+        && sourceCheckpoint(this.#service,p.sourceId)?.pts===existing.pts);
+      nativeCheck(response instanceof Api.updates.ChannelDifferenceTooLong && response.final===true
+        && response.dialog instanceof Api.Dialog && response.dialog.peer instanceof Api.PeerChannel
+        && decimal(response.dialog.peer.channelId)===p.channelId
+        && nativeInt(response.dialog.pts) && response.dialog.pts>existing.pts);
+      const baselinePts=response.dialog.pts;
+      const committed=await this.#service.exclusive(()=>{
+        nativeCheck(!this.#closed && !this.#blocked && this.#epoch===epoch && !this.#peerDirty
+          && this.#owns() && this.#rebaselineAuthorization===authorization
+          && digest(telegramSourcePolicy(this.#service,p.sourceId))===digest(p)
+          && sourceCheckpoint(this.#service,p.sourceId)?.pts===existing.pts
+          && digest(telegramRebaselineAuthorization(this.#service,p))===digest(authorization));
+        return commitTelegramRebaseline(this.#service,p,authorization,baselinePts);
+      });
+      this.#baseline=baselinePts;this.#baselineHash=committed.baseline_hash;
+      this.#authorization=null;this.#rebaselineAuthorization=null;
+      nativeCheck(this.#owns() && sourceCheckpoint(this.#service,p.sourceId)?.pts===baselinePts);
+      for(const [key,u] of this.#pending)if(u.pts<=baselinePts)this.#pending.delete(key);
+      return {duplicate:false,pts:baselinePts,epoch_id:committed.epoch_id,phase:'catching_up'};
+    } catch(error) {
+      const code=typeof error?.code==='string' && /^[A-Z0-9_]{1,100}$/.test(error.code)
+        ?error.code:'NATIVE_OBSERVATION_FAILED';
+      try {
+        await this.#service.exclusive(()=>{
+          let current=null;
+          try{current=telegramRebaselineAuthorization(this.#service,p);}catch{}
+          const active=!!current && digest(current)===digest(authorization);
+          finishTelegramRebaseline(this.#service,authorization,{status:'failed',
+            reason:active?code:'TELEGRAM_REBASELINE_AUTHORITY_STALE'});
+        });
+      } catch { /* The durable integrity checkpoint remains authoritative if terminal receipt cannot be stored. */ }
+      throw error;
+    }
   }
   async #read(request) {
     if(Date.now()<this.#retryAt)throw new AppError('Public Telegram reader is waiting for retry',409,'PUBLIC_TELEGRAM_BACKOFF');

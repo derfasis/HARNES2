@@ -103,11 +103,11 @@ function importBundle(t, h, bundle) {
   assert.equal(child.status, 0, child.stderr);
   return new Store(path.join(destination, 'data'));
 }
-test('schema-16 transfer preserves model and attempt history but revokes all scoped authority', async t => {
+test('schema-17 transfer preserves model and attempt history but revokes all scoped authority', async t => {
   const h = setup(t), { profile, granted, goal } = await grant(t, h);
   assert.equal((await processAudienceAssessment(h.service, fakeRuntime)).disposition, 'proposal_created');
   const bundle = exportPartner(h.store);
-  assert.equal(bundle.migrations.length, 16);
+  assert.equal(bundle.migrations.length, 17);
   assert.equal(bundle.tables.audience_attention_attempts.length, 1);
   assert.equal(bundle.tables.model_profiles[0].definition_hash, profile.definition_hash);
   const restored = importBundle(t, h, bundle);
@@ -128,6 +128,7 @@ test('actual historical schema-13 catalogue imports with no invented profile or 
   await h.open({ source_ids: [SOURCE] });
   const bundle = exportPartner(h.store);
   bundle.migrations = bundle.migrations.slice(0, 13);
+  delete bundle.tables.source_observation_epochs;
   delete bundle.tables.model_profiles;
   delete bundle.tables.audience_attention_models;
   delete bundle.tables.audience_followup_requests;
@@ -136,7 +137,7 @@ test('actual historical schema-13 catalogue imports with no invented profile or 
   bundle.tables_sha256 = hash(JSON.stringify(bundle.tables));
   const restored = importBundle(t, h, bundle);
   try {
-    assert.equal(restored.get('SELECT COUNT(*) n FROM schema_migrations').n, 16);
+    assert.equal(restored.get('SELECT COUNT(*) n FROM schema_migrations').n, 17);
     assert.equal(restored.get('SELECT COUNT(*) n FROM model_profiles').n, 0);
     assert.equal(restored.get('SELECT COUNT(*) n FROM audience_attention_models').n, 0);
     assert.equal(new BusinessService(restored, h.config).attention.hasScopedGrant(), false);

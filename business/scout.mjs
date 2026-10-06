@@ -1,6 +1,7 @@
 import { id } from './store.mjs';
 import { ensure, requiredText, now, AppError } from './errors.mjs';
 import { digest, sourceCheckpoint, validateSourceCheckpoint, SOURCE_CHECKPOINT_CHANNEL } from './source-ingestion.mjs';
+import { observationRecoveryPresentation, sourceObservationFloor } from './source-observation-epochs.mjs';
 import { scoutSignals } from './scout-signals.mjs';
 import { telegramReadState } from './telegram-read-gate.mjs';
 import { scoutAssessmentDiagnostic } from './scout-assessment-output.mjs';
@@ -152,6 +153,7 @@ export class SourceScout {
    if(candidate)check(row.account_id===candidate.account_id&&row.source_ref===`telegram:channel:${candidate.channel_id}`,'SCOUT_SAMPLE_SCOPE');
    const messages=JSON.parse(row.messages_json);check(Array.isArray(messages)&&messages.length<=1500,'SCOUT_SAMPLE_INVALID');
    check(Number.isSafeInteger(row.source_cursor)&&row.source_cursor>=0,'SCOUT_SAMPLE_INVALID');
+   if(current)check(row.source_cursor>=sourceObservationFloor(this.service,row.source_ref),'SCOUT_SAMPLE_STALE');
    if(row.status==='sealed')check(digest({source_ref:row.source_ref,account_id:row.account_id,from:row.requested_from,until:row.requested_until,source_cursor:row.source_cursor,messages,coverage:row.coverage})===row.digest,'SCOUT_SAMPLE_INVALID');
    // If a watched message has since changed/deleted, the frozen sample is historical only.
    if(current&&messages.length){
@@ -255,7 +257,7 @@ export class SourceScout {
      catch(e){if(!(e instanceof AppError)&&!(e instanceof SyntaxError))throw e;reason=e.code??'SCOUT_RECORD_INVALID';}
      const monitor=this.db.get("SELECT * FROM scout_grants WHERE campaign_id=? AND candidate_id=? AND kind='monitor' ORDER BY created_at DESC,rowid DESC LIMIT 1",c.id,candidate.id);
      const checkpoint=sourceCheckpoint(this.service,`telegram:channel:${candidate.channel_id}`);
-     return {...candidate,origin:JSON.parse(candidate.origin_json),sample,assessment,reason,checkpoint,checkpoint_fingerprint:checkpoint?digest(checkpoint):null,monitor_grant:monitor?{...monitor,current:this.grantCurrent(monitor,c,'monitor')&&this.monitorAuthorityPolicies().some(p=>digest(p)===digest(this.monitorPolicy({...monitor,channel_id:candidate.channel_id}))),checkpoint}:null};
+     return {...candidate,joined:candidate.joined===1,source_ref:`telegram:channel:${candidate.channel_id}`,origin:JSON.parse(candidate.origin_json),sample,assessment,reason,checkpoint,checkpoint_fingerprint:checkpoint?digest(checkpoint):null,observation_recovery:observationRecoveryPresentation(this.service,`telegram:channel:${candidate.channel_id}`),monitor_grant:monitor?{...monitor,current:this.grantCurrent(monitor,c,'monitor')&&this.monitorAuthorityPolicies().some(p=>digest(p)===digest(this.monitorPolicy({...monitor,channel_id:candidate.channel_id}))),checkpoint}:null};
    });
    const grant=this.db.get("SELECT * FROM scout_grants WHERE campaign_id=? AND kind='audit' ORDER BY created_at DESC,rowid DESC LIMIT 1",c.id);
    return {...c,config:JSON.parse(c.config_json),authority:{scout:grant?{...grant,current:this.grantCurrent(grant,c,'audit')}:null},candidates,

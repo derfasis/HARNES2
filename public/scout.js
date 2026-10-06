@@ -14,6 +14,18 @@ export function createScoutView({ api, command, esc, modal, refresh, openAudienc
   const input = (name,title,value='',type='text') => `<label>${esc(title)}<input name="${esc(name)}" type="${type}" value="${esc(value)}"></label>`;
   const area = (name,title,value='') => `<label>${esc(title)}<textarea name="${esc(name)}">${esc(value)}</textarea></label>`;
   const campaign = () => (detail?.campaign ?? detail ?? data?.campaigns?.find(x=>x.id===selectedId));
+  const liveMonitor = (c,x) => {
+    const grant=x?.monitor_grant;
+    return c?.status==='active'&&x?.joined===true&&/^[1-9][0-9]{0,18}$/.test(String(x?.channel_id??''))
+      &&grant?.current===true&&grant.status==='active'
+      &&(grant.campaign_id===undefined||grant.campaign_id===c.id)
+      &&(grant.candidate_id===undefined||grant.candidate_id===x.id)
+      &&(grant.campaign_revision===undefined||grant.campaign_revision===c.revision)
+      &&typeof grant.expires_at==='string'&&Date.parse(grant.expires_at)>Date.now();
+  };
+  const canRecoverObservation = (c,x) => liveMonitor(c,x)
+    &&x?.checkpoint?.reason==='INTEGRITY_RECONCILIATION_REQUIRED'
+    &&x.observation_recovery?.eligible===true;
   const assessmentFailures = {
     SCOUT_MODEL_INCOMPLETE:'Модель не завершила оценку. Успешный результат не подтверждён.',
     SCOUT_TOOLS_FORBIDDEN:'Модель попыталась использовать инструменты. Оценка отклонена.',
@@ -73,17 +85,17 @@ export function createScoutView({ api, command, esc, modal, refresh, openAudienc
     const candidateMarkup=candidates.length?candidates.map(x=>{
       const s=x.sample, a=x.assessment;
       const monitoring=x.monitor_grant;
-      const liveMonitor=monitoring?.current===true&&monitoring.status==='active'
-        &&typeof monitoring.expires_at==='string'&&Date.parse(monitoring.expires_at)>Date.now()
-        &&c.status==='active'&&x.joined===true&&/^[1-9][0-9]{0,18}$/.test(String(x.channel_id??''));
+      const hasLiveMonitor=liveMonitor(c,x);
       const checkpoint=x.checkpoint??monitoring?.checkpoint;
       const checkpointMarkup=checkpoint&&checkpoint.pts!==undefined?`<small class="muted scout-checkpoint">Точка текущего разрешения чтения: PTS ${esc(checkpoint.pts)}</small>`:'';
+      const recovery=x.observation_recovery;
+      const recoveryMarkup=liveMonitor(c,x)&&(recovery?.epoch||recovery?.pending||recovery?.eligible===true)?`<div class="scout-audit scout-observation-recovery"><strong>Наблюдение источника</strong><p>Исторический пробел неизвестен. Старые доказательства сохранены для аудита, но устарели для текущих выводов.</p>${recovery.epoch?`<small>Поколение: ${esc(recovery.epoch.generation)} · базовый PTS: ${esc(recovery.epoch.baseline_pts)} · история неполная. ${x.checkpoint?.phase==='current'?'Успешный опрос вперёд подтвердил текущее наблюдение.':'Текущее состояние подтвердится после успешного опроса вперёд.'}</small>`:'<small>Новое поколение наблюдения ещё не создано.</small>'}${recovery.pending?`<small>Ожидает решения оператора до ${esc(date(recovery.pending.expires_at))}.</small>${button('Отменить продолжение наблюдения','scout-observation-rebaseline-cancel',x.id,'danger')}`:canRecoverObservation(c,x)?button('Продолжить с нового наблюдения','scout-observation-rebaseline',x.id,'secondary'):''}</div>`:'';
       return `<article class="scout-card"><div class="panel-head"><div><h3>${esc(x.title||x.username||x.channel_id||'Источник')}</h3><small>${esc(x.username?`@${x.username}`:'')}${x.channel_id?` · ${esc(x.channel_id)}`:''} · ${esc(x.kind||'')}</small>${checkpointMarkup}</div>${badge(a?.status||'candidate')}</div>
         <p>${esc(x.reason||'')}</p><div class="scout-audit"><strong>Исторический образец</strong>${s?`<small>Завершён: ${esc(date(s.finished_at))} · покрытие: ${esc(s.coverage??'неизвестно')}</small><p>Сообщений: ${esc(s.metrics?.messages??'неизвестно')} · авторов с ID: ${esc(s.metrics?.authors??'неизвестно')} · активных дней: ${esc(s.metrics?.active_days??'неизвестно')} · ответов: ${esc(s.metrics?.replies??'неизвестно')}</p><p>Точных повторов: ${esc(s.metrics?.exact_repeats??'неизвестно')} · неподтверждённых: ${esc(s.metrics?.unsupported??'неизвестно')}</p>${(s.groups??[]).map(g=>`<div class="scout-evidence"><strong>${esc(g.id||'Группа')}</strong><small>Ссылки на evidence: ${esc((g.evidence_refs??[]).join(', ')||'нет')}</small><p>${esc(g.preview||'')}</p><small>${(g.messages??[]).map(m=>typeof m.link==='string'&&/^https:\/\/t\.me\/[A-Za-z][A-Za-z0-9_]{3,31}\/[1-9][0-9]*$/.test(m.link)?`<a href="${esc(m.link)}" target="_blank" rel="noopener noreferrer">Сообщение ${esc(m.message_id)}</a>`:`Сообщение ${esc(m.message_id)}`).join(' · ')}</small></div>`).join('')}`:empty('Исторических данных нет','Отсутствие истории не означает пустой канал.')}</div>
         <p class="muted tiny">Точные повторы не оценивают спам. ID авторов не подтверждают, что это разные люди.</p>
         <div class="scout-audit"><strong>Текущий мониторинг</strong>${safeGrant(monitoring)}</div>
         ${a?`<div class="scout-audit"><strong>Оценка · ${esc(a.id||'')}</strong><p>${esc(a.reason||'')}</p><p>Возможности: ${esc((a.opportunities??[]).map(o=>`${o.description} [${(o.evidence_refs??[]).join(', ')}]`).join('; ')||'не указаны')}</p><p>Неопределённость: ${esc((a.uncertainty??[]).join('; ')||'не указана')}</p>${a.status==='pending'||a.status==='proposed'?button('Одобрить оценку','scout-review-approve',a.id)+button('Отклонить оценку','scout-review-reject',a.id):''}</div>`:''}
-        <div class="actions">${button('Проверить источник','scout-audit',x.id)}${s?button('Запросить оценку','scout-assess',x.id,'secondary',data?.model_enabled!==true):''}${s&&data?.model_enabled!==true?'<small class="muted">Оценка отключена в конфигурации; кнопка не ставит запрос в очередь.</small>':''}${s?button('Выдать разрешение мониторинга','scout-admit',x.id):''}${liveMonitor&&openAudienceGoal?button('Добавить цель Audience','scout-audience-handoff',x.id,'secondary'):''}</div></article>`;
+        ${recoveryMarkup}<div class="actions">${button('Проверить источник','scout-audit',x.id)}${s?button('Запросить оценку','scout-assess',x.id,'secondary',data?.model_enabled!==true):''}${s&&data?.model_enabled!==true?'<small class="muted">Оценка отключена в конфигурации; кнопка не ставит запрос в очередь.</small>':''}${s?button('Выдать разрешение мониторинга','scout-admit',x.id):''}${hasLiveMonitor&&openAudienceGoal?button('Добавить цель Audience','scout-audience-handoff',x.id,'secondary'):''}</div></article>`;
     }).join(''):empty('Кандидатов пока нет','Добавьте известный источник вручную или запустите поиск после отдельной выдачи разрешения.');
     const jobsMarkup=jobs.length?jobs.map(j=>`<div class="feature"><div>${esc(j.kind)}<small>${esc(j.reason||'')} · Следующий запуск: ${esc(date(j.next_at))}</small>${assessmentFailure(j.diagnostic)?`<small>${esc(assessmentFailure(j.diagnostic))}</small>`:''}</div>${badge(j.status)}</div>`).join(''):empty('Очередь пуста','Новые задания появятся после явного запуска поиска или проверки.');
     const unknown=(c.unknown??[]).length?`<ul>${c.unknown.map(v=>`<li>${esc(v)}</li>`).join('')}</ul>`:empty('Неизвестных состояний нет','');
@@ -118,6 +130,43 @@ export function createScoutView({ api, command, esc, modal, refresh, openAudienc
         throw new Error('Разрешение мониторинга истекло или отозвано. Обновите источник перед передачей в Audience.');
       await openAudienceGoal({source_ref:`telegram:channel:${candidate.channel_id}`,grant_id:grant.id,
         expires_at:grant.expires_at,campaign_id:current.id,campaign_revision:current.revision,candidate_id:candidate.id});
+      return;
+    }
+    if(action==='scout-observation-rebaseline'||action==='scout-observation-rebaseline-cancel') {
+      const current=await api(`/api/scout/campaigns/${encodeURIComponent(c.id)}`);
+      if(current?.id!==c.id||current.status!=='active'||current.revision!==c.revision)
+        throw new Error('Кампания изменилась. Обновите карточку источника.');
+      const candidate=(current.candidates??[]).find(row=>row.id===id);
+      if(!candidate||candidate.id!==id||!liveMonitor(current,candidate))
+        throw new Error('Действующее разрешение мониторинга больше недоступно. Обновите источник.');
+      const recovery=candidate.observation_recovery;
+      if(action==='scout-observation-rebaseline-cancel') {
+        const authorizationId=recovery?.pending?.id;
+        if(!authorizationId)throw new Error('Ожидающее разрешение уже отсутствует. Обновите источник.');
+        modal('Отменить продолжение наблюдения',`<p>Отменить ожидающее разрешение для этого источника? Это действие не меняет checkpoint, состояние мониторинга или выводы.</p>${area('reason','Причина отмены')}`,p=>{
+          if(!p.reason?.trim())throw new Error('Укажите причину отмены.');
+          return command('source.rebaseline_cancel',{authorization_id:authorizationId,reason:p.reason.trim()});
+        });
+        return;
+      }
+      if(!canRecoverObservation(current,candidate)||recovery?.pending)
+        throw new Error('Продолжение наблюдения сейчас недоступно. Обновите источник.');
+      const displayed=(c.candidates??[]).find(row=>row.id===id);
+      if(!candidate.checkpoint_fingerprint||candidate.checkpoint_fingerprint!==displayed?.checkpoint_fingerprint)
+        throw new Error('Checkpoint изменился после обновления. Обновите карточку источника.');
+      const fingerprint=candidate.checkpoint_fingerprint;
+      const sourceId=candidate.source_ref;
+      if(typeof sourceId!=='string'||!sourceId)throw new Error('Не удалось подтвердить источник. Обновите карточку.');
+      const defaultExpiry=new Date(Date.now()+30*60*1000);
+      const localExpiry=new Date(defaultExpiry.getTime()-defaultExpiry.getTimezoneOffset()*60000).toISOString().slice(0,16);
+      modal('Продолжить с нового наблюдения',`<p><strong>Исторический пробел неизвестен.</strong> Нельзя подтвердить, какие сообщения были пропущены, и не следует трактовать канал как пустой.</p><p>Старые факты и evidence сохраняются для аудита, но становятся устаревшими и не подтверждают текущее состояние. После разрешения worker начнёт новое поколение с пустой историей; состояние станет текущим только после успешного следующего опроса вперёд.</p><p>Это не вступает в канал и не разрешает поиск, отправку сообщений, контакт с участниками или вызов модели.</p><p>Checkpoint: <code>${esc(fingerprint)}</code></p><p>Срок предварительно установлен на 30 минут; его можно сократить или продлить максимум до одного часа.</p><label class="scout-source"><input type="checkbox" name="acknowledge_gap" value="yes">Я понимаю, что пробел в наблюдении неизвестен, и разрешаю продолжить с нового наблюдения</label>${input('expires_at','Разрешение истекает (не более 1 часа)',localExpiry,'datetime-local')}${area('reason','Причина решения оператора')}`,p=>{
+        if(p.acknowledge_gap!=='yes')throw new Error('Подтвердите понимание неизвестного исторического пробела.');
+        const expiry=new Date(p.expires_at), now=Date.now();
+        if(!p.expires_at||Number.isNaN(expiry.valueOf())||expiry.valueOf()<=now||expiry.valueOf()>now+60*60*1000)
+          throw new Error('Укажите будущий срок разрешения не более чем на 1 час.');
+        if(!p.reason?.trim())throw new Error('Укажите причину решения оператора.');
+        return command('source.rebaseline',{source_id:sourceId,checkpoint_fingerprint:fingerprint,acknowledge_gap:true,expires_at:expiry.toISOString(),reason:p.reason.trim()});
+      });
       return;
     }
     if(action==='scout-revise') {

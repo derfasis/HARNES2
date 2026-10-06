@@ -12,6 +12,7 @@ import { decisionBindings, assessmentDecision } from './audience-decisions.mjs';
 import { currentBasis, currentBasisState } from './audience-current-events.mjs';
 import { FOLLOWUP_TEMPORARY } from './audience-followup.mjs';
 import { watchEpoch, sourceRenewalPreview, assertRenewalRequest, renewSource } from './audience-source-renewal.mjs';
+import { sourceObservationFloor } from './source-observation-epochs.mjs';
 
 const storedOutputSchema = readJson(path.join(ROOT, 'contracts/audience-assessment.schema.json'));
 export const outputSchema = structuredClone(storedOutputSchema);
@@ -79,10 +80,11 @@ export class AudienceLoop {
     if (watch.status === 'revoked') return { current: false, reason: watch.reason ?? 'AUDIENCE_SOURCE_REVOKED' };
     const allowed = effectiveSourceConfig(this.service).opportunity.allowedSourceRefs;
     let epoch, invalid = false;
-    try { epoch = watchEpoch(this,watch); }
+    let currentPolicy;
+    try { epoch = watchEpoch(this,watch); currentPolicy = this.policyHash(watch.source_ref); }
     catch (error) { if (!(error instanceof AppError)) throw error; invalid = true; }
     const reason = invalid ? 'AUDIENCE_WATCH_EPOCH_INVALID' : !allowed.includes(watch.source_ref) ? 'SOURCE_NOT_ALLOWED'
-      : this.policyHash(watch.source_ref) !== (epoch?.source_policy_hash ?? watch.policy_hash) ? 'AUDIENCE_SOURCE_POLICY_CHANGED' : null;
+      : currentPolicy !== (epoch?.source_policy_hash ?? watch.policy_hash) ? 'AUDIENCE_SOURCE_POLICY_CHANGED' : null;
     if (reason) {
       const changed = this.store.run("UPDATE audience_watches SET status='revoked',reason=? WHERE goal_id=? AND source_ref=? AND status='active'", reason, watch.goal_id, watch.source_ref);
       if (changed.changes) this.record('watch_revoked', { goal_id: watch.goal_id, source_ref: watch.source_ref, reason });
@@ -107,7 +109,7 @@ export class AudienceLoop {
     check(this.store.get('SELECT COUNT(*) n FROM audience_goals WHERE partner_id=?', this.partnerId).n < 50, 'AUDIENCE_GOAL_LIMIT');
     const goalId = id();
     this.store.run("INSERT INTO audience_goals VALUES(?,?,?,?,1,'OPEN',?,?,?)", goalId, this.partnerId, title, objective, age, now(), now());
-    for (const ref of sourceIds) this.store.run("INSERT INTO audience_watches VALUES(?,?,?,0,'active',NULL)", goalId, ref, this.policyHash(ref));
+    for (const ref of sourceIds) this.store.run("INSERT INTO audience_watches VALUES(?,?,?,?,'active',NULL)", goalId, ref, this.policyHash(ref),sourceObservationFloor(this.service,ref));
     this.record('opened', { goal_id: goalId, source_ids: sourceIds }, 'operator'); return { goal_id: goalId, ...AUTHORITY };
   }
   pause(p) {

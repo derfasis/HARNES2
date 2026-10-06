@@ -15,6 +15,7 @@ import { AUDIENCE_TABLES, AUDIENCE_ATTENTION_TABLES, AUDIENCE_SOURCE_EPOCH_TABLE
 import { MODEL_PROFILE_TABLES } from '../business/model-profile-tables.mjs';
 import { AUDIENCE_FOLLOWUP_TABLES } from '../business/audience-followup-tables.mjs';
 import { validateWatchEpochs } from '../business/audience-source-renewal.mjs';
+import { finishTelegramRebaseline, validateSourceObservationEpochs } from '../business/source-observation-epochs.mjs';
 import { BusinessService } from '../business/service.mjs';
 
 const [source,destinationArg] = process.argv.slice(2);
@@ -25,8 +26,9 @@ if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw n
 if (fs.existsSync(destination)) throw new Error('Destination already exists. Choose a NEW directory.');
 if (bundle.format !== 'digital-ai-partner' || bundle.schema_version !== 1 || !bundle.tables) throw new Error('Unsupported bundle');
 const migrationCount = Array.isArray(bundle.migrations) ? bundle.migrations.length : -1;
+const TELEGRAM_SOURCE_EPOCH_TABLES = ['source_observation_epochs'];
 const without = (...groups) => {
-  const excluded = new Set([...groups.flat(),...SCOUT_TABLES,...AUDIENCE_TABLES,...MODEL_PROFILE_TABLES,...AUDIENCE_FOLLOWUP_TABLES]);
+  const excluded = new Set([...groups.flat(),...SCOUT_TABLES,...AUDIENCE_TABLES,...MODEL_PROFILE_TABLES,...AUDIENCE_FOLLOWUP_TABLES,...TELEGRAM_SOURCE_EPOCH_TABLES]);
   return TABLES.filter(table => !excluded.has(table));
 };
 // These are historical export catalogues. Deriving them from the current list alone silently
@@ -41,14 +43,15 @@ const inputCatalogues = new Map([
   [8, without(WORK_TABLES, CONTROL_TABLES)],
   [9, without(WORK_TABLES, CONTROL_TABLES)],
   [10, without()],
-  [11, TABLES.filter(table => !AUDIENCE_TABLES.includes(table) && !MODEL_PROFILE_TABLES.includes(table) && !AUDIENCE_FOLLOWUP_TABLES.includes(table))],
+  [11, TABLES.filter(table => !AUDIENCE_TABLES.includes(table) && !MODEL_PROFILE_TABLES.includes(table) && !AUDIENCE_FOLLOWUP_TABLES.includes(table) && !TELEGRAM_SOURCE_EPOCH_TABLES.includes(table))],
   // These releases predate immutable source-watch epochs. Keep their catalogues
-  // fixed even though Store.TABLES now includes the schema-16 table.
-  [12, TABLES.filter(table => !AUDIENCE_ATTENTION_TABLES.includes(table) && !MODEL_PROFILE_TABLES.includes(table) && !AUDIENCE_FOLLOWUP_TABLES.includes(table) && !AUDIENCE_SOURCE_EPOCH_TABLES.includes(table))],
-  [13, TABLES.filter(table => !MODEL_PROFILE_TABLES.includes(table) && !AUDIENCE_FOLLOWUP_TABLES.includes(table) && !AUDIENCE_SOURCE_EPOCH_TABLES.includes(table))],
-  [14, TABLES.filter(table => !AUDIENCE_FOLLOWUP_TABLES.includes(table) && !AUDIENCE_SOURCE_EPOCH_TABLES.includes(table))],
-  [15, TABLES.filter(table => !AUDIENCE_SOURCE_EPOCH_TABLES.includes(table))],
-  [16, TABLES],
+  // fixed even though Store.TABLES now includes later epoch tables.
+  [12, TABLES.filter(table => !AUDIENCE_ATTENTION_TABLES.includes(table) && !MODEL_PROFILE_TABLES.includes(table) && !AUDIENCE_FOLLOWUP_TABLES.includes(table) && !AUDIENCE_SOURCE_EPOCH_TABLES.includes(table) && !TELEGRAM_SOURCE_EPOCH_TABLES.includes(table))],
+  [13, TABLES.filter(table => !MODEL_PROFILE_TABLES.includes(table) && !AUDIENCE_FOLLOWUP_TABLES.includes(table) && !AUDIENCE_SOURCE_EPOCH_TABLES.includes(table) && !TELEGRAM_SOURCE_EPOCH_TABLES.includes(table))],
+  [14, TABLES.filter(table => !AUDIENCE_FOLLOWUP_TABLES.includes(table) && !AUDIENCE_SOURCE_EPOCH_TABLES.includes(table) && !TELEGRAM_SOURCE_EPOCH_TABLES.includes(table))],
+  [15, TABLES.filter(table => !AUDIENCE_SOURCE_EPOCH_TABLES.includes(table) && !TELEGRAM_SOURCE_EPOCH_TABLES.includes(table))],
+  [16, TABLES.filter(table => !TELEGRAM_SOURCE_EPOCH_TABLES.includes(table))],
+  [17, TABLES],
 ]);
 const inputTables = inputCatalogues.get(migrationCount);
 if (!inputTables) throw new Error('Migration version differs');
@@ -241,6 +244,19 @@ function assertOutcomeIntegrity(store, { strictEvidence = false } = {}) {
   }
 }
 
+function revokeTransferredRebaselineRequests(store) {
+  const requests = store.all(`SELECT id,partner_id,payload_json FROM events
+    WHERE kind='source.telegram.rebaseline.requested' AND actor='operator' ORDER BY id`);
+  for (const request of requests) {
+    const authorizationId = String(request.id);
+    const terminal = store.get(`SELECT id FROM events WHERE partner_id=? AND kind='source.telegram.rebaseline.finished'
+      AND actor='system' AND json_extract(payload_json,'$.authorization_id')=? LIMIT 1`, request.partner_id, authorizationId);
+    if (terminal) continue;
+    finishTelegramRebaseline({ store, config: { partnerId: request.partner_id } }, authorizationId,
+      { status: 'revoked', reason: 'TRANSFER_REVOKED' });
+  }
+}
+
 const store = new Store(path.join(destination,'data'));
 try {
   store.transaction(()=>{
@@ -277,6 +293,15 @@ try {
       }
     }
     if (migrationCount >= 16) validateWatchEpochs(store);
+    // Validate immutable cutovers while their source checkpoints and authorization
+    // history are still intact. Imported requests are audit history, not authority.
+    // A schema-16 catalog can be forged around schema-17 epoch events. The
+    // current Store already has the table, so validate its rows and event markers
+    // for every import; a genuine pre-epoch bundle has neither and remains valid.
+    validateSourceObservationEpochs(store);
+    // Requests can also be copied into a forged legacy catalog without an epoch
+    // marker. Retire unresolved requests regardless of the claimed migration prefix.
+    revokeTransferredRebaselineRequests(store);
     if (migrationCount >= 9) {
       const profile = bundle.assets.find(asset => asset.path === 'partner/profile.json');
       const partnerId = JSON.parse(profile.content).id;

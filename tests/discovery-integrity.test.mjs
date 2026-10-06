@@ -902,6 +902,7 @@ test('v3 bundle from a clean database imports into the current schema with empty
   const { WORK_TABLES, CONTROL_TABLES } = await import('../business/work-tables.mjs');
   const { SCOUT_TABLES } = await import('../business/scout-tables.mjs');
   const { AUDIENCE_TABLES } = await import('../business/audience-tables.mjs');
+  delete v3.tables.source_observation_epochs;
   delete v3.tables.model_profiles; delete v3.tables.audience_attention_models;
   delete v3.tables.audience_followup_requests; delete v3.tables.audience_followup_attempts;
   for (const table of [...DISCOVERY_TABLES, ...CONTINUITY_TABLES, ...EXECUTIVE_TABLES, ...ACTION_TABLES, ...OUTCOME_TABLES, ...WORK_TABLES, ...CONTROL_TABLES, ...SCOUT_TABLES, ...AUDIENCE_TABLES]) delete v3.tables[table];

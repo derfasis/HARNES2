@@ -5,6 +5,7 @@ import { captureOpportunity, consumeOpportunity, opportunityCapture, OPPORTUNITY
 
 import { ingestSource, sourceCheckpoint } from './source-ingestion.mjs';
 import { requestTelegramRecovery } from './sources/telegram-readonly.mjs';
+import { requestTelegramRebaseline, cancelTelegramRebaseline } from './source-observation-epochs.mjs';
 import { REVIEW_ACTIONS, reviewOpportunity, opportunityReviewDetail, opportunityReviews } from './opportunity-review.mjs';
 
 import { EngagementLoop, ENGAGEMENT_ACTIONS, ENGAGEMENT_AGENT_ACTIONS } from './engagement.mjs';
@@ -120,6 +121,7 @@ export class BusinessService {
     if (MODEL_PROFILE_COMMANDS.has(action)) ensure(actor?.kind === 'operator', 'MODEL_PROFILE_OPERATOR_REQUIRED', 403, 'MODEL_PROFILE_OPERATOR_REQUIRED');
     if (WORK_COMMANDS.has(action)) ensure(actor.kind === 'operator', 'WORK_OPERATOR_REQUIRED', 403, 'WORK_OPERATOR_REQUIRED');
     if (SCOUT_COMMANDS.has(action)) ensure(actor.kind === 'operator', 'SCOUT_OPERATOR_REQUIRED', 403, 'SCOUT_OPERATOR_REQUIRED');
+    if (['source.rebaseline','source.rebaseline_cancel'].includes(action)) ensure(actor?.kind === 'operator', 'TELEGRAM_REBASELINE_OPERATOR_REQUIRED', 403, 'TELEGRAM_REBASELINE_OPERATOR_REQUIRED');
     if (actor.kind === 'agent' && (this.config.controlPlane?.enabled === true || this.control.ticket(actor.runId))) {
       const ticket = this.control.require(actor.runId, { plane: 'private' });
       const run = this.store.get('SELECT * FROM runs WHERE id=? AND partner_id=?', actor.runId, this.config.partnerId);
@@ -187,6 +189,8 @@ export class BusinessService {
       if (p.engagement_id) conversationId = this.engagement.get(p.engagement_id).conversation_id;
     } else switch (action) {
       case 'source.reconcile': result = requestTelegramRecovery(this,p,actor); break;
+      case 'source.rebaseline': result = requestTelegramRebaseline(this,p,actor); break;
+      case 'source.rebaseline_cancel': result = cancelTelegramRebaseline(this,p,actor); break;
       case 'source.ingest': {
         result = ingestSource(this, p);
         if (this.config.discovery?.enabled === true && result.source_event_id && result.disposition === 'registered') markDiscoveryPending(this, result.source_event_id);

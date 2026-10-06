@@ -247,6 +247,7 @@ test('research and attempts export/restore; legacy schema-5 bundle has empty res
   for (const legacy of [false, true]) {
     const data = structuredClone(bundle);
     if (legacy) {
+      delete data.tables.source_observation_epochs;
       delete data.tables.model_profiles; delete data.tables.audience_attention_models;
       delete data.tables.audience_followup_requests; delete data.tables.audience_followup_attempts;
       for (const table of [...EXECUTIVE_TABLES, ...ACTION_TABLES, ...OUTCOME_TABLES, ...WORK_TABLES, ...CONTROL_TABLES, ...SCOUT_TABLES, ...AUDIENCE_TABLES]) delete data.tables[table];
@@ -387,7 +388,7 @@ test('real schema-5 database upgrades in place without changing existing source 
   const before = db.prepare('SELECT * FROM events').all(); db.close();
   const migrated = new Store(directory);
   try {
-    assert.equal(migrated.all('SELECT * FROM schema_migrations').length, 16);
+    assert.equal(migrated.all('SELECT * FROM schema_migrations').length, 17);
     assert.deepEqual(migrated.all('SELECT * FROM events'), before);
     assert.equal(migrated.get('SELECT mission FROM partners').mission, 'Keep this mission');
     assert.equal(migrated.get('SELECT COUNT(*) n FROM research_intents').n, 0);

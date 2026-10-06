@@ -268,6 +268,7 @@ for (const legacy of [false,true]) test(`${legacy ? 'v6' : 'v7'} transfer cannot
   const h = harness(t), a = await h.propose(await h.accepted()); await h.grant(a);
   const bundle = exportPartner(h.store);
   if (legacy) {
+    delete bundle.tables.source_observation_epochs;
     delete bundle.tables.model_profiles; delete bundle.tables.audience_attention_models;
     delete bundle.tables.audience_followup_requests; delete bundle.tables.audience_followup_attempts;
     for (const table of [...ACTION_TABLES, ...OUTCOME_TABLES, ...WORK_TABLES, ...CONTROL_TABLES, ...SCOUT_TABLES, ...AUDIENCE_TABLES]) delete bundle.tables[table];

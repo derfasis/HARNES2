@@ -9,7 +9,7 @@ import { exportPartner } from '../business/export.mjs';
 import { Store, id } from '../business/store.mjs';
 import { audienceHarness, SOURCE, proposalFrom } from './audience-test-helpers.mjs';
 
-test('schema-12 transfer preserves audience work scope while revoking its authority', async t => {
+test('schema-17 transfer preserves audience work scope while revoking its authority', async t => {
   const h = audienceHarness(t);
   const goal = await h.open({ source_ids: [SOURCE] });
   await h.ingest({ message_id: 'transfer-question', text: 'How do I get started with the programme?' });
@@ -35,7 +35,7 @@ test('schema-12 transfer preserves audience work scope while revoking its author
   assert.ok(opened.case_id);
 
   const bundle = exportPartner(h.store), file = path.join(h.directory, 'audience-transfer.json');
-  assert.equal(bundle.migrations.length, 16);
+  assert.equal(bundle.migrations.length, 17);
   assert.equal(bundle.tables.audience_needs.find(row => row.id === need.id).status, 'accepted');
   assert.equal(bundle.tables.audience_work_links.find(row => row.thread_id === work.thread_id).need_id, need.id);
   fs.writeFileSync(file, JSON.stringify(bundle), { flag: 'wx' });

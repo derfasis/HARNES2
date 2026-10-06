@@ -1,7 +1,8 @@
 // No Telegram client, credentials, network, send API or model is imported here.
 // This is a bounded adapter-facing channel difference contract, NOT raw MTProto.
 import { AppError, ensure, now } from '../errors.mjs';
-import { automaticBoundary, digest, ingestSource, finishSource, sourceRows, sourceCheckpoint, sourceAllowlist, SOURCE_CHECKPOINT_CHANNEL, validateSourceCheckpoint } from '../source-ingestion.mjs';
+import { automaticBoundary, digest, ingestSource, finishSource, sourceHistoryRows, sourceCheckpoint, sourceAllowlist, SOURCE_CHECKPOINT_CHANNEL, validateSourceCheckpoint } from '../source-ingestion.mjs';
+import { sourceObservationEpoch, telegramRebaselineAuthorization } from '../source-observation-epochs.mjs';
 import { markDiscoveryPending } from '../discovery.mjs';
 import { validateTelegramSources } from '../config.mjs';
 import { effectiveSourceConfig } from '../scout-policy.mjs';
@@ -74,7 +75,7 @@ function durableConflictTargets(service,record) {
   // a whole union first can hide every recovered target behind smaller native IDs.
   const ids=[...new Set([...native.slice(0,CONFLICT_TARGET_SAMPLE/2),
     ...recovered.slice(0,CONFLICT_TARGET_SAMPLE/2),...native,...recovered])].slice(0,CONFLICT_TARGET_SAMPLE);
-  const rows=new Map(sourceRows(service,record.source_id,ids.map(id=>`message:${id}`))
+  const rows=new Map(sourceHistoryRows(service,record.source_id,ids.map(id=>`message:${id}`))
     .map(r=>[r.message.message_id,r]));
   return ids.map(id=>{
     const messageId=`message:${id}`,row=rows.get(messageId),m=row?.message;
@@ -135,6 +136,8 @@ function stateFor(service, p, authorizationId=null) {
   check(state, 'TELEGRAM_BOOTSTRAP_REQUIRED');
   check(state.policy_hash === digest(p), 'TELEGRAM_SOURCE_POLICY_CHANGED');
   validateSourceCheckpoint(state,p);
+  sourceObservationEpoch(service,p.sourceId);
+  check(!telegramRebaselineAuthorization(service,p),'TELEGRAM_REBASELINE_PENDING');
   check(state.reason!==INTEGRITY || authorizationId && telegramRecoveryAuthorization(service,p)===authorizationId,INTEGRITY);
   return state;
 }
@@ -165,6 +168,7 @@ export function requestTelegramRecovery(service,raw,actor) {
   check(actor?.kind==='operator','TELEGRAM_RECOVERY_OPERATOR_REQUIRED');
   fields(raw,['source_id','checkpoint_fingerprint','reason']);
   const p=policy(service,raw.source_id),s=sourceCheckpoint(service,p.sourceId);
+  check(!telegramRebaselineAuthorization(service,p),'TELEGRAM_REBASELINE_PENDING');
   check(s,'TELEGRAM_BOOTSTRAP_REQUIRED');validateSourceCheckpoint(s,p);
   check(s.reason===INTEGRITY && raw.checkpoint_fingerprint===digest(s),'TELEGRAM_RECOVERY_CHECKPOINT_MISMATCH');
   check(typeof raw.reason==='string' && raw.reason.trim() && raw.reason.length<=1000,'TELEGRAM_RECOVERY_REASON_REQUIRED');
@@ -232,7 +236,7 @@ function latestProof(service,p,eventId) {
   return row ? JSON.parse(row.payload_json) : null;
 }
 function saveMessage(service,p,m,pts,ptsCount,recovery=null) {
-  const row=sourceRows(service,p.sourceId).find(r=>r.message.message_id===`message:${m.id}`),old=row?.message;
+  const row=sourceHistoryRows(service,p.sourceId).find(r=>r.message.message_id===`message:${m.id}`),old=row?.message;
   // Evidence revisions are application-local, not Telegram per-message PTS.
   const version=Math.max(pts,(old?.version??0)+1);
   const normalized = normalizeTelegramMessage(p,m,version);
@@ -260,7 +264,7 @@ function saveUpdate(service,p,u,recovery=null) {
     check(u.message === undefined && Array.isArray(u.message_ids) && u.message_ids.length > 0
       && u.message_ids.length <= 100 && u.message_ids.every(id=>integer(id))
       && new Set(u.message_ids).size === u.message_ids.length, 'INVALID_TELEGRAM_DELETE');
-    const current = new Map(sourceRows(service,p.sourceId).map(r=>[r.message.message_id,r.message]));
+    const current = new Map(sourceHistoryRows(service,p.sourceId).map(r=>[r.message.message_id,r.message]));
     for (const id of u.message_ids) {
       const messageId=`message:${id}`, previous=current.get(messageId);
       if (!deleted(service,p,messageId)) service.store.event(service.config.partnerId,null,TOMBSTONE,'system',
@@ -399,7 +403,7 @@ function reconcile(service,p,s,page) {
       .filter(u=>u.message?.id===id || u.message_ids?.includes(id)).at(-1);
     conflictCheck(!last || last.message && digest(last.message)===digest(m),'snapshot_vs_last_update_mismatch',
       ()=>({source_id:p.sourceId,message_id:m.id,pts:page.pts,edit_date:m.edit_date??null}));
-    const old=sourceRows(service,p.sourceId).find(r=>r.message.message_id===`message:${id}`);
+    const old=sourceHistoryRows(service,p.sourceId).find(r=>r.message.message_id===`message:${id}`);
     const normalized=normalizeTelegramMessage(p,m,(old?.message.version??0)+1);
     conflictCheck(old || page.to_pts>page.from_pts,'snapshot_without_advance',()=>({source_id:p.sourceId,pts:page.to_pts}));
     check(!old || old.message.author_id===normalized.author_id,'TELEGRAM_AUTHOR_IDENTITY_CHANGED');
@@ -426,7 +430,7 @@ function validateHistoricalUpdate(service,p,u) {
   check(u.channel_id===p.channelId && ['new','edit','delete','metadata'].includes(u.kind),'INVALID_TELEGRAM_UPDATE');
   if(u.kind==='metadata'){validateMetadata(u);return [];}
   check(u.metadata_type===undefined && u.metadata_fingerprint===undefined,'UNSUPPORTED_TELEGRAM_FIELDS');
-  const rows=sourceRows(service,p.sourceId);
+  const rows=sourceHistoryRows(service,p.sourceId);
   if(u.kind==='delete') {
     check(u.message===undefined && Array.isArray(u.message_ids) && u.message_ids.length>0 && u.message_ids.length<=100
       && u.message_ids.every(id=>integer(id)) && new Set(u.message_ids).size===u.message_ids.length,'INVALID_TELEGRAM_DELETE');
@@ -456,7 +460,7 @@ export function bootstrapTelegramSource(service, sourceId, baseline,confirmBasel
     check(new Set(frozen.history.map(m=>m.id)).size===frozen.history.length,'DUPLICATE_BASELINE_MESSAGE');
     const old=sourceCheckpoint(service,sourceId), fingerprint=digest(frozen);
     if(old) {check(old.policy_hash===digest(p) && old.baseline_hash===fingerprint,'TELEGRAM_BASELINE_COLLISION');return {duplicate:true,pts:old.pts};}
-    check(sourceRows(service,sourceId).length===0,'TELEGRAM_SOURCE_ALREADY_POPULATED');
+    check(sourceHistoryRows(service,sourceId).length===0,'TELEGRAM_SOURCE_ALREADY_POPULATED');
     for(const message of frozen.history) {
       const saved=ingestSource(service,normalizeTelegramMessage(p,message,1));
       proof(service,p,saved.source_event_id,{kind:'reconciled_snapshot',message_id:`message:${message.id}`,

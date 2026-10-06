@@ -3,6 +3,7 @@ import { ensure } from './errors.mjs';
 import { validateTelegramSources, validateBrowserSources } from './config.mjs';
 import { effectiveSourceConfig } from './scout-policy.mjs';
 import { telegramReadState } from './telegram-read-gate.mjs';
+import { sourceObservationFloor } from './source-observation-epochs.mjs';
 
 export const SOURCE_MESSAGE = 'source.message';
 export const PIPELINE_FINISHED = 'opportunity.pipeline.finished';
@@ -162,6 +163,7 @@ function telegramTransportBoundary(service, sourceId) {
   if(service.scout?.enabled){const read=telegramReadState(service,p.accountId,{sourceId});check(!['SCOUT_ACCOUNT_BACKOFF','SCOUT_READ_GATE_UNPROVEN','SCOUT_OWNERSHIP_UNAVAILABLE'].includes(read.reason),'SOURCE_TRANSPORT_DIRTY');}
   check(state && state.policy_hash === digest(p), 'SOURCE_TRANSPORT_NOT_READY');
   validateSourceCheckpoint(state,p);
+  sourceObservationFloor(service,sourceId);
   check(state.phase === 'current', 'SOURCE_TRANSPORT_NOT_CURRENT');
   check(p.sourceKind!=='live_snapshot'||typeof liveHealth==='function', 'SOURCE_TRANSPORT_DIRTY');
   check(!liveHealth || liveCurrent === true, 'SOURCE_TRANSPORT_DIRTY');
@@ -230,13 +232,18 @@ function timestamp(value) {
   return normalized;
 }
 export function sourceRows(service, sourceId, messageIds = null) {
+  return sourceHistoryRows(service,sourceId,messageIds,sourceObservationFloor(service,sourceId));
+}
+// Canonical transport identity/version/tombstone checks retain the historical record.
+// Business evidence uses sourceRows(), whose floor forbids pre-gap evidence revival.
+export function sourceHistoryRows(service, sourceId, messageIds = null, floor = 0) {
   const messageFilter = Array.isArray(messageIds)
     ? "AND json_extract(e.payload_json,'$.message_id') IN (SELECT value FROM json_each(?))" : '';
-  const params = [service.config.partnerId, SOURCE_MESSAGE, sourceId];
+  const params = [service.config.partnerId, SOURCE_MESSAGE, sourceId, floor];
   if (Array.isArray(messageIds)) params.push(JSON.stringify([...new Set(messageIds)]));
   params.push(1001);
   return service.store.all(`SELECT e.id,e.created_at,e.payload_json FROM events e WHERE e.partner_id=? AND e.kind=? AND e.actor='system'
-    AND json_extract(e.payload_json,'$.source_id')=? ${messageFilter} AND NOT EXISTS
+    AND json_extract(e.payload_json,'$.source_id')=? AND e.id>? ${messageFilter} AND NOT EXISTS
     (SELECT 1 FROM events n WHERE n.partner_id=e.partner_id AND n.kind=e.kind AND n.actor='system'
       AND json_extract(n.payload_json,'$.source_id')=json_extract(e.payload_json,'$.source_id')
       AND json_extract(n.payload_json,'$.message_id')=json_extract(e.payload_json,'$.message_id') AND n.id>e.id)
@@ -278,7 +285,7 @@ export function ingestSource(service, raw) {
     check(digest(JSON.parse(historical.payload_json)) === digest(message), 'SOURCE_VERSION_COLLISION');
     return { source_event_id: String(historical.id), duplicate: true, disposition: 'duplicate' };
   }
-  const rows = sourceRows(service, message.source_id), previous = rows.find(row => row.message.message_id === message.message_id);
+  const rows = sourceHistoryRows(service, message.source_id), previous = rows.find(row => row.message.message_id === message.message_id);
   check(rows.every(row => row.message.source_kind === message.source_kind), 'SOURCE_KIND_CHANGED');
   if (previous) {
     const old = previous.message;

@@ -5,6 +5,7 @@ import { ROOT, readJson } from './config.mjs';
 import { id } from './store.mjs';
 import { ensure, requiredText, dateTime, now, AppError } from './errors.mjs';
 import { sourceEvent, sourceRows, sourceAccessReadiness, sourceTransportKind, browserCheckpoint, digest } from './source-ingestion.mjs';
+import { sourceObservationEpoch, sourceObservationFloor } from './source-observation-epochs.mjs';
 import { effectiveSourceConfig } from './scout-policy.mjs';
 
 export const proposalSchema = readJson(path.join(ROOT, 'contracts/continuity-proposal.schema.json'));
@@ -31,13 +32,16 @@ export class ContinuityLoop {
     const telegram = cfg.telegramSources?.find(p => p.sourceId === sourceRef);
     const policy = browser ? { ...browser } : telegram ?? { sourceId: sourceRef, kind: 'fixture' };
     if (browser) delete policy.pollEverySeconds;
-    return digest(policy);
+    const epoch = sourceObservationEpoch(this.service,sourceRef);
+    return digest(epoch ? {policy,observation_epoch:epoch.id,observation_floor:epoch.observation_floor} : policy);
   }
   health(watch) {
     if (watch.status === 'revoked') return { current: false, reason: watch.reason };
-    if (this.policyHash(watch.source_ref) !== watch.policy_hash)
-      return { current: false, reason: 'CONTINUITY_SOURCE_POLICY_CHANGED' };
-    try { return sourceAccessReadiness(this.service, watch.source_ref); }
+    try {
+      if (this.policyHash(watch.source_ref) !== watch.policy_hash)
+        return { current: false, reason: 'CONTINUITY_SOURCE_POLICY_CHANGED' };
+      return sourceAccessReadiness(this.service, watch.source_ref);
+    }
     catch { return { current: false, reason: 'CONTINUITY_SOURCE_UNAVAILABLE' }; }
   }
   thread(threadId) {
@@ -46,8 +50,10 @@ export class ContinuityLoop {
   }
   watches(threadId) { return this.store.all('SELECT * FROM partner_watches WHERE thread_id=? ORDER BY source_ref', threadId); }
   head(sourceRef) {
-    return this.store.get("SELECT COALESCE(MAX(id),0) n FROM events WHERE partner_id=? AND kind='source.message' AND actor='system' AND payload_json->>'$.source_id'=?",
+    const head = this.store.get("SELECT COALESCE(MAX(id),0) n FROM events WHERE partner_id=? AND kind='source.message' AND actor='system' AND payload_json->>'$.source_id'=?",
       this.partnerId, sourceRef).n;
+    try { return Math.max(sourceObservationFloor(this.service,sourceRef),head); }
+    catch(error) { if(!(error instanceof AppError)) throw error; return head; }
   }
   record(kind, payload, actor = 'system') { this.store.event(this.partnerId, null, `continuity.${kind}`, actor, payload); }
   changed(row, reasons) {
@@ -75,8 +81,10 @@ export class ContinuityLoop {
     for (const watch of watches) {
       const selected = events.filter(e => parse(e.payload_json).source_id === watch.source_ref);
       if (!selected.length) continue;
-      const current = new Map(sourceRows(this.service, watch.source_ref, selected.map(e => parse(e.payload_json).message_id))
-        .map(e => [e.message.message_id, e]));
+      let rows;
+      try { rows = sourceRows(this.service,watch.source_ref,selected.map(e=>parse(e.payload_json).message_id)); }
+      catch(error) { if(!(error instanceof AppError)) throw error; rows = []; }
+      const current = new Map(rows.map(e=>[e.message.message_id,e]));
       const access = this.health(watch);
       const transport = sourceTransportKind(this.service, watch.source_ref);
       const browser = browserCheckpoint(this.service, watch.source_ref);
