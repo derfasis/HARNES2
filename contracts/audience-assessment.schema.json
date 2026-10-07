@@ -35,6 +35,17 @@
       "required":["need_id","title","hypothesis","why_now","exchange_ids","evidence_event_ids","counterevidence_event_ids","support_quotes","next_step","reason","unknowns"],
       "properties":{
         "proposal_version":{"const":2},
+        "first_contact":{"type":"object","additionalProperties":false,
+          "required":["version","target_event_id","target_quote","channel","help","channel_reason"],
+          "properties":{
+            "version":{"const":1},
+            "target_event_id":{"type":"string","pattern":"^[1-9][0-9]*$","maxLength":20},
+            "target_quote":{"$ref":"#/$defs/text"},
+            "channel":{"enum":["public_reply","none"]},
+            "help":{"$ref":"#/$defs/text"},
+            "channel_reason":{"$ref":"#/$defs/text"}
+          }
+        },
         "need_id":{"type":["string","null"],"minLength":1,"maxLength":36},
         "title":{"type":"string","minLength":1,"maxLength":200,"pattern":"\\S"},
         "hypothesis":{"$ref":"#/$defs/text"},"why_now":{"$ref":"#/$defs/text"},
@@ -71,6 +82,7 @@
       },
       "dependencies":{
         "context_event_ids":["proposal_version"],"context_review":["proposal_version"],"material_preview":["proposal_version"],
+        "first_contact":["proposal_version"],
         "proposal_version":["context_event_ids","context_review"]
       },
       "allOf":[{

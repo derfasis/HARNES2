@@ -906,6 +906,7 @@ test('v3 bundle from a clean database imports into the current schema with empty
   delete v3.tables.model_profiles; delete v3.tables.audience_attention_models;
   delete v3.tables.audience_followup_requests; delete v3.tables.audience_followup_attempts;
   for (const table of [...DISCOVERY_TABLES, ...CONTINUITY_TABLES, ...EXECUTIVE_TABLES, ...ACTION_TABLES, ...OUTCOME_TABLES, ...WORK_TABLES, ...CONTROL_TABLES, ...SCOUT_TABLES, ...AUDIENCE_TABLES]) delete v3.tables[table];
+  delete v3.tables.audience_first_contact_heads;
   for (const row of v3.tables.messages) { delete row.occurred_at; delete row.time_basis; }
   v3.migrations = v3.migrations.slice(0, 3);
   v3.tables_sha256 = hash(JSON.stringify(v3.tables));

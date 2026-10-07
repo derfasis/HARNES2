@@ -90,7 +90,7 @@ function importBundle(t,h,bundle,label) {
     {cwd:ROOT,encoding:'utf8',windowsHide:true})};
 }
 
-test('schema-17 transfer preserves request, attempt and receipt history while revoking pending authority',async t=>{
+test('schema-18 transfer preserves request, attempt and receipt history while revoking pending authority',async t=>{
   const h=setup(t),selected=await profile(h);
   const completed=await seedNeed(h,'completed');
   await addFreshEvent(h,'completed');
@@ -102,7 +102,7 @@ test('schema-17 transfer preserves request, attempt and receipt history while re
   const pendingRequest=await request(h,pending.need,selected);
 
   const bundle=exportPartner(h.store);
-  assert.equal(bundle.migrations.length,17);
+  assert.equal(bundle.migrations.length,18);
   assert.equal(bundle.tables.audience_followup_requests.length,2);
   assert.equal(bundle.tables.audience_followup_attempts.length,1);
   const consumedSource=bundle.tables.audience_followup_attempts.find(row=>row.request_id===completedRequest.request_id);
@@ -137,13 +137,14 @@ test('schema-17 transfer preserves request, attempt and receipt history while re
   } finally { restored.close(); }
 });
 
-test('actual schema-14 catalogue imports without follow-up or epoch tables and upgrades to 17',async t=>{
+test('actual schema-14 catalogue imports without follow-up or epoch tables and upgrades to 18',async t=>{
   const h=setup(t),bundle=exportPartner(h.store);
   bundle.migrations=bundle.migrations.slice(0,14);
   delete bundle.tables.source_observation_epochs;
   delete bundle.tables.audience_watch_epochs;
   delete bundle.tables.audience_followup_requests;
   delete bundle.tables.audience_followup_attempts;
+  delete bundle.tables.audience_first_contact_heads;
   bundle.tables_sha256=hash(JSON.stringify(bundle.tables));
   assert.equal(Object.hasOwn(bundle.tables,'audience_followup_requests'),false);
   assert.equal(Object.hasOwn(bundle.tables,'audience_followup_attempts'),false);
@@ -151,14 +152,14 @@ test('actual schema-14 catalogue imports without follow-up or epoch tables and u
   assert.equal(result.status,0,result.stderr);
   const restored=new Store(path.join(destination,'data'));
   try {
-    assert.equal(restored.get('SELECT COUNT(*) n FROM schema_migrations').n,17);
+    assert.equal(restored.get('SELECT COUNT(*) n FROM schema_migrations').n,18);
     assert.equal(restored.get('SELECT COUNT(*) n FROM audience_followup_requests').n,0);
     assert.equal(restored.get('SELECT COUNT(*) n FROM audience_followup_attempts').n,0);
     assert.deepEqual(restored.all('PRAGMA foreign_key_check'),[]);
   } finally { restored.close(); }
 });
 
-test('schema-17 catalogue and follow-up row shape are exact on import',async t=>{
+test('schema-18 catalogue and follow-up row shape are exact on import',async t=>{
   const h=setup(t),base=exportPartner(h.store);
   const malformedBundles=[];
   const missingTable=structuredClone(base);
@@ -169,6 +170,7 @@ test('schema-17 catalogue and follow-up row shape are exact on import',async t=>
   const misplacedTables=structuredClone(base);
   misplacedTables.migrations=misplacedTables.migrations.slice(0,14);
   delete misplacedTables.tables.source_observation_epochs;
+  delete misplacedTables.tables.audience_first_contact_heads;
   misplacedTables.tables_sha256=hash(JSON.stringify(misplacedTables.tables));
   malformedBundles.push({label:'schema14-with-schema15-tables',bundle:misplacedTables,pattern:/Bundle table list differs/});
 

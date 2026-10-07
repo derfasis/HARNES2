@@ -42,6 +42,17 @@ export function proposalBindings(output, packet) {
     check(output.next_step === 'prepare_material' && Buffer.byteLength(preview.content, 'utf8') <= 32000
       && preview.evidence_event_ids.every(ref => references.includes(ref)), 'AUDIENCE_PREVIEW_SCOPE');
   }
+  const contact = output.first_contact;
+  if (contact) {
+    const target = evidence.find(e => e.source_event_id === contact.target_event_id);
+    check(target && output.evidence_event_ids.includes(contact.target_event_id)
+      && typeof target.text === 'string' && target.text.includes(contact.target_quote)
+      && output.support_quotes.some(q => q.source_event_id === contact.target_event_id && q.quote.includes(contact.target_quote)),
+    'FIRST_CONTACT_TARGET_INVALID');
+    if (contact.channel === 'public_reply') check(output.next_step === 'prepare_material' && preview
+      && preview.evidence_event_ids.includes(contact.target_event_id)
+      && typeof target.author_id === 'string' && target.author_id.trim().length > 0, 'FIRST_CONTACT_RESPONSE_INVALID');
+  }
   return { selected, references };
 }
 

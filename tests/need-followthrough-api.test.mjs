@@ -32,10 +32,19 @@ async function harness(t) {
   config.controlPlane={ ...config.controlPlane,enabled:true,maxConcurrent:3,reservationUsd:0.25 };
   config.continuity={ ...config.continuity,enabled:true,modelEnabled:false };
   config.executive={ ...config.executive,enabled:false,modelEnabled:false };
-  const app=await start({ config,directory });
+  let app=await start({ config,directory });
   t.after(async()=>{ await app.close(); fs.rmSync(directory,{recursive:true,force:true}); });
-  const origin=`http://127.0.0.1:${app.server.address().port}`;
-  const session=await (await fetch(`${origin}/api/session`)).json();
+  let origin, session;
+  for (let attempt=0; attempt<3; attempt++) {
+    origin=`http://127.0.0.1:${app.server.address().port}`;
+    try { session=await (await fetch(`${origin}/api/session`)).json(); break; }
+    catch (error) {
+      // Port 0 can select a Fetch-blocked port on a customized Windows range.
+      // Only retry allocation before seeding state; actual HTTP failures still fail.
+      if (error.cause?.message !== 'bad port' || attempt===2) throw error;
+      await app.close(); app=await start({ config,directory });
+    }
+  }
   const headers={ 'x-partner-token':session.token,'content-type':'application/json' };
   const get=route=>fetch(`${origin}${route}`,{headers});
   const postCommand=(action,payload,requestId=id(),extra={})=>fetch(`${origin}/api/commands`,{method:'POST',headers,
