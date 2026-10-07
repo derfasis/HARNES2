@@ -654,6 +654,90 @@ const deleteGate=async(h,id=7)=>{const post=message({id,post:true,fromId:null});
 const tombstones=(h,id=7)=>h.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='source.telegram.tombstone'"
   +(id?` AND json_extract(payload_json,'$.message_id')='message:${id}'`:'')).n;
 const deleteVersions=h=>h.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='source.message' AND json_extract(payload_json,'$.operation')='delete'").n;
+test('live-shaped: disjoint native new and same-watermark counterless delete both apply',async t=>{
+  const h=harness(t);h.fullReply({...publicFull(),fullChat:new Api.ChannelFull({id:b(100),pts:191715})});await h.bootstrap();
+  const created=message({id:115832,fromId:new Api.PeerUser({userId:b(20)}),message:'What does this offer include?'});
+  const native=update(191716,'new',{message:created}),removed=zeroDelete(191716,{messages:[115831]});
+  await h.receive(native);
+  h.reply(difference(191716,[created],[native,removed]));
+  await h.poll();await h.tick();
+  assert.equal(h.state().pts,191716);assert.equal(h.state().phase,'current');
+  assert.deepEqual(h.rows().map(r=>r.message.message_id),['message:115832']);
+  assert.equal(h.rows()[0].message.operation,'upsert');
+  assert.equal(tombstones(h,115831),1);assert.equal(deleteVersions(h),0);
+  assert.equal(h.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='source.telegram.update'").n,2);
+  assert.equal(h.calls,1);assert.equal(h.cards().length,1);noEffects(h);
+  const page=mapChannelDifference(p,191715,difference(191716,[created],[native,removed]),[mapTelegramUpdate(p,native)]);
+  assert.equal((await applyTelegramDifference(h.service,sourceId,page)).disposition,'duplicate');
+  await h.receive(native);await h.receive(removed);h.reply(difference(191716,[created],[native,removed]));
+  await h.poll();await h.tick();assert.equal(h.reader.status().buffered,0);
+  assert.equal(tombstones(h,115831),1);assert.equal(deleteVersions(h),0);assert.equal(h.calls,1);
+  await h.restart();h.reply(empty(191716));await h.poll();await h.tick();
+  assert.equal(h.state().phase,'current');assert.equal(h.rows().length,1);assert.equal(tombstones(h,115831),1);
+  h.reply(difference(191717,[message({id:115831,fromId:new Api.PeerUser({userId:b(30)})})]));
+  await assert.rejects(h.poll(),{code:'TELEGRAM_MESSAGE_DELETED'});
+  assert.equal(h.state().pts,191716);assert.equal(h.rows().length,1);assert.equal(tombstones(h,115831),1);
+  assert.equal(h.calls,1);noEffects(h);
+});
+test('known message deletion coexists with unrelated native new and stales its prior evidence',async t=>{
+  const h=harness(t);await deleteGate(h);const old=h.rows().find(r=>r.message.message_id==='message:7');
+  const oldCard=h.cards()[0],calls=h.calls,created=message({id:8,media:new Api.MessageMediaUnsupported()});
+  const native=update(11,'new',{message:created}),removed=zeroDelete(11,{messages:[7]});
+  await h.receive(native);h.reply(difference(11,[created],[native,removed]));await h.poll();await h.tick();
+  assert.equal(h.state().pts,11);assert.equal(h.state().phase,'current');
+  assert.equal(h.rows().find(r=>r.message.message_id==='message:7').message.operation,'delete');
+  assert.equal(h.rows().find(r=>r.message.message_id==='message:8').message.operation,'unsupported');
+  assert.equal(tombstones(h,7),1);assert.equal(deleteVersions(h),1);
+  const deleted=h.rows().find(r=>r.message.message_id==='message:7');
+  assert.notEqual(deleted.event_id,old.event_id);assert.ok(deleted.message.version>old.message.version);
+  assert.equal(h.service.opportunityDetail(oldCard.id).freshness.fresh,false);
+  assert.equal(h.calls,calls);assert.equal(h.cards().length,1);noEffects(h);
+});
+test('disjoint native edit and same-watermark counterless delete both apply',async t=>{
+  const h=harness(t);await h.bootstrap();
+  const known=message({id:1}),opaque=message({id:2,fromId:new Api.PeerUser({userId:b(20)}),media:new Api.MessageMediaUnsupported()});
+  h.reply(difference(11,[known,opaque]));await h.poll();await h.tick();
+  const oldCard=h.cards()[0],calls=h.calls;
+  const edited=message({id:2,fromId:new Api.PeerUser({userId:b(20)}),media:new Api.MessageMediaUnsupported(),editDate:1767225601});
+  const native=update(12,'edit',{message:edited}),removed=zeroDelete(12,{messages:[1]});
+  await h.receive(native);h.reply(difference(12,[],[native,removed]));await h.poll();await h.tick();
+  assert.equal(h.state().pts,12);assert.equal(h.state().phase,'current');
+  assert.equal(h.rows().find(r=>r.message.message_id==='message:1').message.operation,'delete');
+  assert.equal(h.rows().find(r=>r.message.message_id==='message:2').message.operation,'unsupported');
+  assert.equal(tombstones(h,1),1);assert.equal(deleteVersions(h),1);
+  assert.equal(h.service.opportunityDetail(oldCard.id).freshness.fresh,false);
+  assert.equal(h.calls,calls);assert.equal(h.cards().length,1);noEffects(h);
+});
+test('same-target native new or edit and counterless delete at one watermark remain fail closed',async t=>{
+  for(const kind of ['new','edit']) {
+    const h=harness(t);let prior;
+    if(kind==='edit') {await recovered(h);prior=h.rows()[0];}
+    else await h.bootstrap();
+    const changed=message({id:1,message:kind==='new'?'New then deleted':'Edited then deleted',
+      ...(kind==='edit'?{editDate:1767225601}:{})});
+    const native=update(kind==='new'?11:12,kind,{message:changed});
+    const removed=zeroDelete(native.pts,{messages:[1]});
+    await h.receive(native);
+    h.reply(difference(native.pts,[],[native,removed]));
+    await assert.rejects(h.poll(),{code:'TELEGRAM_SNAPSHOT_CONFLICT'});
+    assert.equal(h.state().reason,'INTEGRITY_RECONCILIATION_REQUIRED');
+    assert.equal(h.rows().length,prior?1:0);if(prior)assert.equal(h.rows()[0].event_id,prior.event_id);
+    assert.equal(tombstones(h,1),0);assert.equal(h.store.get("SELECT COUNT(*) AS n FROM events WHERE kind='source.telegram.update'").n,0);
+    noEffects(h);
+  }
+});
+test('metadata sharing a watermark with unrelated counterless delete does not block either receipt',async t=>{
+  const h=harness(t);await h.bootstrap();
+  const meta=webpage(11),removed=zeroDelete(11,{messages:[115831]});
+  await h.receive(meta);h.reply(difference(11,[],[meta,removed]));await h.poll();await h.tick();
+  assert.equal(h.state().pts,11);assert.equal(h.state().phase,'current');
+  assert.equal(tombstones(h,115831),1);assert.equal(deleteVersions(h),0);assert.equal(h.rows().length,0);
+  const receipts=h.store.all("SELECT payload_json FROM events WHERE kind='source.telegram.update' AND json_extract(payload_json,'$.pts')=11")
+    .map(r=>JSON.parse(r.payload_json));
+  assert.equal(receipts.length,2);assert.equal(receipts.filter(r=>r.kind==='metadata'&&r.metadata_type==='webpage').length,1);
+  assert.equal(receipts.filter(r=>r.kind==='delete'&&r.pts_count===0&&r.proof_kind==='reconciled_event').length,1);
+  assert.equal(h.calls,0);assert.equal(h.cards().length,0);noEffects(h);
+});
 test('GLM F6: same-pts native and counterless deletes are one event with corroborating receipt',async t=>{
   const h=harness(t);await deleteGate(h);assert.equal(h.cards().length,1);
   const native=update(11,'delete',{ptsCount:1,messages:[7]}),counterless=zeroDelete(11,{messages:[7]});

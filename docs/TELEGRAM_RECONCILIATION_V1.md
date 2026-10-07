@@ -91,6 +91,16 @@ reclassify native-origin evidence. Explicit supported edits/deletes supersede
 prior snapshot/native material state, and ordinary later native mutations work
 without Consumer/Router changes.
 
+A positive-count new/edit/metadata update and a returned zero-count deletion can
+share a watermark while describing different messages. Compare delete ID sets
+only when both representations are deletes. Mixed-kind updates still pass the
+existing per-target and snapshot checks: creating/editing and deleting the same
+message at the same watermark remains a conflict. An unseen deleted message gets
+only a durable scoped tombstone; no author, text or source identity is invented.
+The existing conservative rule for two same-PTS delete representations is
+unchanged: equal ID sets corroborate one deletion; different or partial sets
+remain blocked pending evidence of a supported representation.
+
 All public identity/content/ancestry/time validation, unknown-update rejection,
 DifferenceTooLong handling and operator-only fingerprinted INTEGRITY recovery
 remain intact. No DB migration, queue, sender capability or Router schema change.
