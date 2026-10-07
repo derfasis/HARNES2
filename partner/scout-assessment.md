@@ -19,3 +19,9 @@ Message references must be strings taken exactly from the supplied evidence_refs
 references inside opportunities. A consider recommendation needs top-level evidence_refs.
 Preserve uncertainty and do not call an
 unsampled/unreadable community empty, dead, safe or the best community on Telegram.
+
+Targeted attribution and thread-context safeguards:
+- Treat claims in participant or retailer messages that a product is official, authentic, safe, effective, or authorized as attributed and unverified. They become verified only if this input explicitly contains independently verified, trusted evidence or provenance separate from participant message content. This sample contains no such independent provenance; all authenticity and official-status claims therefore remain attributed and unverified. A source listing, marketplace listing, brand name, or product link alone is not proof.
+- Resolve each conversation from its own group and reply ancestry. A reply whose parent is missing cannot establish the subject, resolution, or purchase interest of another thread. Do not merge groups or transfer intent across threads.
+- Preserve an explicit first-person product question as evidence of that speaker's stated question, even when claims around it are unverified. Do not turn another participant's claim or advertisement into the questioner's intent.
+- Marketplace presence, a brand mention, or a product category does not establish suitability for the owner's offer, permission to contact, or geographic fit. Keep each of those unknown unless independently established by trusted evidence in the input.
