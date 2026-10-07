@@ -12,14 +12,29 @@ import { BusinessService } from '../business/service.mjs';
 import { exportPartner } from '../business/export.mjs';
 import { processAudienceAssessment } from '../business/audience-reasoning.mjs';
 
-async function proposed(t, { channel = 'public_reply', firstContact = {}, withReply = false, max_age_seconds = 3600 } = {}) {
+async function ingestPublished(h, { message_id, text, version = 1, operation = 'upsert', source_id = SOURCE,
+  thread_id = null, reply_to_id = null, author_id = `author:${source_id}`, published_at = new Date().toISOString() }) {
+  return h.command('source.ingest', { source_id, source_kind:'sanitized_fixture', message_id, author_id,
+    display_name:null, thread_id, reply_to_id, version, operation, text, created_at:published_at, updated_at:published_at },
+  id(), { kind:'channel', sourceId:source_id });
+}
+
+async function proposed(t, { channel = 'public_reply', firstContact = {}, withReply = false, max_age_seconds = 3600,
+  targetPublishedAt = new Date().toISOString(), corruptPublishedAt = undefined } = {}) {
   const h = audienceHarness(t);
   const goal = await h.open({ source_ids: [SOURCE], objective: 'Understand whether this public request needs a response.', max_age_seconds });
-  const root = await h.ingest({ message_id: 'first-contact-target',
-    text: 'Could someone explain how to get started with the volunteer rota?' });
+  const root = await ingestPublished(h, { message_id:'first-contact-target',
+    text:'Could someone explain how to get started with the volunteer rota?', published_at:targetPublishedAt });
+  if (corruptPublishedAt !== undefined) {
+    const row = h.store.get('SELECT payload_json FROM events WHERE id=?', Number(root.source_event_id));
+    const message = JSON.parse(row.payload_json);
+    if (corruptPublishedAt === 'missing') delete message.created_at;
+    else message.created_at = corruptPublishedAt;
+    h.store.run('UPDATE events SET payload_json=? WHERE id=?', JSON.stringify(message), Number(root.source_event_id));
+  }
   let reply;
-  if (withReply) reply = await h.ingest({ message_id: 'first-contact-reply', reply_to_id: 'first-contact-target',
-    text: 'The rota is still open for Saturday.' });
+  if (withReply) reply = await ingestPublished(h, { message_id:'first-contact-reply', reply_to_id:'first-contact-target',
+    text:'The rota is still open for Saturday.' });
   h.service.audience.reconcile({ limit: 20 });
   const capture = await h.capture(goal.goal_id);
   const assessment = h.service.audience.assessment(capture.assessment_id);
@@ -36,7 +51,7 @@ async function proposed(t, { channel = 'public_reply', firstContact = {}, withRe
   };
   const result = await h.command('audience.propose', { assessment_id: assessment.id, output });
   const need = h.service.audience.need(result.need_ids[0]);
-  return { h, goal, root, reply, assessment, output, need };
+  return { h, goal, root, reply, assessment, output, need, targetPublishedAt };
 }
 
 async function acceptNeed(h, need) {
@@ -52,13 +67,20 @@ function firstContactReviewPayload(need, decision = 'approve') {
     decision, note: `Owner reviewed the proposed first-contact response: ${decision}.` };
 }
 
+function assertCurrentTargetFreshness(need, publishedAt, maxAgeSeconds) {
+  assert.deepEqual(need.first_contact_state.target_freshness, {
+    state:'current', published_at:new Date(publishedAt).toISOString(),
+    fresh_until:new Date(Date.parse(publishedAt) + maxAgeSeconds * 1000).toISOString(), max_age_seconds:maxAgeSeconds
+  });
+}
+
 function assertNoContactEffects(h) {
   for (const table of ['persons', 'conversations', 'drafts', 'contact_permissions', 'delivery_attempts'])
     assert.equal(h.store.get(`SELECT COUNT(*) n FROM ${table}`).n, 0, `${table} remains empty`);
 }
 
 test('public first-contact approval is separate from need acceptance and remains a review-only receipt', async t => {
-  const { h, need: proposedNeed, output } = await proposed(t);
+  const { h, need: proposedNeed, output, targetPublishedAt } = await proposed(t);
   assert.equal(proposedNeed.first_contact_state.state, 'pending');
   assert.equal(proposedNeed.first_contact_state.fit, 'unknown');
   assert.equal(proposedNeed.first_contact_state.outcome, 'not_observed');
@@ -67,6 +89,7 @@ test('public first-contact approval is separate from need acceptance and remains
     source_ref: SOURCE, source_event_id: output.needs[0].first_contact.target_event_id,
     message_id: 'first-contact-target', author_ref: `author:${SOURCE}`
   });
+  assertCurrentTargetFreshness(proposedNeed, targetPublishedAt, 3600);
 
   const accepted = await acceptNeed(h, proposedNeed);
   assert.equal(accepted.first_contact_state.state, 'pending', 'accepting a need does not approve contact');
@@ -90,13 +113,14 @@ test('public first-contact approval is separate from need acceptance and remains
 });
 
 for (const mutation of ['edit', 'delete', 'source revoke']) test(`approved first-contact review becomes stale after ${mutation} and restart`, async t => {
-  const { h, need } = await proposed(t);
+  const { h, need, targetPublishedAt } = await proposed(t);
   const accepted = await acceptNeed(h, need);
   await h.command('audience.review_first_contact', firstContactReviewPayload(accepted));
   assert.equal(h.service.audience.need(accepted.id).first_contact_state.state, 'approved', 'positive approval exists before the source changes');
-  if (mutation === 'edit') await h.ingest({ message_id: 'first-contact-target', version: 2,
-    text: 'The volunteer rota is closed; no help is needed.' });
-  else if (mutation === 'delete') await h.ingest({ message_id: 'first-contact-target', version: 2, operation: 'delete', text: null });
+  if (mutation === 'edit') await ingestPublished(h, { message_id:'first-contact-target', version:2,
+    text:'The volunteer rota is closed; no help is needed.', published_at:targetPublishedAt });
+  else if (mutation === 'delete') await ingestPublished(h, { message_id:'first-contact-target', version:2, operation:'delete', text:null,
+    published_at:targetPublishedAt });
   else h.config.opportunity.allowedSourceRefs = [];
   h.service.audience.reconcile({ limit: 20 });
   assert.notEqual(h.service.audience.need(accepted.id).first_contact_state.state, 'approved');
@@ -153,8 +177,105 @@ test('stored goal evidence expiration withdraws first-contact approval across re
   assertNoContactEffects(h);
 });
 
+test('a recently observed but old published question stays a current need while first contact is stale', async t => {
+  const publishedAt = new Date(Date.now() - 120_000).toISOString();
+  const { h, goal, need } = await proposed(t, { max_age_seconds:60, targetPublishedAt:publishedAt });
+  assert.equal(need.current,true, 'recent ingestion keeps the underlying evidence-backed need current');
+  assert.equal(need.first_contact_state.state,'stale');
+  assert.deepEqual(need.first_contact_state.target_freshness, { state:'expired', published_at:publishedAt,
+    fresh_until:new Date(Date.parse(publishedAt) + 60_000).toISOString(), max_age_seconds:60 });
+  assert.equal(need.first_contact_state.target.message_id,'first-contact-target',
+    'freshness is a separate projection and does not change target identity binding');
+  const accepted = await acceptNeed(h, need);
+  assert.equal(accepted.status,'accepted', 'ordinary need review remains available despite the stale response target');
+  assert.equal(accepted.current,true);
+  const payload = firstContactReviewPayload(accepted), request = id();
+  const before = h.store.get('SELECT COUNT(*) n FROM command_receipts').n;
+  await assert.rejects(h.command('audience.review_first_contact',payload,request),
+    error => error?.code === 'FIRST_CONTACT_TARGET_STALE');
+  assert.equal(h.store.get('SELECT id FROM command_receipts WHERE id=?',request),undefined);
+  assert.equal(h.store.get('SELECT COUNT(*) n FROM command_receipts').n,before);
+  assert.equal(h.service.audience.need(accepted.id).first_contact_state.state,'stale');
+  assert.equal(h.service.audience.need(accepted.id).current,true);
+  assertNoContactEffects(h);
+});
+
+for (const [label, corruptPublishedAt, expectedFreshness] of [
+  ['missing', 'missing', 'unknown'], ['invalid', 'not-a-publication-time', 'invalid']
+]) test(`${label} canonical publication timestamp cannot authorize public first contact`, async t => {
+  const { h, need, output } = await proposed(t, { max_age_seconds:60, corruptPublishedAt });
+  assert.equal(need.current,true, 'the source observation is recent even though its publication timestamp is unusable');
+  assert.equal(need.first_contact_state.state, expectedFreshness === 'unknown' ? 'stale' : 'invalid');
+  assert.equal(need.first_contact_state.target_freshness.state,expectedFreshness);
+  assert.deepEqual(need.first_contact_state.target, {
+    source_ref:SOURCE, source_event_id:output.needs[0].first_contact.target_event_id,
+    message_id:'first-contact-target', author_ref:`author:${SOURCE}`
+  }, 'publication freshness does not change the exact target identity binding');
+  const accepted = await acceptNeed(h,need), payload = firstContactReviewPayload(accepted), request = id();
+  await assert.rejects(h.command('audience.review_first_contact',payload,request),
+    error => error?.code === 'FIRST_CONTACT_TARGET_STALE');
+  assert.equal(h.store.get('SELECT id FROM command_receipts WHERE id=?',request),undefined);
+  assert.equal(h.service.audience.need(accepted.id).first_contact_state.state,expectedFreshness === 'unknown' ? 'stale' : 'invalid');
+  assertNoContactEffects(h);
+});
+
+test('the canonical source-ingest boundary still rejects future publication timestamps', async t => {
+  const h = audienceHarness(t);
+  const before = h.store.get('SELECT COUNT(*) n FROM events').n;
+  await assert.rejects(ingestPublished(h, { message_id:'future-publication', text:'A future dated public question.',
+    published_at:new Date(Date.now()+60_000).toISOString() }), error => error?.code === 'FUTURE_OR_REVERSED_SOURCE_TIME');
+  assert.equal(h.store.get('SELECT COUNT(*) n FROM events').n,before,
+    'invalid future timestamps are refused before they can enter a source packet');
+  assertNoContactEffects(h);
+});
+
+test('a current approval expires from publication age after material import, restart and old-request replay', async t => {
+  const publishedAt = new Date(Date.now() - 59_000).toISOString();
+  const { h, need } = await proposed(t, { max_age_seconds:60, targetPublishedAt:publishedAt });
+  assert.equal(need.current,true);
+  assertCurrentTargetFreshness(need,publishedAt,60);
+  const accepted = await acceptNeed(h,need), work = await readyWork(h,accepted);
+  const approvalPayload = firstContactReviewPayload(accepted), approvalRequest = id();
+  await h.command('audience.review_first_contact',approvalPayload,approvalRequest);
+  assert.equal(h.service.audience.need(accepted.id).first_contact_state.state,'approved');
+  const current = h.service.audience.need(accepted.id);
+  const imported = await h.command('audience.import_preview', { need_id:current.id,
+    expected_revision:current.revision, expected_basis_fingerprint:current.basis_fingerprint,
+    case_id:work.case_id, expected_case_revision:work.expected_case_revision,
+    expected_preview_sha256:current.preview_sha256 }, id());
+  assert.ok(imported.material_id);
+  const realNow = Date.now;
+  Date.now = () => realNow() + 2000;
+  try {
+    const expired = h.service.audience.need(accepted.id);
+    assert.equal(expired.current,true, 'source observation is still recent under the goal evidence window');
+    assert.equal(expired.first_contact_state.state,'stale');
+    assert.equal(expired.first_contact_state.target_freshness.state,'expired');
+    assert.equal(h.service.audience.workScope(work.thread_id).current,false,
+      'publication expiry blocks already imported response material and dependent Work');
+    const receipts = h.store.get('SELECT COUNT(*) n FROM command_receipts').n;
+    await assert.rejects(h.command('audience.review_first_contact',approvalPayload,approvalRequest),
+      error => error?.code === 'FIRST_CONTACT_TARGET_STALE');
+    assert.equal(h.store.get('SELECT COUNT(*) n FROM command_receipts').n,receipts);
+    await assert.rejects(h.command('audience.import_preview', { need_id:current.id,
+      expected_revision:current.revision, expected_basis_fingerprint:current.basis_fingerprint,
+      case_id:work.case_id, expected_case_revision:work.expected_case_revision,
+      expected_preview_sha256:current.preview_sha256 }, id()),
+    error => error?.code === 'FIRST_CONTACT_REVIEW_NOT_APPROVED');
+    h.restart();
+    const restored = h.service.audience.need(accepted.id);
+    assert.equal(restored.current,true);
+    assert.equal(restored.first_contact_state.state,'stale');
+    assert.equal(restored.first_contact_state.target_freshness.state,'expired');
+    assert.equal(h.service.audience.workScope(work.thread_id).current,false);
+    await assert.rejects(h.command('audience.review_first_contact',approvalPayload,approvalRequest),
+      error => error?.code === 'FIRST_CONTACT_TARGET_STALE');
+  } finally { Date.now = realNow; }
+  assertNoContactEffects(h);
+});
+
 test('first-contact review rejects non-operator, stale basis, and changed proposal before recording a receipt', async t => {
-  const { h, need } = await proposed(t);
+  const { h, need, targetPublishedAt } = await proposed(t);
   const accepted = await acceptNeed(h, need);
   const payload = firstContactReviewPayload(accepted), actorRequest = id();
   const receiptCount = () => h.store.get('SELECT COUNT(*) n FROM command_receipts').n;
@@ -163,7 +284,7 @@ test('first-contact review rejects non-operator, stale basis, and changed propos
   assert.equal(h.store.get('SELECT id FROM command_receipts WHERE id=?', actorRequest), undefined);
   assert.equal(receiptCount(), before);
 
-  await h.ingest({ message_id: 'first-contact-target', version: 2, text: 'A changed request.' });
+  await ingestPublished(h, { message_id:'first-contact-target', version:2, text:'A changed request.', published_at:targetPublishedAt });
   const staleRequest = id(), staleCount = receiptCount();
   await assert.rejects(h.command('audience.review_first_contact', payload, staleRequest));
   assert.equal(h.store.get('SELECT id FROM command_receipts WHERE id=?', staleRequest), undefined);
@@ -237,17 +358,11 @@ test('first-contact proposal requires positive exact evidence, known author, and
   ]) {
     const h = audienceHarness(t);
     const goal = await h.open({ source_ids: [SOURCE] });
-    const root = label === 'unknown author'
-      ? await h.command('source.ingest', { source_id: SOURCE, source_kind: 'sanitized_fixture',
-        message_id: 'first-contact-target', author_id: null, display_name: null, thread_id: null,
-        reply_to_id: null, version: 1, operation: 'upsert',
-        text: 'Could someone explain how to get started with the volunteer rota?',
-        created_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-01T00:00:00.000Z' },
-      id(), { kind: 'channel', sourceId: SOURCE })
-      : await h.ingest({ message_id: 'first-contact-target',
-        text: 'Could someone explain how to get started with the volunteer rota?' });
-    if (options.withReply) await h.ingest({ message_id: 'first-contact-reply', reply_to_id: 'first-contact-target',
-      text: 'The rota is still open for Saturday.' });
+    const root = await ingestPublished(h, { message_id:'first-contact-target',
+      author_id:label === 'unknown author' ? null : `author:${SOURCE}`,
+      text:'Could someone explain how to get started with the volunteer rota?' });
+    if (options.withReply) await ingestPublished(h, { message_id:'first-contact-reply', reply_to_id:'first-contact-target',
+      text:'The rota is still open for Saturday.' });
     h.service.audience.reconcile({ limit: 20 });
     const capture = await h.capture(goal.goal_id), assessment = h.service.audience.assessment(capture.assessment_id);
     const target = assessment.packet.exchanges.flatMap(exchange => exchange.evidence)
@@ -328,6 +443,83 @@ test('an approved first-contact decision is resolved; only its exact latest comm
   assertNoContactEffects(h);
 });
 
+async function importedRejectedFirstContact(t) {
+  const { h, need } = await proposed(t), accepted = await acceptNeed(h,need), work = await readyWork(h,accepted);
+  const approvalPayload = firstContactReviewPayload(accepted), approvalRequest = id();
+  await h.command('audience.review_first_contact',approvalPayload,approvalRequest);
+  const approved = h.service.audience.need(accepted.id);
+  const importPayload = { need_id:approved.id, expected_revision:approved.revision,
+    expected_basis_fingerprint:approved.basis_fingerprint, case_id:work.case_id,
+    expected_case_revision:work.expected_case_revision, expected_preview_sha256:approved.preview_sha256 };
+  const importRequest = id();
+  await h.command('audience.import_preview',importPayload,importRequest);
+  const rejectionPayload = firstContactReviewPayload(h.service.audience.need(accepted.id),'reject'), rejectionRequest = id();
+  await h.command('audience.review_first_contact',rejectionPayload,rejectionRequest);
+  assert.equal(h.service.audience.need(accepted.id).first_contact_state.state,'rejected');
+  assert.equal(h.service.audience.workScope(work.thread_id).current,false);
+  const head = h.store.get('SELECT * FROM audience_first_contact_heads WHERE need_id=?',accepted.id);
+  assert.equal(head.request_id,rejectionRequest,'the latest review head points to rejection, never the older approval');
+  assert.equal(head.event_id,h.store.get(`SELECT id FROM events WHERE id=? AND
+    json_extract(payload_json,'$.request_id')=?`,head.event_id,rejectionRequest).id);
+  assert.equal(head.review_id,h.service.audience.need(accepted.id).first_contact_state.review.id);
+  return { h, accepted, work, approvalPayload, approvalRequest, importPayload, importRequest, head };
+}
+
+for (const damage of ['malformed latest JSON','remove need_id from latest rejection','delete latest rejection event','remove latest-review head'])
+  test(`${damage} cannot resurrect an imported-and-rejected first-contact approval`, async t => {
+    const { h, accepted, work, approvalPayload, approvalRequest, importPayload, importRequest, head } =
+      await importedRejectedFirstContact(t);
+    if (damage === 'malformed latest JSON')
+      h.store.run("UPDATE events SET payload_json='not-json' WHERE id=?",head.event_id);
+    else if (damage === 'remove need_id from latest rejection')
+      h.store.run("UPDATE events SET payload_json=json_remove(payload_json,'$.need_id') WHERE id=?",head.event_id);
+    else if (damage === 'delete latest rejection event') h.store.run('DELETE FROM events WHERE id=?',head.event_id);
+    else h.store.run('DELETE FROM audience_first_contact_heads WHERE need_id=?',accepted.id);
+
+    h.restart();
+    const projected = h.service.audience.need(accepted.id);
+    assert.notEqual(projected.first_contact_state.state,'approved');
+    assert.ok(['invalid','rejected','stale'].includes(projected.first_contact_state.state),
+      JSON.stringify(projected.first_contact_state));
+    assert.equal(h.service.audience.workScope(work.thread_id).current,false);
+    const receipts = h.store.get('SELECT COUNT(*) n FROM command_receipts').n;
+    await assert.rejects(h.command('audience.review_first_contact',approvalPayload,approvalRequest),
+      'the older approval receipt cannot supersede a damaged or missing latest-review head');
+    assert.equal(h.store.get('SELECT COUNT(*) n FROM command_receipts').n,receipts);
+    await assert.rejects(h.command('audience.import_preview',importPayload,importRequest),
+      'the old import receipt cannot restore a response after the latest review head is damaged');
+    assert.equal(h.store.get('SELECT COUNT(*) n FROM command_receipts').n,receipts);
+    const freshImport = { ...importPayload, expected_case_revision:h.service.work.detail(work.case_id).revision };
+    await assert.rejects(h.command('audience.import_preview',freshImport,id()));
+    assert.equal(h.service.audience.need(accepted.id).first_contact_state.state,'invalid');
+    assert.equal(h.service.audience.workScope(work.thread_id).current,false);
+    assertNoContactEffects(h);
+  });
+
+test('a failed first-contact command receipt rolls back its review event and latest-review head', async t => {
+  const { h, need } = await proposed(t), accepted = await acceptNeed(h,need);
+  const payload = firstContactReviewPayload(accepted), request = id();
+  const headBefore = h.store.get('SELECT * FROM audience_first_contact_heads WHERE need_id=?',accepted.id);
+  assert.ok(headBefore);
+  assert.equal(headBefore.request_id,null);
+  assert.equal(headBefore.event_id,null);
+  assert.equal(headBefore.review_id,null);
+  h.store.db.exec(`CREATE TRIGGER fail_first_contact_receipt BEFORE INSERT ON command_receipts
+    WHEN NEW.id='${request}' BEGIN SELECT RAISE(ABORT,'forced first-contact receipt failure'); END`);
+  const eventCount = h.store.get(`SELECT COUNT(*) n FROM events WHERE kind='audience.review_first_contact'
+    AND json_extract(payload_json,'$.need_id')=?`,accepted.id).n;
+  await assert.rejects(h.command('audience.review_first_contact',payload,request));
+  assert.equal(h.store.get(`SELECT COUNT(*) n FROM events WHERE kind='audience.review_first_contact'
+    AND json_extract(payload_json,'$.need_id')=?`,accepted.id).n,eventCount,
+  'the audit event rolls back with the failed command receipt');
+  assert.deepEqual(h.store.get('SELECT * FROM audience_first_contact_heads WHERE need_id=?',accepted.id),headBefore,
+    'the pre-existing pending review head remains all-null; no review head is committed');
+  assert.equal(h.store.get('SELECT id FROM command_receipts WHERE id=?',request),undefined);
+  h.store.db.exec('DROP TRIGGER fail_first_contact_receipt');
+  assert.equal(h.service.audience.need(accepted.id).first_contact_state.state,'pending');
+  assertNoContactEffects(h);
+});
+
 test('a valid model no-need result creates no first-contact position or positive contact credit', async t => {
   const previousKey = process.env.PARTNER_MODEL_API_KEY;
   process.env.PARTNER_MODEL_API_KEY = 'offline-first-contact-review-sentinel-never-sent';
@@ -403,7 +595,7 @@ test('the model proposal path preserves exact first-contact field bindings and u
   Object.assign(h.config.runtime, { enabled:true, maxRunsPerDay:20, baseUrl:'https://unused-first-contact.invalid/v1',
     model:'offline-first-contact-review', dailyBudgetUsd:null, inputUsdPerMillion:null, outputUsdPerMillion:null });
   const goal = await h.open({ source_ids:[SOURCE] });
-  const source = await h.ingest({ message_id:'model-first-contact-target',
+  const source = await ingestPublished(h, { message_id:'model-first-contact-target',
     text:'Could someone explain how to get started with the volunteer rota?' });
   h.service.audience.reconcile({ limit:20 });
   const detail = h.service.audience.detail(goal.goal_id);

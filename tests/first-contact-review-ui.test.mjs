@@ -5,11 +5,14 @@ import { createAudienceView } from '../public/audience.js';
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[c]);
 const quote = 'Where can I find the first setup step?';
 const preview = 'The source asks where to find the first setup step. The answer is not verified.';
+const maxAgeSeconds = 86400;
+const publishedAt = new Date(Date.now()-60_000).toISOString();
+const freshUntil = new Date(Date.parse(publishedAt)+maxAgeSeconds*1000).toISOString();
 
 function harness() {
   const calls = [], dialogs = [];
   const evidence = { source_event_id:'ev-first', source_ref:'forum:allowed', message_id:'message-4', author_id:'author-ref-4',
-    text:quote, published_at:null, source_updated_at:null, observed_at:'2026-02-03T10:00:00Z' };
+    text:quote, published_at:publishedAt, source_updated_at:null, observed_at:'2026-02-03T10:00:00Z' };
   const need = { id:'need-1', goal_id:'goal-1', assessment_id:'assessment-1', title:'First setup question',
     hypothesis:'A public question asks where the first setup step is.', why_now:'A direct question is present.', next_step:'prepare_material',
     reason:'The supplied source contains a direct question.', unknowns:['Whether the question is still unresolved is unknown.'],
@@ -22,6 +25,7 @@ function harness() {
     channel_reason:'The question was posted in the public discussion; private contact is unsupported.' };
   const firstContactState = { version:1, state:'pending', proposal_sha256:'a'.repeat(64),
     target:{source_ref:'forum:allowed',source_event_id:'ev-first',message_id:'message-4',author_ref:'author-ref-4'},
+    target_freshness:{state:'current',published_at:publishedAt,fresh_until:freshUntil,max_age_seconds:maxAgeSeconds},
     review:null, fit:'unknown', executable:false, contact_permission:false, allowed_effects:[], outcome:'not_observed' };
   const goal = {id:'goal-1',title:'Audience goal',status:'OPEN',revision:2,objective:'Understand public setup questions',
     source_refs:['forum:allowed'],needs:[{id:'need-1',title:need.title,status:need.status,revision:need.revision}],assessments:[]};
@@ -56,6 +60,8 @@ test('first response is visible as a separate, inert proposal and approval submi
   assert.match(html,/Возможный первый ответ · отдельное решение/);
   assert.match(html,/Публичный ответ в исходном обсуждении/);
   assert.match(html,/неизвестно/); assert.match(html,/не наблюдался/);
+  assert.match(html,/Свежесть публикации/); assert.ok(html.includes(publishedAt)); assert.ok(html.includes(freshUntil));
+  assert.ok(html.includes('2026-02-03T10:00:00Z'), 'publication and observation timestamps remain separate');
   assert.match(html,/Точный текст предложения/); assert.ok(html.includes(preview));
   assert.match(html,/data-do="audience-first-contact-approve"/);
   assert.match(html,/data-do="audience-first-contact-reject"/);
@@ -115,6 +121,70 @@ test('approved first-response suggestion can be explicitly withdrawn with a fres
     note:'Withdrawing the prior text approval after review.'}}]);
 });
 
+test('expired, unknown, and future publication metadata never enables first-response review', async () => {
+  const h=harness();
+  const oldPublishedAt=new Date(Date.now()-3*86400_000).toISOString();
+  Object.assign(h.need,{first_contact:h.firstContact,first_contact_state:{...h.firstContactState,state:'stale',
+    target_freshness:{state:'expired',published_at:oldPublishedAt,
+      fresh_until:new Date(Date.parse(oldPublishedAt)+maxAgeSeconds*1000).toISOString(),max_age_seconds:maxAgeSeconds}}});
+  h.evidence.published_at=h.need.first_contact_state.target_freshness.published_at;
+  await openNeed(h);
+  assert.match(h.view.render(),/срок свежести истёк/);
+  assert.doesNotMatch(h.view.render(),/data-do="audience-first-contact-approve"/);
+  await assert.rejects(h.view.act('audience-first-contact-approve','need-1'),/нельзя рассмотреть/);
+
+  h.evidence.published_at=null;
+  h.need.first_contact_state={...h.firstContactState,state:'stale',target_freshness:{state:'unknown',
+    published_at:null,fresh_until:null,max_age_seconds:86400}};
+  await h.view.load();
+  assert.match(h.view.render(),/Дата публикации и срок свежести неизвестны/);
+  assert.doesNotMatch(h.view.render(),/data-do="audience-first-contact-approve"/);
+  await assert.rejects(h.view.act('audience-first-contact-approve','need-1'),/не прошло проверку|нельзя рассмотреть/);
+
+  h.evidence.published_at=publishedAt;
+  h.need.first_contact_state={...h.firstContactState,target_freshness:{state:'current',published_at:publishedAt,
+    fresh_until:new Date(Date.parse(publishedAt)+maxAgeSeconds*1000+1000).toISOString(),max_age_seconds:maxAgeSeconds}};
+  await h.view.load();
+  assert.match(h.view.render(),/не прошло проверку/i);
+  assert.doesNotMatch(h.view.render(),/data-do="audience-first-contact-approve"/);
+  await assert.rejects(h.view.act('audience-first-contact-approve','need-1'),/не прошло проверку|нельзя рассмотреть/);
+
+  h.need.first_contact_state={...h.firstContactState,target_freshness:{state:'current',published_at:publishedAt,
+    fresh_until:new Date(Date.parse(publishedAt)+59_000).toISOString(),max_age_seconds:59}};
+  await h.view.load();
+  assert.doesNotMatch(h.view.render(),/data-do="audience-first-contact-approve"/);
+
+  const future=new Date(Date.now()+86400_000).toISOString();
+  h.evidence.published_at=future;
+  h.need.first_contact_state={...h.firstContactState,target_freshness:{state:'current',published_at:future,
+    fresh_until:new Date(Date.parse(future)+maxAgeSeconds*1000).toISOString(),max_age_seconds:maxAgeSeconds}};
+  await h.view.load();
+  assert.match(h.view.render(),/не прошло проверку/i);
+  assert.doesNotMatch(h.view.render(),/data-do="audience-first-contact-approve"/);
+  await assert.rejects(h.view.act('audience-first-contact-approve','need-1'),/не прошло проверку|нельзя рассмотреть/);
+  assert.deepEqual(h.calls,[]);
+});
+
+test('public reply import requires valid approved fresh metadata in both render and action paths', async () => {
+  const h=harness();
+  Object.assign(h.need,{proposal_version:2,first_contact:h.firstContact,first_contact_state:{...h.firstContactState,state:'approved',
+    review:{id:'a7f085de-09f1-4abc-8ac7-1ea199c773f0',decision:'approve',note:'Reviewed.',reviewed_at:new Date().toISOString()}},
+    linked_work_case:{id:'case-1',revision:8,current:true}});
+  await openNeed(h);
+  assert.match(h.view.render(),/data-do="audience-import-preview"/);
+  await h.view.act('audience-import-preview','need-1');
+  assert.equal(h.calls.at(-1).action,'audience.import_preview');
+
+  h.calls.length=0;
+  h.need.first_contact_state={...h.need.first_contact_state,
+    target_freshness:{...h.firstContactState.target_freshness,
+      fresh_until:new Date(Date.parse(publishedAt)+maxAgeSeconds*1000+1000).toISOString()}};
+  await h.view.load();
+  assert.doesNotMatch(h.view.render(),/data-do="audience-import-preview"/);
+  await assert.rejects(h.view.act('audience-import-preview','need-1'),/отдельного одобрения/);
+  assert.deepEqual(h.calls,[]);
+});
+
 test('mismatched authority, target, quote, or hash fails closed and untrusted text is escaped', async () => {
   const h=harness();
   Object.assign(h.need,{first_contact:{...h.firstContact,target_quote:'different quote <script>bad()</script>'},
@@ -136,4 +206,17 @@ test('modal rechecks exact current proposal binding before submitting review', a
   h.need.revision++; await h.view.load();
   await assert.rejects(h.dialogs.at(-1).submit({note:'Review note'}),/изменились/);
   assert.deepEqual(h.calls,[]);
+});
+
+test('first-response approval rechecks freshness expiry after the review modal opens', async () => {
+  const originalNow=Date.now;
+  let clockNow=Date.parse(publishedAt)+maxAgeSeconds*1000-1_000;
+  Date.now=()=>clockNow;
+  try {
+    const h=harness(); Object.assign(h.need,{first_contact:h.firstContact,first_contact_state:h.firstContactState});
+    await openNeed(h); await h.view.act('audience-first-contact-approve','need-1');
+    clockNow+=2_000;
+    await assert.rejects(h.dialogs.at(-1).submit({note:'Review after expiry.'}),/изменились/);
+    assert.deepEqual(h.calls,[]);
+  } finally { Date.now=originalNow; }
 });

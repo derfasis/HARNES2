@@ -11,7 +11,7 @@ import { EXECUTIVE_TABLES } from '../business/executive-tables.mjs';
 import { OUTCOME_TABLES } from '../business/outcome-tables.mjs';
 import { WORK_TABLES, CONTROL_TABLES } from '../business/work-tables.mjs';
 import { SCOUT_TABLES } from '../business/scout-tables.mjs';
-import { AUDIENCE_TABLES, AUDIENCE_ATTENTION_TABLES, AUDIENCE_SOURCE_EPOCH_TABLES } from '../business/audience-tables.mjs';
+import { AUDIENCE_TABLES, AUDIENCE_ATTENTION_TABLES, AUDIENCE_SOURCE_EPOCH_TABLES, AUDIENCE_FIRST_CONTACT_TABLES } from '../business/audience-tables.mjs';
 import { MODEL_PROFILE_TABLES } from '../business/model-profile-tables.mjs';
 import { AUDIENCE_FOLLOWUP_TABLES } from '../business/audience-followup-tables.mjs';
 import { validateWatchEpochs } from '../business/audience-source-renewal.mjs';
@@ -27,6 +27,7 @@ if (fs.existsSync(destination)) throw new Error('Destination already exists. Cho
 if (bundle.format !== 'digital-ai-partner' || bundle.schema_version !== 1 || !bundle.tables) throw new Error('Unsupported bundle');
 const migrationCount = Array.isArray(bundle.migrations) ? bundle.migrations.length : -1;
 const TELEGRAM_SOURCE_EPOCH_TABLES = ['source_observation_epochs'];
+const priorTables = TABLES.filter(table => !AUDIENCE_FIRST_CONTACT_TABLES.includes(table));
 const without = (...groups) => {
   const excluded = new Set([...groups.flat(),...SCOUT_TABLES,...AUDIENCE_TABLES,...MODEL_PROFILE_TABLES,...AUDIENCE_FOLLOWUP_TABLES,...TELEGRAM_SOURCE_EPOCH_TABLES]);
   return TABLES.filter(table => !excluded.has(table));
@@ -46,12 +47,13 @@ const inputCatalogues = new Map([
   [11, TABLES.filter(table => !AUDIENCE_TABLES.includes(table) && !MODEL_PROFILE_TABLES.includes(table) && !AUDIENCE_FOLLOWUP_TABLES.includes(table) && !TELEGRAM_SOURCE_EPOCH_TABLES.includes(table))],
   // These releases predate immutable source-watch epochs. Keep their catalogues
   // fixed even though Store.TABLES now includes later epoch tables.
-  [12, TABLES.filter(table => !AUDIENCE_ATTENTION_TABLES.includes(table) && !MODEL_PROFILE_TABLES.includes(table) && !AUDIENCE_FOLLOWUP_TABLES.includes(table) && !AUDIENCE_SOURCE_EPOCH_TABLES.includes(table) && !TELEGRAM_SOURCE_EPOCH_TABLES.includes(table))],
-  [13, TABLES.filter(table => !MODEL_PROFILE_TABLES.includes(table) && !AUDIENCE_FOLLOWUP_TABLES.includes(table) && !AUDIENCE_SOURCE_EPOCH_TABLES.includes(table) && !TELEGRAM_SOURCE_EPOCH_TABLES.includes(table))],
-  [14, TABLES.filter(table => !AUDIENCE_FOLLOWUP_TABLES.includes(table) && !AUDIENCE_SOURCE_EPOCH_TABLES.includes(table) && !TELEGRAM_SOURCE_EPOCH_TABLES.includes(table))],
-  [15, TABLES.filter(table => !AUDIENCE_SOURCE_EPOCH_TABLES.includes(table) && !TELEGRAM_SOURCE_EPOCH_TABLES.includes(table))],
-  [16, TABLES.filter(table => !TELEGRAM_SOURCE_EPOCH_TABLES.includes(table))],
-  [17, TABLES],
+  [12, priorTables.filter(table => !AUDIENCE_ATTENTION_TABLES.includes(table) && !MODEL_PROFILE_TABLES.includes(table) && !AUDIENCE_FOLLOWUP_TABLES.includes(table) && !AUDIENCE_SOURCE_EPOCH_TABLES.includes(table) && !TELEGRAM_SOURCE_EPOCH_TABLES.includes(table))],
+  [13, priorTables.filter(table => !MODEL_PROFILE_TABLES.includes(table) && !AUDIENCE_FOLLOWUP_TABLES.includes(table) && !AUDIENCE_SOURCE_EPOCH_TABLES.includes(table) && !TELEGRAM_SOURCE_EPOCH_TABLES.includes(table))],
+  [14, priorTables.filter(table => !AUDIENCE_FOLLOWUP_TABLES.includes(table) && !AUDIENCE_SOURCE_EPOCH_TABLES.includes(table) && !TELEGRAM_SOURCE_EPOCH_TABLES.includes(table))],
+  [15, priorTables.filter(table => !AUDIENCE_SOURCE_EPOCH_TABLES.includes(table) && !TELEGRAM_SOURCE_EPOCH_TABLES.includes(table))],
+  [16, priorTables.filter(table => !TELEGRAM_SOURCE_EPOCH_TABLES.includes(table))],
+  [17, priorTables],
+  [18, TABLES],
 ]);
 const inputTables = inputCatalogues.get(migrationCount);
 if (!inputTables) throw new Error('Migration version differs');

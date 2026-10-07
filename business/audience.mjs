@@ -13,7 +13,7 @@ import { currentBasis, currentBasisState } from './audience-current-events.mjs';
 import { FOLLOWUP_TEMPORARY } from './audience-followup.mjs';
 import { watchEpoch, sourceRenewalPreview, assertRenewalRequest, renewSource } from './audience-source-renewal.mjs';
 import { sourceObservationFloor } from './source-observation-epochs.mjs';
-import { firstContactState, reviewFirstContact, assertFirstContactReview } from './first-contact-review.mjs';
+import { firstContactState, reviewFirstContact, assertFirstContactReview, commitFirstContactHead } from './first-contact-review.mjs';
 
 const storedOutputSchema = readJson(path.join(ROOT, 'contracts/audience-assessment.schema.json'));
 export const outputSchema = structuredClone(storedOutputSchema);
@@ -777,6 +777,8 @@ export class AudienceLoop {
       if (existing) this.store.run("UPDATE audience_needs SET assessment_id=?,revision=revision+1,status='proposed',output_json=?,basis_json=?,review_note=NULL,reviewed_at=NULL,updated_at=? WHERE id=?",
         a.id, JSON.stringify(output), JSON.stringify(basis), now(), needId);
       else this.store.run("INSERT INTO audience_needs VALUES(?,?,?,1,'proposed',?,?,NULL,NULL,?,?)", needId, a.goal_id, a.id, JSON.stringify(output), JSON.stringify(basis), now(), now());
+      if (output.first_contact) this.store.run(`INSERT INTO audience_first_contact_heads(need_id) VALUES(?)
+        ON CONFLICT(need_id) DO UPDATE SET request_id=NULL,event_id=NULL,review_id=NULL`,needId);
       results.push(needId);
     }
     this.store.run("UPDATE audience_assessments SET status='proposed',producer=?,output_json=? WHERE id=?", producer, JSON.stringify(p.output), a.id);
@@ -846,6 +848,7 @@ export class AudienceLoop {
     return {...result,first_contact_state:firstContactState(this,result,packet)};
   }
   assertFirstContactReview(p, options) { return assertFirstContactReview(this,p,options); }
+  commitFirstContactHead(needId,result,requestId,eventId) { commitFirstContactHead(this,needId,result,requestId,eventId); }
   review(p) {
     fields(p, ['need_id', 'expected_revision', 'expected_basis_fingerprint', 'decision', 'note']); const n = this.need(p.need_id);
     check(n.revision === p.expected_revision && n.basis_fingerprint === p.expected_basis_fingerprint, 'AUDIENCE_REVISION_CONFLICT');

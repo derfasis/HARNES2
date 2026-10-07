@@ -79,10 +79,10 @@ async function secondEpoch(h, goalId) {
   await h.command('audience.renew_source', payload, requestId);
 }
 
-test('schema-17 export and real staging import retain epoch history while revoking authority and replay', async t => {
+test('schema-18 export and real staging import retain epoch history while revoking authority and replay', async t => {
   const h = audienceHarness(t), renewed = await renewedWatch(h), oldModel = renewed.modelAuthority;
   const bundle = exportPartner(h.store);
-  assert.equal(bundle.migrations.length, 17);
+  assert.equal(bundle.migrations.length, 18);
   assert.ok(bundle.excluded.includes('transferable audience source-watch authority'));
   assert.ok(Object.hasOwn(bundle.tables, 'audience_watch_epochs'));
   assert.deepEqual(bundle.tables.audience_watch_epochs, h.store.all('SELECT * FROM audience_watch_epochs ORDER BY goal_id,source_ref,generation'));
@@ -110,11 +110,12 @@ test('schema-17 export and real staging import retain epoch history while revoki
   } finally { restored.close(); }
 });
 
-test('actual schema-15 catalogue preserves a legacy watch and imports through migration 17', async t => {
+test('actual schema-15 catalogue preserves a legacy watch and imports through migration 18', async t => {
   const h = audienceHarness(t), { goal, watch: legacySourceWatch } = await legacyWatch(h);
   const bundle = exportPartner(h.store);
   bundle.migrations = bundle.migrations.slice(0, 15);
   delete bundle.tables.audience_watch_epochs;
+  delete bundle.tables.audience_first_contact_heads;
   delete bundle.tables.source_observation_epochs;
   bundle.tables_sha256 = hash(JSON.stringify(bundle.tables));
   assert.equal(Object.hasOwn(bundle.tables, 'audience_watch_epochs'), false);
@@ -122,7 +123,7 @@ test('actual schema-15 catalogue preserves a legacy watch and imports through mi
   assert.equal(result.status, 0, result.stderr);
   const restored = new Store(path.join(destination, 'data'));
   try {
-    assert.equal(restored.get('SELECT COUNT(*) n FROM schema_migrations').n, 17);
+    assert.equal(restored.get('SELECT COUNT(*) n FROM schema_migrations').n, 18);
     assert.equal(restored.get('SELECT COUNT(*) n FROM audience_watch_epochs').n, 0);
     const importedWatch = restored.get('SELECT * FROM audience_watches WHERE goal_id=? AND source_ref=?', goal.goal_id, SOURCE);
     assert.equal(importedWatch.status, 'revoked');
@@ -132,7 +133,7 @@ test('actual schema-15 catalogue preserves a legacy watch and imports through mi
   } finally { restored.close(); }
 });
 
-test('schema-17 import preserves a complete two-epoch chain and rejects broken history', async t => {
+test('schema-18 import preserves a complete two-epoch chain and rejects broken history', async t => {
   const h = audienceHarness(t), { goal } = await renewedWatch(h), base = exportPartner(h.store);
   assert.equal(base.tables.audience_watch_epochs.length, 1);
   await secondEpoch(h, goal.goal_id);

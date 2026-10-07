@@ -449,6 +449,8 @@ export class BusinessService {
     const auditPayload = action === 'executive.import_candidates' ? { format: 'openoutfind-jsonl', raw_input_persisted: false } : p;
     this.store.event(this.config.partnerId, conversationId, action, actor.kind, { ...auditPayload, result, run_id: actor.runId ?? null,
       ...(REVIEW_ACTIONS.includes(action) || action === 'audience.review_first_contact' ? { request_id: requestId } : {}) });
+    if (action === 'audience.review_first_contact') this.audience.commitFirstContactHead(p.need_id,result,requestId,
+      this.store.get('SELECT last_insert_rowid() AS id').id);
     this.store.run('INSERT INTO command_receipts VALUES(?,?,?,?)', requestId, fingerprint, JSON.stringify(result), now());
     return result;
   }

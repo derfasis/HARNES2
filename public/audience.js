@@ -62,7 +62,7 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
       || typeof proposal.target_quote !== 'string' || !proposal.target_quote.trim()
       || typeof proposal.help !== 'string' || !proposal.help.trim()
       || typeof proposal.channel_reason !== 'string' || !proposal.channel_reason.trim()) return { valid:false, reason:'Предложение неполное или имеет неподдерживаемый формат.' };
-    if (!exactKeys(state, ['version','state','proposal_sha256','target','review','fit','executable','contact_permission','allowed_effects','outcome'])
+    if (!exactKeys(state, ['version','state','proposal_sha256','target','target_freshness','review','fit','executable','contact_permission','allowed_effects','outcome'])
       || state.version !== 1 || !['not_proposed','pending','approved','rejected','stale','invalid'].includes(state.state)
       || typeof state.proposal_sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(state.proposal_sha256)
       || !exactKeys(state.target, ['source_ref','source_event_id','message_id','author_ref'])
@@ -73,6 +73,23 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
       || state.fit !== 'unknown' || state.executable !== false || state.contact_permission !== false
       || !Array.isArray(state.allowed_effects) || state.allowed_effects.length !== 0
       || state.outcome !== 'not_observed') return { valid:false, reason:'Состояние предложения не совпадает с безопасным контрактом; рассмотрение отключено.' };
+    const freshness = state.target_freshness;
+    if (!exactKeys(freshness, ['state','published_at','fresh_until','max_age_seconds'])
+      || !['current','expired','unknown','invalid'].includes(freshness.state)
+      || !(freshness.published_at === null || typeof freshness.published_at === 'string' && !Number.isNaN(Date.parse(freshness.published_at)))
+      || !(freshness.fresh_until === null || typeof freshness.fresh_until === 'string' && !Number.isNaN(Date.parse(freshness.fresh_until)))
+      || !Number.isInteger(freshness.max_age_seconds) || freshness.max_age_seconds < 60 || freshness.max_age_seconds > 2592000
+      || freshness.state === 'current' && (typeof freshness.published_at !== 'string' || typeof freshness.fresh_until !== 'string'
+        || freshness.published_at !== (assessment?.packet?.exchanges ?? []).flatMap(exchange => exchange.evidence ?? [])
+          .find(item => item.source_event_id === proposal.target_event_id)?.published_at
+        || Date.parse(freshness.published_at) > Date.now()
+        || Date.parse(freshness.fresh_until) !== Date.parse(freshness.published_at) + freshness.max_age_seconds * 1000)
+      || freshness.state === 'unknown' && (freshness.published_at !== null || freshness.fresh_until !== null)
+      || freshness.state === 'expired' && (typeof freshness.published_at !== 'string' || typeof freshness.fresh_until !== 'string')
+      || freshness.state === 'expired' && (Date.parse(freshness.fresh_until) > Date.now()
+        || Date.parse(freshness.fresh_until) !== Date.parse(freshness.published_at) + freshness.max_age_seconds * 1000)
+      || freshness.state === 'invalid')
+      return { valid:false, reason:'Возраст публикации или срок свежести не совпадает с сохранённой целью; рассмотрение отключено.' };
     if (state.state === 'pending' && state.review !== null) return { valid:false, reason:'Ожидающее предложение неожиданно содержит решение; рассмотрение отключено.' };
     const reviewDecision = state.state === 'approved' ? 'approve' : state.state === 'rejected' ? 'reject' : null;
     if (reviewDecision
@@ -85,12 +102,16 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
     const basis = new Set([...(n.evidence_event_ids ?? []), ...(n.counterevidence_event_ids ?? []), ...(n.context_event_ids ?? [])]);
     if (!target || !basis.has(proposal.target_event_id) || !String(target.text ?? '').includes(proposal.target_quote)
       || target.source_ref !== state.target.source_ref || target.message_id !== state.target.message_id
-      || (target.author_id ?? null) !== state.target.author_ref)
+      || (target.author_id ?? null) !== state.target.author_ref
+      || ['current','expired'].includes(freshness.state) && freshness.published_at !== target.published_at
+      || freshness.state === 'unknown' && target.published_at !== null
+      || freshness.state === 'expired' && Date.parse(freshness.fresh_until) > Date.now())
       return { valid:false, reason:'Источник, сообщение или точная цитата не совпадают с сохранённым основанием; рассмотрение отключено.' };
     if (proposal.channel === 'public_reply'
       && (typeof n.material_preview?.content !== 'string' || !n.material_preview.content.trim()))
       return { valid:false, reason:'Точный текст ответа отсутствует; рассмотрение отключено.' };
-    return { valid:true, proposal, state, target };
+    return { valid:true, proposal, state, target,
+      freshnessCurrent:freshness.state === 'current' && typeof freshness.fresh_until === 'string' && Date.parse(freshness.fresh_until) > Date.now() };
   }
   const canonicalJson = value => {
     if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
@@ -482,6 +503,10 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
           ${selected.length ? selected.map(id => { const e = evidenceById.get(id); return `<blockquote>${esc(e?.text ?? 'Выбранная цитата недоступна в снимке.')}<small> · событие ${esc(id)}</small></blockquote>`; }).join('') : '<small>Выбранные цитаты: нет.</small>'}</article>`;
       }).join('') || '<p>Классификации контекста не сохранены.</p>'}</section>`
       : '<div class="section-note">Историческое предложение версии 1: в записи нет зафиксированной проверки полного контекста или предпросмотра материала.</div>';
+    const contactBinding = n.first_contact ? firstContactBinding(n) : null;
+    const responseImportReady = !n.first_contact || contactBinding?.valid === true
+      && (contactBinding.proposal.channel === 'none'
+        || contactBinding.proposal.channel === 'public_reply' && contactBinding.freshnessCurrent && contactBinding.state.state === 'approved');
     const preview = contextVersion && n.material_preview ? `<section class="material-preview"><h3>Предпросмотр предлагаемого материала</h3>
       <p><strong>${esc(n.material_preview.title ?? 'Без названия')}</strong></p>
       <pre class="workspace-pre">${esc(n.material_preview.content ?? '')}</pre>
@@ -491,18 +516,26 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
       <p><strong>Полное основание материала:</strong> ${esc((n.preview_basis_event_ids ?? []).join(', ') || 'не подтверждено сервером')}. Связанный контекст сохраняется независимо от списка цитат модели.</p>
       ${n.linked_work_case?.id ? `<p><strong>Связанное дело Work:</strong> ${esc(n.linked_work_case.id)} · ревизия ${esc(n.linked_work_case.revision ?? '—')} · ${n.linked_work_case.current === true ? 'актуально' : 'не подтверждено'}</p>` : '<p>Дело Work не связано.</p>'}
       <p class="muted tiny">Импорт добавит точный текст как предложенный материал в открытое дело Work. Он всё ещё требует проверки материала в Work и отдельного разрешения Action.</p>
-      ${current && accepted && n.linked_work_case?.current === true && n.linked_work_case?.id && n.preview_sha256 ? button('Импортировать предпросмотр в дело Work', 'audience-import-preview', n.id, 'secondary') : ''}</section>`
+      ${current && accepted && n.linked_work_case?.current === true && n.linked_work_case?.id && n.preview_sha256 && responseImportReady ? button('Импортировать предпросмотр в дело Work', 'audience-import-preview', n.id, 'secondary') : ''}</section>`
       : contextVersion ? '<section class="material-preview"><h3>Предпросмотр материала</h3><p>Предпросмотр не сохранён.</p></section>' : '';
     const firstContact = n.first_contact ? (() => {
-      const binding = firstContactBinding(n), state = n.first_contact_state;
+      const binding = contactBinding, state = n.first_contact_state;
       const stateLabels = { not_proposed:'Не предложено', pending:'Ожидает отдельного решения', approved:'Текст предложения одобрен владельцем', rejected:'Предложение отклонено', stale:'Основание устарело', invalid:'Не прошло проверку' };
       const channelLabel = binding.valid && binding.proposal.channel === 'public_reply' ? 'Публичный ответ в исходном обсуждении' : 'Пока не отвечать';
-      const canReject = binding.valid && current && ['proposed','accepted'].includes(n.status) && binding.state.state === 'pending';
-      const canWithdraw = binding.valid && current && accepted && binding.state.state === 'approved';
-      const canApprove = canReject && accepted && binding.proposal.channel === 'public_reply' && !!n.material_preview?.content;
+      const canReject = binding.valid && binding.freshnessCurrent && current
+        && ['proposed','accepted'].includes(n.status) && binding.state.state === 'pending';
+      const canWithdraw = binding.valid && binding.freshnessCurrent && current && accepted && binding.state.state === 'approved';
+      const canApprove = canReject && accepted && binding.proposal.channel === 'public_reply'
+        && binding.freshnessCurrent && !!n.material_preview?.content;
       const stateNote = binding.valid
         ? `${stateLabels[binding.state.state] ?? 'Неизвестное состояние'} · соответствие ситуации: неизвестно · результат: не наблюдался`
         : `Предложение не прошло проверку: ${binding.reason}`;
+      const freshness = binding.valid ? binding.state.target_freshness : state?.target_freshness;
+      const freshnessText = freshness?.state === 'current'
+        ? `Опубликовано: ${esc(freshness.published_at)} · наблюдалось: ${esc(binding.valid ? binding.target.observed_at ?? 'неизвестно' : 'не подтверждено')} · срок свежести до: ${esc(freshness.fresh_until)}${binding.valid && !binding.freshnessCurrent ? ' · срок истёк' : ''}`
+        : freshness?.state === 'expired'
+          ? `Опубликовано: ${esc(freshness.published_at)} · наблюдалось: ${esc(binding.valid ? binding.target.observed_at ?? 'неизвестно' : 'не подтверждено')} · срок свежести истёк ${esc(freshness.fresh_until)}`
+          : freshness?.state === 'unknown' ? 'Дата публикации и срок свежести неизвестны.' : 'Дата публикации и срок свежести не подтверждены.';
       const responseText = binding.valid && binding.proposal.channel === 'none'
         ? 'Ответ не предложен.' : n.material_preview?.content ?? 'Точный текст ответа отсутствует.';
       return `<section class="first-contact-review"><h3>Возможный первый ответ · отдельное решение</h3>
@@ -511,6 +544,7 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
         <p><strong>Что может помочь:</strong> ${esc(binding.valid ? binding.proposal.help : n.first_contact.help ?? 'Предложение недоступно')}</p>
         <blockquote>${esc(binding.valid ? binding.proposal.target_quote : n.first_contact.target_quote ?? 'Точная цитата недоступна')}</blockquote>
         <p><strong>Источник и сообщение:</strong> ${esc(binding.valid ? binding.state.target.source_ref : state?.target?.source_ref ?? 'не подтверждены')} · событие ${esc(binding.valid ? binding.state.target.source_event_id : state?.target?.source_event_id ?? 'не подтверждено')} · сообщение ${esc(binding.valid ? binding.state.target.message_id : state?.target?.message_id ?? 'не подтверждено')}</p>
+        <p><strong>Свежесть публикации:</strong> ${freshnessText}</p>
         <p><strong>Точный текст предложения:</strong></p><pre class="workspace-pre">${esc(responseText)}</pre>
         <p><strong>Неизвестно:</strong> ${esc((n.unknowns ?? []).join('; ') || 'Не указано')}</p>
         <p><strong>Актуальность основания:</strong> ${current ? 'актуально по сохранённой проверке; нерешённость вопроса неизвестна' : `не подтверждена (${esc((n.reasons ?? []).join('; ') || 'основание неактуально')})`}</p>
@@ -993,10 +1027,11 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
       const frozen = need;
       const binding = firstContactBinding(frozen);
       const isWithdrawal = decision === 'reject' && binding.valid && binding.state.state === 'approved';
-      const allowed = binding.valid && frozen.id === id && selectedNeed === id && frozen.current === true
+      const allowed = binding.valid && binding.freshnessCurrent && frozen.id === id && selectedNeed === id && frozen.current === true
         && ['proposed','accepted'].includes(frozen.status)
         && (binding.state.state === 'pending' || isWithdrawal && frozen.status === 'accepted')
-        && (decision === 'reject' || frozen.status === 'accepted' && binding.state.state === 'pending' && binding.proposal.channel === 'public_reply'
+        && (decision === 'reject' || frozen.status === 'accepted' && binding.state.state === 'pending'
+          && binding.proposal.channel === 'public_reply' && binding.freshnessCurrent
           && typeof frozen.material_preview?.content === 'string' && !!frozen.material_preview.content.trim());
       if (!allowed) throw new Error('Предложение нельзя рассмотреть: обновите гипотезу и проверьте её точный текст и основание.');
       modal(`${decision === 'approve' ? 'Одобрить только текст предложения' : 'Отклонить предложение первого ответа'}`,
@@ -1005,10 +1040,12 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
           const currentWithdrawal = decision === 'reject' && currentBinding.valid && currentBinding.state.state === 'approved';
           const stillAllowed = latest?.id === frozen.id && selectedNeed === frozen.id
             && latest.revision === frozen.revision && latest.basis_fingerprint === frozen.basis_fingerprint
-            && currentBinding.valid && (currentBinding.state.state === 'pending' || currentWithdrawal && latest.status === 'accepted')
+            && currentBinding.valid && currentBinding.freshnessCurrent
+            && (currentBinding.state.state === 'pending' || currentWithdrawal && latest.status === 'accepted')
             && currentBinding.state.proposal_sha256 === binding.state.proposal_sha256
             && latest.current === true && ['proposed','accepted'].includes(latest.status)
-            && (decision === 'reject' || latest.status === 'accepted' && currentBinding.state.state === 'pending' && currentBinding.proposal.channel === 'public_reply'
+            && (decision === 'reject' || latest.status === 'accepted' && currentBinding.state.state === 'pending'
+              && currentBinding.proposal.channel === 'public_reply' && currentBinding.freshnessCurrent
               && typeof latest.material_preview?.content === 'string' && !!latest.material_preview.content.trim());
           if (!stillAllowed) throw new Error('Гипотеза или предложение изменились. Обновите страницу и проверьте снова.');
           if (!p.note?.trim()) throw new Error('Укажите основание решения.');
@@ -1029,6 +1066,11 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
       const linked = n.linked_work_case;
       if (n.id !== id || n.status !== 'accepted' || n.current !== true || !linked?.id || linked.current !== true || !n.preview_sha256) {
         throw new Error('Предпросмотр можно импортировать только для принятой актуальной гипотезы и актуального связанного дела Work. Обновите данные и проверьте снова.');
+      }
+      if (n.first_contact) {
+        const binding = firstContactBinding(n);
+        if (!binding.valid || binding.proposal.channel === 'public_reply' && (!binding.freshnessCurrent || binding.state.state !== 'approved'))
+          throw new Error('Материал ответа можно импортировать только после отдельного одобрения при актуальной дате публикации. Обновите данные и проверьте снова.');
       }
       await command('audience.import_preview', { need_id: n.id, expected_revision: n.revision,
         expected_basis_fingerprint: n.basis_fingerprint, case_id: linked.id,

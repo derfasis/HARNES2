@@ -47,11 +47,26 @@ and author/message references come from the frozen evidence, not model invention
 An author reference is not a verified human or recipient identity. Exact quotations
 prove provenance; they do not prove the model interpreted the request correctly.
 
-No migration or new queue/table is needed. The exact proposal already lives in
-`audience_needs` and its immutable assessment. The operator review uses the existing
-transactionally committed `events` and `command_receipts`; both must agree on the
-request fingerprint and inert result. Exports carry audit history, not renewed
-source/model/contact authority.
+`first_contact_state.target_freshness` separately exposes the canonical target's
+`published_at`, `fresh_until`, `max_age_seconds` and state (`current`, `expired`,
+`unknown`, `invalid`). It reuses the goal's existing age policy and checks publication
+time against the current clock; recent intake or HTTP confirmation cannot renew an
+old public question. Unknown/invalid/future publication cannot approve a public
+response. Browser capture time is not publication time. Source-current information
+may still support internal research when the specific response target is expired.
+
+The exact proposal lives in `audience_needs` and its immutable assessment; there is
+no new queue or runtime. One necessary additive migration, `018`, stores
+`audience_first_contact_heads`: a pending row for a newly proposed version, or the
+exact current review's request/event/review IDs. The operator decision updates this
+head, existing `events` and `command_receipts` in one transaction; the bound event
+and receipt must agree on the request fingerprint and inert result. Reading the
+last parseable audit event is forbidden: corrupting/deleting a rejection must not
+expose an older approval. Missing heads fail closed. A legitimate revised proposal
+resets its head to pending and still requires new need and response review.
+Historical schema-17 bundles import with empty heads; neither migration nor import
+manufactures approval. Exports carry review metadata, not renewed source/model/contact
+authority.
 
 ## Review lifecycle
 
@@ -83,10 +98,12 @@ authorized interaction; no response record is created by material review or hand
 
 Edit/delete/revoke, new relevant evidence, observation expiry and goal changes use
 existing Audience freshness/epochs; review cannot override them. Restart reconstructs
-state from the same bound proposal, operator event and receipt without inference or
-new grants. Missing/corrupt receipts fail closed. A staging import preserves the old
+state from the same bound proposal, current head, operator event and receipt without
+inference or new grants. Missing/corrupt heads, events or receipts fail closed. A staging import preserves the old
 decision event as history while existing import fences retire its current source
 basis. A reviewed draft is still not delivery, and silence remains unknown.
+Target publication expiry is checked again after approval, on restart, receipt
+replay and dependent preview/Work use; an old approval cannot extend its deadline.
 
 ## Quality limits and verification
 
@@ -111,11 +128,14 @@ Run `node --test tests/first-contact-review*.test.mjs`, then `npm test`,
 
 Against canonical `main@0e903b2c0fc5ce927e40cae7476a4f7d3aa02cf7`:
 
-- 24 focused tests (18 business/recovery/model-path tests and 6 UI tests).
-- Full regression: 1,598 Node tests, 25 Python tests and build passed; no skipped Node tests.
-- Five deliberately removed guards were independently caught: positive-target binding,
+- 37 focused tests (28 business/recovery/model-path tests and 9 UI tests).
+- Full `npm run verify`: 1,612 Node tests, 25 Python tests and build passed; no skipped
+  Node tests. `git diff --check` passed separately. Historical transfer/upgrade
+  fixtures remain strict and a schema-17 import cannot invent a review head.
+- All seven deliberate safety mutations were caught: positive-target binding,
   event/receipt agreement, superseded approval replay, preview import approval and
-  post-import withdrawal. The first target mutation initially survived a confounded
+  post-import withdrawal, publication-age enforcement, and replacing the durable
+  head with the last parseable audit event. The first target mutation initially survived a confounded
   negative fixture. A valid complete exchange with a peer counterevidence target now
   proves that specific guard rather than failing an unrelated schema check.
 - Three finite actual configured Gemini/Hermes invocations used synthetic isolated
