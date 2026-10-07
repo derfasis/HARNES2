@@ -138,6 +138,11 @@ Against canonical `main@0e903b2c0fc5ce927e40cae7476a4f7d3aa02cf7`:
   head with the last parseable audit event. The first target mutation initially survived a confounded
   negative fixture. A valid complete exchange with a peer counterevidence target now
   proves that specific guard rather than failing an unrelated schema check.
+- Hosted Windows caught a test-fixture race: setup could consume the one real
+  second left before publication expiry. The expiry test now freezes the entire
+  Date API before setup and advances to the exact deadline; source intake remains
+  current. Production timing rules are unchanged. An additional mutation allowing
+  equality at the deadline was caught by this deterministic test.
 - Three finite actual configured Gemini/Hermes invocations used synthetic isolated
   questions and recorded 16,940 input + 3,443 output tokens. Pricing, quota percentage
   and proxy-internal retry count remain unknown. No live customer/source qualification

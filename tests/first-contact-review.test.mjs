@@ -230,6 +230,9 @@ test('the canonical source-ingest boundary still rejects future publication time
 });
 
 test('a current approval expires from publication age after material import, restart and old-request replay', async t => {
+  // Freeze the whole Date API so source intake, audit timestamps and freshness
+  // agree. Fixture setup must not race a one-second real-clock deadline on CI.
+  t.mock.timers.enable({apis:['Date'],now:Date.parse('2026-10-07T12:00:00.000Z')});
   const publishedAt = new Date(Date.now() - 59_000).toISOString();
   const { h, need } = await proposed(t, { max_age_seconds:60, targetPublishedAt:publishedAt });
   assert.equal(need.current,true);
@@ -244,33 +247,32 @@ test('a current approval expires from publication age after material import, res
     case_id:work.case_id, expected_case_revision:work.expected_case_revision,
     expected_preview_sha256:current.preview_sha256 }, id());
   assert.ok(imported.material_id);
-  const realNow = Date.now;
-  Date.now = () => realNow() + 2000;
-  try {
-    const expired = h.service.audience.need(accepted.id);
-    assert.equal(expired.current,true, 'source observation is still recent under the goal evidence window');
-    assert.equal(expired.first_contact_state.state,'stale');
-    assert.equal(expired.first_contact_state.target_freshness.state,'expired');
-    assert.equal(h.service.audience.workScope(work.thread_id).current,false,
-      'publication expiry blocks already imported response material and dependent Work');
-    const receipts = h.store.get('SELECT COUNT(*) n FROM command_receipts').n;
-    await assert.rejects(h.command('audience.review_first_contact',approvalPayload,approvalRequest),
-      error => error?.code === 'FIRST_CONTACT_TARGET_STALE');
-    assert.equal(h.store.get('SELECT COUNT(*) n FROM command_receipts').n,receipts);
-    await assert.rejects(h.command('audience.import_preview', { need_id:current.id,
-      expected_revision:current.revision, expected_basis_fingerprint:current.basis_fingerprint,
-      case_id:work.case_id, expected_case_revision:work.expected_case_revision,
-      expected_preview_sha256:current.preview_sha256 }, id()),
-    error => error?.code === 'FIRST_CONTACT_REVIEW_NOT_APPROVED');
-    h.restart();
-    const restored = h.service.audience.need(accepted.id);
-    assert.equal(restored.current,true);
-    assert.equal(restored.first_contact_state.state,'stale');
-    assert.equal(restored.first_contact_state.target_freshness.state,'expired');
-    assert.equal(h.service.audience.workScope(work.thread_id).current,false);
-    await assert.rejects(h.command('audience.review_first_contact',approvalPayload,approvalRequest),
-      error => error?.code === 'FIRST_CONTACT_TARGET_STALE');
-  } finally { Date.now = realNow; }
+  t.mock.timers.tick(1000);
+  assert.equal(Date.now(),Date.parse(current.first_contact_state.target_freshness.fresh_until),
+    'expiry is enforced at the exact publication deadline');
+  const expired = h.service.audience.need(accepted.id);
+  assert.equal(expired.current,true, 'source observation is still recent under the goal evidence window');
+  assert.equal(expired.first_contact_state.state,'stale');
+  assert.equal(expired.first_contact_state.target_freshness.state,'expired');
+  assert.equal(h.service.audience.workScope(work.thread_id).current,false,
+    'publication expiry blocks already imported response material and dependent Work');
+  const receipts = h.store.get('SELECT COUNT(*) n FROM command_receipts').n;
+  await assert.rejects(h.command('audience.review_first_contact',approvalPayload,approvalRequest),
+    error => error?.code === 'FIRST_CONTACT_TARGET_STALE');
+  assert.equal(h.store.get('SELECT COUNT(*) n FROM command_receipts').n,receipts);
+  await assert.rejects(h.command('audience.import_preview', { need_id:current.id,
+    expected_revision:current.revision, expected_basis_fingerprint:current.basis_fingerprint,
+    case_id:work.case_id, expected_case_revision:work.expected_case_revision,
+    expected_preview_sha256:current.preview_sha256 }, id()),
+  error => error?.code === 'FIRST_CONTACT_REVIEW_NOT_APPROVED');
+  h.restart();
+  const restored = h.service.audience.need(accepted.id);
+  assert.equal(restored.current,true);
+  assert.equal(restored.first_contact_state.state,'stale');
+  assert.equal(restored.first_contact_state.target_freshness.state,'expired');
+  assert.equal(h.service.audience.workScope(work.thread_id).current,false);
+  await assert.rejects(h.command('audience.review_first_contact',approvalPayload,approvalRequest),
+    error => error?.code === 'FIRST_CONTACT_TARGET_STALE');
   assertNoContactEffects(h);
 });
 
