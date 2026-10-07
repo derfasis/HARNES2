@@ -7,7 +7,7 @@ import { telegramReadState } from './telegram-read-gate.mjs';
 import { scoutAssessmentDiagnostic } from './scout-assessment-output.mjs';
 export { SCOUT_TABLES, SCOUT_COMMANDS } from './scout-tables.mjs';
 const check=(ok,code)=>ensure(ok,code,409,code);
-export const SCOUT_EVALUATOR_VERSION='scout-assessment-v2';
+export const SCOUT_EVALUATOR_VERSION='scout-assessment-v3';
 const future = raw => {const ms=Date.parse(raw);check(Number.isFinite(ms)&&ms>Date.now()&&ms<=Date.now()+30*86400000,'SCOUT_GRANT_TIME_INVALID');return new Date(ms).toISOString();};
 const fields=(p,keys)=>check(p&&typeof p==='object'&&!Array.isArray(p)&&Object.keys(p).every(k=>keys.includes(k)),'SCOUT_FIELDS_INVALID');
 function topicConfig(p) {

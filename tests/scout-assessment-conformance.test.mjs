@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { processScoutAssessment } from '../business/scout-reasoning.mjs';
 import { SCOUT_EVALUATOR_VERSION } from '../business/scout.mjs';
 import { id } from '../business/store.mjs';
-import { message, noHistory, scoutHarness } from './scout-test-helpers.mjs';
+import { channel, message, noHistory, scoutHarness } from './scout-test-helpers.mjs';
 
 const validOutput = (refs=['1']) => ({
   recommendation:'consider', reason:'The bounded source sample contains a relevant discussion.',
@@ -190,6 +190,17 @@ test('old evaluator jobs are stale before any billable invocation',async t=>{
   assert.equal(x.h.store.get('SELECT COUNT(*) n FROM runs').n,0);
 });
 
+test('v2 evaluator jobs are stale before any billable invocation after the v3 upgrade',async t=>{
+  const x=await prepared(t),cursor=JSON.parse(x.job.cursor_json);cursor.evaluator_version='scout-assessment-v2';
+  x.h.store.run('UPDATE scout_jobs SET cursor_json=? WHERE id=?',JSON.stringify(cursor),x.job.id);
+  let calls=0;
+  await processScoutAssessment(x.h.service,{decide:async()=>{calls++;return {completed:true,final_response:JSON.stringify(validOutput())};}});
+  assert.equal(calls,0);
+  assert.equal(x.h.store.get('SELECT status,reason FROM scout_jobs WHERE id=?',x.job.id).status,'stale');
+  assert.equal(x.h.store.get('SELECT reason FROM scout_jobs WHERE id=?',x.job.id).reason,'SCOUT_ASSESSMENT_STALE');
+  assert.equal(x.h.store.get('SELECT COUNT(*) n FROM runs').n,0);
+});
+
 test('reconciliation retires old or corrupt evaluator cursors even with billing disabled, preserving the healthy neighbor',async t=>{
   const x=await prepared(t),cursor=JSON.parse(x.job.cursor_json);
   cursor.evaluator_version='scout-assessment-v1';
@@ -224,9 +235,9 @@ test('evaluator upgrade invalidates old advice without revoking independently gr
   assert.match(context.instructions_digest,/^[0-9a-f]{64}$/);
   assert.match(context.output_contract_digest,/^[0-9a-f]{64}$/);
   // Recreate a persisted pre-upgrade receipt/grant link. Assessment provenance
-  // is immutable; production must never rewrite an old receipt into version 2.
+  // is immutable; production must never rewrite an old receipt into version 3.
   const legacyId=id();
-  h.store.run("INSERT INTO scout_assessments(id,campaign_id,campaign_revision,candidate_id,sample_id,sample_digest,topic_hash,evaluator_version,output_json,run_id,status,created_at) SELECT ?,campaign_id,campaign_revision,candidate_id,sample_id,sample_digest,topic_hash,'scout-assessment-v1',output_json,run_id,'approved',created_at FROM scout_assessments WHERE id=?",legacyId,outcome.assessment_id);
+  h.store.run("INSERT INTO scout_assessments(id,campaign_id,campaign_revision,candidate_id,sample_id,sample_digest,topic_hash,evaluator_version,output_json,run_id,status,created_at) SELECT ?,campaign_id,campaign_revision,candidate_id,sample_id,sample_digest,topic_hash,'scout-assessment-v2',output_json,run_id,'approved',created_at FROM scout_assessments WHERE id=?",legacyId,outcome.assessment_id);
   const grant={...h.store.get('SELECT * FROM scout_grants WHERE id=?',admitted.grant_id),id:id(),assessment_id:legacyId};
   await h.command('scout.revoke',{campaign_id:campaign.id,revision:campaign.revision,grant_id:admitted.grant_id});
   h.store.run(`INSERT INTO scout_grants(${Object.keys(grant).join(',')}) VALUES(${Object.keys(grant).map(()=>'?').join(',')})`,...Object.values(grant));
@@ -237,6 +248,78 @@ test('evaluator upgrade invalidates old advice without revoking independently gr
   assert.equal(presentation.candidates[0].monitor_grant.id,grant.id);
   assert.equal(presentation.candidates[0].monitor_grant.current,true);
   assert.deepEqual(h.service.scout.monitorAuthorityPolicies(),before);
+  assert.throws(()=>h.service.scout.assessment(legacyId,h.service.scout.campaign(campaign.id)),{code:'SCOUT_ASSESSMENT_STALE'});
+  assert.deepEqual(h.service.scout.monitorAuthorityPolicies(),before);
+});
+
+test('a persisted approved v2 assessment is stale after restart and cannot authorize monitor admission',async t=>{
+  const {h,campaign,candidate,sample,outcome}=await assess(t,{completed:true,final_response:JSON.stringify(validOutput())});
+  await h.command('scout.review',{campaign_id:campaign.id,revision:campaign.revision,assessment_id:outcome.assessment_id,
+    decision:'approve',note:'Explicit operator review before evaluator upgrade'});
+  const legacyId=id();
+  h.store.run("INSERT INTO scout_assessments(id,campaign_id,campaign_revision,candidate_id,sample_id,sample_digest,topic_hash,evaluator_version,output_json,run_id,status,created_at) SELECT ?,campaign_id,campaign_revision,candidate_id,sample_id,sample_digest,topic_hash,'scout-assessment-v2',output_json,run_id,'approved',created_at FROM scout_assessments WHERE id=?",legacyId,outcome.assessment_id);
+  h.restart();
+  const presentation=h.service.scout.presentation(h.service.scout.campaign(campaign.id));
+  assert.equal(presentation.candidates[0].assessment.status,'stale');
+  await assert.rejects(h.command('scout.admit',{campaign_id:campaign.id,revision:campaign.revision,
+    candidate_id:candidate.id,sample_id:sample.id,assessment_id:legacyId,
+    purpose:'Synthetic monitor admission guard test',max_lag_seconds:300,
+    expires_at:new Date(Date.now()+86400000).toISOString()}),{code:'SCOUT_ASSESSMENT_STALE'});
+  assert.equal(h.store.get("SELECT COUNT(*) n FROM scout_grants WHERE campaign_id=? AND kind='monitor'",campaign.id).n,0);
+});
+
+test('v3 conformance packet preserves product-question and peer-claim ancestry without granting effects',async t=>{
+  // Canned output checks packet/provenance and durable effects only; it does not
+  // test whether a live model makes the same semantic judgments.
+  const prior=process.env.PARTNER_MODEL_API_KEY;
+  process.env.PARTNER_MODEL_API_KEY='offline-scout-conformance-key';
+  t.after(()=>{if(prior===undefined)delete process.env.PARTNER_MODEL_API_KEY;else process.env.PARTNER_MODEL_API_KEY=prior;});
+  const observedAt=Date.now()-180000;
+  const rows=[
+    message('12',{author_ref:'author-question',date:new Date(observedAt).toISOString(),text:'I am comparing NOW lutein. How much lutein is in each capsule, and what is the price?'}),
+    message('13',{author_ref:'author-peer',date:new Date(observedAt+60000).toISOString(),reply_to:'12',text:'FitLine is official; I recommend buying it from my shop.'}),
+    message('20',{author_ref:'author-orphan',date:new Date(observedAt+120000).toISOString(),reply_to:'19',text:'Interested too; send details.'}),
+  ];
+  const h=scoutHarness(t,{modelEnabled:true,resolve:async()=>channel({joined:false}),history:input=>input.before_id?noHistory(input):{
+    empty:false,requested_count:input.limit,received_count:rows.length,oldest_id:12,messages:rows
+  }});
+  h.config.runtime.model='offline-scout-conformance';h.config.runtime.baseUrl='http://127.0.0.1:1/v1';
+  h.config.runtime.provider='custom';h.config.runtime.adapter='hermes';
+  const campaign=await h.campaign('Packaged nutrition product discussion');
+  await h.authorize(campaign);
+  const candidate=await h.seed(campaign);
+  const sample=await h.auditAndSeal(campaign,candidate);
+  await h.command('scout.request_assessment',{campaign_id:campaign.id,revision:campaign.revision,candidate_id:candidate.id,sample_id:sample.id});
+  let calls=0;
+  const result={completed:true,final_response:JSON.stringify({
+    recommendation:'consider',
+    reason:'A participant asks about NOW lutein amount and price. A peer calls FitLine official, but that claim is unverified; the sample does not establish a FitLine match.',
+    evidence_refs:['12','13'],
+    opportunities:[{description:'Review the stated NOW lutein amount and price question against independently verified offer information, if available.',evidence_refs:['12']}],
+    uncertainty:['The peer claim that FitLine is official is unverified in this sample.','FitLine offer suitability and permission to contact are unknown.']
+  }),tool_calls:[],usage:{input_tokens:17,output_tokens:23}};
+  const outcome=await processScoutAssessment(h.service,{decide:async(_run,context)=>{
+    calls++;
+    assert.equal(context.packet.contact_permission,false);
+    assert.deepEqual(context.packet.sample,{id:sample.id,digest:sample.digest,coverage:sample.coverage,
+      from:sample.requested_from,until:sample.requested_until});
+    assert.deepEqual(context.packet.groups.map(g=>({id:g.id,evidence_refs:g.evidence_refs,context_incomplete:g.context_incomplete})),[
+      {id:'12',evidence_refs:['12','13'],context_incomplete:false},
+      {id:'20',evidence_refs:['20'],context_incomplete:true},
+    ]);
+    const forwarded=context.packet.groups.flatMap(g=>g.messages).sort((a,b)=>Number(a.message_id)-Number(b.message_id));
+    assert.deepEqual(forwarded,JSON.parse(sample.messages_json));
+    return result;
+  }});
+  assert.equal(calls,1);assert.equal(outcome.disposition,'assessment_proposed');
+  assert.equal(h.store.get('SELECT joined FROM scout_candidates WHERE id=?',candidate.id).joined,0);
+  const saved=JSON.parse(h.store.get('SELECT output_json FROM scout_assessments WHERE id=?',outcome.assessment_id).output_json);
+  assert.deepEqual(saved.evidence_refs,['12','13']);
+  assert.deepEqual(saved.opportunities[0].evidence_refs,['12']);
+  assert.deepEqual(saved,JSON.parse(result.final_response));
+  assert.equal(h.store.get("SELECT COUNT(*) n FROM scout_grants WHERE campaign_id=? AND kind='monitor'",campaign.id).n,0);
+  for(const table of ['persons','conversations','contact_permissions','drafts','approvals','delivery_attempts','outcome_events'])
+    assert.equal(h.store.get(`SELECT COUNT(*) n FROM ${table}`).n,0,table);
 });
 
 test('receipt projection closes malformed persisted diagnostics and ignores arbitrary provider fields',async t=>{
