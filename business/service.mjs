@@ -142,6 +142,7 @@ export class BusinessService {
     // A receipt acknowledges an earlier import; it cannot authorize use after the
     // selected context, review, case or source authority has changed.
     if (action === 'audience.import_preview') this.audience.assertPreviewImport(p, { replay: previous?.fingerprint === fingerprint });
+    if (action === 'audience.review_first_contact') this.audience.assertFirstContactReview(p,{receipt:previous?.fingerprint === fingerprint ? previous : null});
     if (action === 'audience.reassess') this.audience.assertReassessmentRequest(p);
     if (action === 'audience.retry_reassessment') this.audience.assertRetryRequest(p);
     if (action === 'audience.retry_assessment') this.audience.assertOrdinaryRetryRequest(p);
@@ -447,7 +448,7 @@ export class BusinessService {
     // Imported donor extras are untrusted and intentionally discarded, not echoed into audit.
     const auditPayload = action === 'executive.import_candidates' ? { format: 'openoutfind-jsonl', raw_input_persisted: false } : p;
     this.store.event(this.config.partnerId, conversationId, action, actor.kind, { ...auditPayload, result, run_id: actor.runId ?? null,
-      ...(REVIEW_ACTIONS.includes(action) ? { request_id: requestId } : {}) });
+      ...(REVIEW_ACTIONS.includes(action) || action === 'audience.review_first_contact' ? { request_id: requestId } : {}) });
     this.store.run('INSERT INTO command_receipts VALUES(?,?,?,?)', requestId, fingerprint, JSON.stringify(result), now());
     return result;
   }

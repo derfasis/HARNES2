@@ -13,6 +13,7 @@ import { currentBasis, currentBasisState } from './audience-current-events.mjs';
 import { FOLLOWUP_TEMPORARY } from './audience-followup.mjs';
 import { watchEpoch, sourceRenewalPreview, assertRenewalRequest, renewSource } from './audience-source-renewal.mjs';
 import { sourceObservationFloor } from './source-observation-epochs.mjs';
+import { firstContactState, reviewFirstContact, assertFirstContactReview } from './first-contact-review.mjs';
 
 const storedOutputSchema = readJson(path.join(ROOT, 'contracts/audience-assessment.schema.json'));
 export const outputSchema = structuredClone(storedOutputSchema);
@@ -832,7 +833,7 @@ export class AudienceLoop {
         workCase = { id: w.id, revision: w.revision, current };
       }
     }
-    return { id: row.id, goal_id: row.goal_id, assessment_id: row.assessment_id, status: row.status, revision: row.revision,
+    const result = { id: row.id, goal_id: row.goal_id, assessment_id: row.assessment_id, status: row.status, revision: row.revision,
       ...output, current: reasons.length === 0, reasons, epistemic_status: 'unverified_interpretation',
       context_accounting: output.proposal_version === 2 ? 'supplied_packet_only' : 'not_recorded',
       preview_sha256: previewHash(output), linked_work_case: workCase,
@@ -840,7 +841,11 @@ export class AudienceLoop {
       preview_basis_event_ids: output.material_preview ? allRefs(output) : [],
       basis_fingerprint: digest({ revision: row.revision, basis, output }), review_note: row.review_note,
       reviewed_at: row.reviewed_at, thread_id: link?.thread_id ?? null, ...AUTHORITY };
+    const packet = output.first_contact
+      ? parse(this.store.get('SELECT packet_json FROM audience_assessments WHERE id=?',row.assessment_id).packet_json) : {exchanges:[]};
+    return {...result,first_contact_state:firstContactState(this,result,packet)};
   }
+  assertFirstContactReview(p, options) { return assertFirstContactReview(this,p,options); }
   review(p) {
     fields(p, ['need_id', 'expected_revision', 'expected_basis_fingerprint', 'decision', 'note']); const n = this.need(p.need_id);
     check(n.revision === p.expected_revision && n.basis_fingerprint === p.expected_basis_fingerprint, 'AUDIENCE_REVISION_CONFLICT');
@@ -869,6 +874,9 @@ export class AudienceLoop {
     if (this.service.audienceReconciliationHealth === false || this.service.audienceReconciliationHealth === null)
       reasons.push('AUDIENCE_RECONCILIATION_UNPROVEN');
     if (n.status !== 'accepted' || n.revision !== link.need_revision) reasons.push('AUDIENCE_WORK_REVISION_STALE');
+    const importedResponse = n.first_contact?.channel === 'public_reply' && this.store.get(`SELECT id FROM events
+      WHERE partner_id=? AND kind='audience.preview_imported' AND payload_json->>'$.need_id'=? LIMIT 1`,this.partnerId,n.id);
+    if (importedResponse && n.first_contact_state.state !== 'approved') reasons.push('FIRST_CONTACT_REVIEW_NOT_APPROVED');
     if (digest(basis) !== digest(parse(this.store.get('SELECT basis_json FROM audience_needs WHERE id=?', n.id).basis_json))) reasons.push('AUDIENCE_WORK_SCOPE_STALE');
     return { need_id: n.id, need_revision: link.need_revision, current: reasons.length === 0, reasons,
       evidence_event_ids: allRefs(n), fingerprint: digest({ need_id: n.id, revision: link.need_revision, basis, current: !reasons.length, reasons }) };
@@ -922,6 +930,7 @@ export class AudienceLoop {
     check(n.current && n.status === 'accepted' && n.revision === p.expected_revision
       && n.basis_fingerprint === p.expected_basis_fingerprint, 'AUDIENCE_STALE_BASIS');
     check(n.proposal_version === 2 && n.material_preview && n.preview_sha256 === p.expected_preview_sha256, 'AUDIENCE_PREVIEW_HASH_MISMATCH');
+    if (n.first_contact?.channel === 'public_reply') check(n.first_contact_state.state === 'approved', 'FIRST_CONTACT_REVIEW_NOT_APPROVED');
     const row = this.service.work.get(p.case_id);
     check(n.thread_id && row.thread_id === n.thread_id, 'AUDIENCE_PREVIEW_CASE_SCOPE');
     this.service.work.current(row);
@@ -1039,6 +1048,7 @@ export class AudienceLoop {
     if (action === 'audience.attention_revoke') return this.service.attention.revoke(p);
     if (action === 'audience.propose') return this.propose(p);
     if (action === 'audience.review') return this.review(p);
+    if (action === 'audience.review_first_contact') return reviewFirstContact(this,p);
     if (action === 'audience.open_work') return this.openWork(p);
     if (action === 'audience.refresh_work') return this.openWork(p, true);
     if (action === 'audience.import_preview') return this.importPreview(p);
