@@ -364,18 +364,19 @@ function reconcile(service,p,s,page) {
     const key=telegramUpdateKey(u),fingerprint=digest(u);
     if(recoveredSeen.has(key)){check(recoveredSeen.get(key)===fingerprint,'TELEGRAM_PTS_COLLISION');continue;}
     recoveredSeen.set(key,fingerprint);
-    const samePtsPositive=u.kind==='delete' && updates.find(v=>v.pts===u.pts) || null;
-    if(samePtsPositive) {
+    const samePtsDelete=u.kind==='delete' && updates.find(v=>v.kind==='delete' && v.pts===u.pts) || null;
+    if(samePtsDelete) {
       // The server may deliver one delete natively (positive count) and again
       // counterless in the difference at the same watermark: equivalent message
-      // id sets prove it is one event, not two deletions.
-      conflictCheck(samePtsPositive.kind==='delete' && samePtsPositive.message_ids.length===u.message_ids.length
-        && [...samePtsPositive.message_ids].sort((a,b)=>a-b).join()===u.message_ids.slice().sort((a,b)=>a-b).join(),
-        'same_pts_delete_mismatch',()=>deleteConflictDiagnostic(p,s,page,samePtsPositive,u));
+      // id sets prove it is one event, not two deletions. A new/edit/metadata
+      // update at that watermark is not a delete twin; compare its targets below.
+      conflictCheck(samePtsDelete.message_ids.length===u.message_ids.length
+        && [...samePtsDelete.message_ids].sort((a,b)=>a-b).join()===u.message_ids.slice().sort((a,b)=>a-b).join(),
+        'same_pts_delete_mismatch',()=>deleteConflictDiagnostic(p,s,page,samePtsDelete,u));
     }
     for(const id of u.message ? [u.message.id] : u.message_ids) {
       check(!targets.has(`${u.pts}:${id}`),'TELEGRAM_PTS_COLLISION');targets.add(`${u.pts}:${id}`);
-      if(samePtsPositive)continue;
+      if(samePtsDelete)continue;
       const last=updates.filter(v=>v.message?.id===id || v.message_ids?.includes(id)).at(-1);
       conflictCheck(!last || last.pts<u.pts || last.pts===u.pts && last.message && u.message
         && digest(last.message)===digest(u.message),'same_pts_message_digest_mismatch',
