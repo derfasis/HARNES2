@@ -604,7 +604,10 @@ export class AudienceLoop {
     this.record('reassessment_canceled', { assessment_id: a.id, need_id: a.packet.reassessment.need_id }, 'operator');
     return { assessment_id: a.id, ...AUTHORITY };
   }
-  detail(goalId, { hypothesisMemory = false } = {}) {
+  // The next ordinary packet is a bounded preview, shared by detail/capture and
+  // Attention's readiness display. Reading it never considers evidence or moves
+  // a sampling cursor; authority and inference admission retain their own checks.
+  nextPacket(goalId) {
     const goal = this.goal(goalId), watches = this.watches(goal.id);
     const projected = watches.map(w => ({ ...w, health: this.health(w), head: this.service.continuity.head(w.source_ref) }));
     const backlog = projected.some(w => w.status === 'active' && w.head > w.cursor);
@@ -618,6 +621,15 @@ export class AudienceLoop {
     // Round-robin sources within each finite packet; a noisy chat cannot fill all eight slots.
     const exchanges = sampleExchanges(pools);
     const basis = this.basis(goal, exchanges);
+    return { goal, projected, queues, exchanges, basis, backlog,
+      ready: this.enabled() && goal.status === 'OPEN' && exchanges.length > 0,
+      source_summary: { enrolled_sources: projected.length,
+        current_sources: projected.filter(w => w.health.current).length,
+        selected_sources: new Set(exchanges.map(e => e.source_ref)).size,
+        selected_exchanges: exchanges.length, source_completeness: 'unknown' } };
+  }
+  detail(goalId, { hypothesisMemory = false } = {}) {
+    const next = this.nextPacket(goalId), { goal, projected, queues, exchanges, basis, backlog } = next;
     const needs = this.store.all('SELECT id FROM audience_needs WHERE goal_id=? ORDER BY updated_at DESC LIMIT 100', goal.id)
       .map(n => this.need(n.id, { includeWorkCase: !hypothesisMemory })).map(n => hypothesisMemory ? this.hypothesisMemory(n) : n);
     const assessments = this.store.all('SELECT id,status,producer,created_at,packet_json FROM audience_assessments WHERE goal_id=? ORDER BY rowid DESC LIMIT 10', goal.id)
@@ -626,9 +638,9 @@ export class AudienceLoop {
         catch { return { ...a, reason: 'AUDIENCE_RECORD_INVALID' }; }
       });
     return { ...goal, watches: projected, exchanges, needs, assessments, backlog,
-      ...(!hypothesisMemory ? { attention: this.service.attention.summary(goalId) } : {}),
+      ...(!hypothesisMemory ? { attention: this.service.attention.summary(goalId, next) } : {}),
       withheld_exchanges: queues.flat().filter(e => !e.current).slice(0, BATCH),
-      basis_fingerprint: digest(basis), ready: this.enabled() && goal.status === 'OPEN' && exchanges.length > 0,
+      basis_fingerprint: digest(basis), ready: next.ready, source_summary: next.source_summary,
       coverage: { batch_exchanges: BATCH, max_messages_per_exchange: MEMBERS, source_capacity: this.service.config.audience?.maxExchangesPerSource ?? 100,
         selection: 'bounded_reply_scopes_not_all_audience', source_completeness: 'unknown', identity_independence: 'unproven' }, ...AUTHORITY };
   }

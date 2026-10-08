@@ -119,7 +119,7 @@ export class AudienceAttention {
       && frozen.model_config.timeoutSeconds <= 1800, 'AUDIENCE_ATTENTION_BINDING_INVALID');
     return frozen.model_config;
   }
-  summary(goalId) {
+  summary(goalId, nextPacket = this.service.audience.nextPacket(goalId)) {
     const scope = this.scope(goalId), cfg = this.service.config;
     const grants = this.db.all('SELECT * FROM audience_attention_grants WHERE partner_id=? AND goal_id=? ORDER BY rowid DESC LIMIT 20', this.partnerId, goalId)
       .map(row => this.view(row));
@@ -133,9 +133,15 @@ export class AudienceAttention {
     if (cfg.controlPlane?.enabled !== true) reasons.push('AUDIENCE_CONTROL_REQUIRED');
     const readiness = runtimeReadiness(selectedConfig, { decision: true });
     if (!readiness.ready) reasons.push('AUDIENCE_MODEL_NOT_READY');
-    const watches = this.service.audience.watches(goalId);
-    const sourceCurrent = watches.every(w => this.service.audience.health(w).current);
-    if (!sourceCurrent) reasons.push('AUDIENCE_SOURCE_NOT_CURRENT');
+    // All enrolled transport health is separate from a valid next bounded packet.
+    // The ordinary dispatcher uses that same packet selection. A healthy subset
+    // cannot renew/shrink the whole-goal grant: eligible/scope above still check
+    // every original source authority epoch, including a revoked neighbor.
+    const sourceCurrent = nextPacket.source_summary.enrolled_sources > 0
+      && nextPacket.source_summary.current_sources === nextPacket.source_summary.enrolled_sources;
+    if (!nextPacket.ready) reasons.push(sourceCurrent ? 'AUDIENCE_EVIDENCE_NOT_READY' : 'AUDIENCE_SOURCE_NOT_CURRENT');
+    const pending = this.db.get("SELECT id,status,producer FROM audience_assessments WHERE goal_id=? AND status IN ('captured','running') ORDER BY rowid LIMIT 1", goalId) ?? null;
+    if (pending) reasons.push('AUDIENCE_ASSESSMENT_PENDING');
     try { this.service.control.assertModelBudget({ runtime: 'hermes-audience-v1', maxRunsPerDay: cfg.audience.maxRunsPerDay }); }
     catch (error) { if (!(error instanceof AppError)) throw error; reasons.push(error.code); }
     const catalog = this.service.modelProfiles.list();
@@ -143,7 +149,7 @@ export class AudienceAttention {
       const profileScope = this.scope(goalId, profile.id);
       const blocks = [...profile.block_reasons];
       if (!profileScope.fingerprint) blocks.push(profileScope.profileError ?? 'AUDIENCE_ATTENTION_SCOPE_UNAVAILABLE');
-      if (!sourceCurrent) blocks.push('AUDIENCE_SOURCE_NOT_CURRENT');
+      if (!nextPacket.ready) blocks.push(sourceCurrent ? 'AUDIENCE_EVIDENCE_NOT_READY' : 'AUDIENCE_SOURCE_NOT_CURRENT');
       if (cfg.controlPlane?.enabled !== true) blocks.push('AUDIENCE_CONTROL_REQUIRED');
       const ready = profileScope.profile && runtimeReadiness({ ...cfg, runtime: profileScope.profile.model_config }, { decision: true }).ready;
       if (!ready) blocks.push('AUDIENCE_MODEL_NOT_READY');
@@ -153,7 +159,8 @@ export class AudienceAttention {
     });
     return { scope_fingerprint: scope.fingerprint, model_configured: !!selectedScope.model,
       model_ready: readiness.ready && (cfg.audience?.modelEnabled === true || !!eligible) && cfg.controlPlane?.enabled === true,
-      source_current: sourceCurrent, can_grant: !!scope.fingerprint && !this.eligible(goalId), grants,
+      source_current: sourceCurrent, evidence_ready: nextPacket.ready, source_summary: nextPacket.source_summary,
+      pending_assessment: pending, can_grant: !!scope.fingerprint && !this.eligible(goalId), grants,
       profile_options: profileOptions, allowed_base_urls: catalog.allowed_base_urls, credential_ready: catalog.credential_ready,
       active_grant_id: eligible?.id ?? null, ready: reasons.length === 0, block_reasons: [...new Set(reasons)], ...AUTHORITY };
   }
