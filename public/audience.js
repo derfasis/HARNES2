@@ -228,6 +228,27 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
     if (!a || typeof a !== 'object') return '';
     const grants = Array.isArray(a.grants) ? a.grants : [];
     const profiles = Array.isArray(a.profile_options) ? a.profile_options : [];
+    const count = value => Number.isSafeInteger(value) && value >= 0 ? String(value) : 'данные не указаны';
+    const plural = (value, forms) => {
+      if (!Number.isSafeInteger(value) || value < 0) return 'данные не указаны';
+      const n = value % 100, last = value % 10;
+      return `${value} ${n >= 11 && n <= 14 ? forms[2] : last === 1 ? forms[0] : last >= 2 && last <= 4 ? forms[1] : forms[2]}`;
+    };
+    const summary = a.source_summary && typeof a.source_summary === 'object' ? a.source_summary : null;
+    const sourceCountKnown = Number.isSafeInteger(summary?.current_sources) && summary.current_sources >= 0
+      && Number.isSafeInteger(summary?.enrolled_sources) && summary.enrolled_sources >= 0;
+    const packetCountKnown = Number.isSafeInteger(summary?.selected_exchanges) && summary.selected_exchanges >= 0
+      && Number.isSafeInteger(summary?.selected_sources) && summary.selected_sources >= 0;
+    const completeness = summary?.source_completeness === 'unknown' ? 'неизвестна'
+      : typeof summary?.source_completeness === 'string' && summary.source_completeness.trim()
+        ? esc(summary.source_completeness) : 'данные не указаны';
+    const pending = a.pending_assessment;
+    const pendingState = pending && typeof pending === 'object' && !Array.isArray(pending)
+      && typeof pending.id === 'string' && pending.id.trim()
+      && typeof pending.producer === 'string' && pending.producer.trim()
+      && ['captured','running'].includes(pending.status)
+      ? `${pending.status === 'captured' ? 'снимок сохранён, анализ не начат' : 'анализ выполняется'} · ID ${esc(pending.id)} · ${esc(pending.producer)}`
+      : pending === null ? 'нет ожидающей оценки' : 'данные не указаны';
     const profileRows = profiles.map(profile => {
       const config = profile.model_config && typeof profile.model_config === 'object' ? profile.model_config : {};
       const profileModel = config.model ?? config.model_id ?? 'модель не указана';
@@ -264,7 +285,12 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
       <p><strong>Глобальный переключатель:</strong> ${listing?.model_enabled === true ? 'включён' : 'выключен'}. Он независим от разрешения этой цели.</p>
       <p><strong>Локальный credential readiness:</strong> ${a.credential_ready === true ? 'учётные данные готовы; значение ключа скрыто' : a.credential_ready === false ? 'учётные данные не готовы; ключ не запрашивается здесь' : 'готовность учётных данных неизвестна'}.</p>
       <p><strong>Разрешённые model endpoints:</strong> ${allowedBaseUrls.length ? allowedBaseUrls.map(url => esc(url)).join('; ') : 'не указаны'}.</p>
-      <p><strong>Разрешение на чтение и актуальность источника:</strong> ${a.source_current === true ? 'подтверждены' : 'не подтверждены'}.</p>
+      <p><strong>Актуальность всех подключённых источников:</strong> ${a.source_current === true ? 'подтверждена' : a.source_current === false ? 'не подтверждена' : 'данные не указаны'}.</p>
+      <p><strong>Источники актуальны:</strong> ${sourceCountKnown ? `${count(summary.current_sources)} из ${count(summary.enrolled_sources)}` : 'данные не указаны'}.</p>
+      <p><strong>Основание следующего анализа:</strong> ${packetCountKnown ? `${plural(summary.selected_exchanges, ['обмен','обмена','обменов'])} из ${plural(summary.selected_sources, ['источника','источников','источников'])}` : 'данные не указаны'}.</p>
+      <p><strong>Полнота источников:</strong> ${completeness}.</p>
+      <p><strong>Основание для следующего анализа:</strong> ${a.evidence_ready === true ? 'есть в ограниченном пакете' : a.evidence_ready === false ? 'подходящее основание не найдено' : 'данные не указаны'}.</p>
+      <p><strong>Ранее созданная оценка:</strong> ${pendingState}.</p>
       <p><strong>Готовность цели:</strong> ${a.ready === true ? 'модельная оценка допущена условиями' : 'оценка сейчас не готова'}.</p>
       ${a.block_reasons?.length ? `<p><strong>Ограничения:</strong> ${esc(a.block_reasons.join('; '))}</p>` : ''}
       <p><strong>Отпечаток области действия:</strong> <code>${esc(a.scope_fingerprint ?? 'не указан')}</code></p>

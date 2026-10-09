@@ -72,6 +72,96 @@ function makeView(api, command, modalState) {
     refresh:async () => {}, notify:() => {} });
 }
 
+async function renderAttentionPanel(attention) {
+  const goalId = 'attention-portfolio-ui';
+  const calls = [];
+  const api = async route => {
+    if (route === '/api/audience?limit=50') return { enabled:false, model_enabled:false,
+      items:[{ id:goalId, title:'Portfolio goal', status:'OPEN', revision:1 }] };
+    if (route === `/api/audience/${goalId}`) return { id:goalId, title:'Portfolio goal',
+      objective:'Inspect a bounded source portfolio', status:'OPEN', revision:1, watches:[], needs:[],
+      assessments:[], ready:false, attention };
+    throw new Error(`Unexpected API route: ${route}`);
+  };
+  const command = async (...args) => { calls.push(args); return {}; };
+  const view = makeView(api, command, {});
+  await view.load();
+  await view.act('audience-goal', goalId);
+  return { html:view.render(), calls };
+}
+
+test('attention panel distinguishes portfolio health from the bounded next-evidence packet', async () => {
+  const { html, calls } = await renderAttentionPanel({ ready:true, source_current:false, evidence_ready:true,
+    source_summary:{ enrolled_sources:20, current_sources:19, selected_sources:1, selected_exchanges:1,
+      source_completeness:'unknown' }, grants:[], profile_options:[], block_reasons:[] });
+  assert.match(html, /Источники актуальны:<\/strong> 19 из 20/);
+  assert.match(html, /Основание следующего анализа:<\/strong> 1 обмен из 1 источника/);
+  assert.match(html, /Полнота источников:<\/strong> неизвестна/);
+  assert.match(html, /Основание для следующего анализа:<\/strong> есть в ограниченном пакете/);
+  assert.match(html, /Готовность цели:<\/strong> модельная оценка допущена условиями/);
+  assert.doesNotMatch(html, /полный анализ 20|20 источников полностью охвачены/i);
+  assert.doesNotMatch(html, /Разрешение на чтение и актуальность источника:/);
+  assert.deepEqual(calls, [], 'rendering a readiness summary never submits a command');
+});
+
+test('attention panel says evidence is unavailable when all sources are healthy but no exchange is selected', async () => {
+  const { html } = await renderAttentionPanel({ ready:false, source_current:true, evidence_ready:false,
+    source_summary:{ enrolled_sources:20, current_sources:20, selected_sources:0, selected_exchanges:0,
+      source_completeness:'unknown' }, grants:[], profile_options:[], block_reasons:['AUDIENCE_EVIDENCE_REQUIRED'] });
+  assert.match(html, /Источники актуальны:<\/strong> 20 из 20/);
+  assert.match(html, /Основание следующего анализа:<\/strong> 0 обменов из 0 источников/);
+  assert.match(html, /Основание для следующего анализа:<\/strong> подходящее основание не найдено/);
+  assert.match(html, /Готовность цели:<\/strong> оценка сейчас не готова/);
+});
+
+test('attention panel marks absent portfolio summary fields as unspecified and escapes untrusted values', async () => {
+  const missing = await renderAttentionPanel({ ready:false, source_current:false, grants:[], profile_options:[], block_reasons:[] });
+  assert.match(missing.html, /Источники актуальны:<\/strong> данные не указаны/);
+  assert.match(missing.html, /Основание следующего анализа:<\/strong> данные не указаны/);
+  assert.match(missing.html, /Полнота источников:<\/strong> данные не указаны/);
+  assert.match(missing.html, /Основание для следующего анализа:<\/strong> данные не указаны/);
+  const hostile = await renderAttentionPanel({ ready:false, source_current:false,
+    grants:[], profile_options:[], block_reasons:[], source_summary:{ enrolled_sources:20,
+      current_sources:19, selected_sources:1, selected_exchanges:1, source_completeness:'<img src=x onerror=1>' } });
+  assert.match(hostile.html, /Полнота источников:<\/strong> &lt;img src=x onerror=1&gt;/);
+  assert.doesNotMatch(hostile.html, /<img src=x onerror=1>/);
+  assert.deepEqual(missing.calls, []);
+  assert.deepEqual(hostile.calls, []);
+});
+
+test('attention panel shows an already admitted running assessment separately from an exhausted next packet', async () => {
+  const { html, calls } = await renderAttentionPanel({ ready:false, source_current:true, evidence_ready:false,
+    source_summary:{ enrolled_sources:20, current_sources:20, selected_sources:0, selected_exchanges:0,
+      source_completeness:'unknown' }, pending_assessment:{ id:'pending-<script>', status:'running', producer:'<model>' },
+    grants:[], profile_options:[], block_reasons:['AUDIENCE_EVIDENCE_NOT_READY'] });
+  assert.match(html, /Основание следующего анализа:<\/strong> 0 обменов из 0 источников/);
+  assert.match(html, /Готовность цели:<\/strong> оценка сейчас не готова/);
+  assert.match(html, /Ранее созданная оценка:<\/strong> анализ выполняется/);
+  assert.match(html, /pending-&lt;script&gt;/);
+  assert.match(html, /&lt;model&gt;/);
+  assert.deepEqual(calls, []);
+});
+
+test('attention panel does not invent pending work for absent, null, or invalid status data', async () => {
+  const base = { ready:false, source_current:false, evidence_ready:false,
+    source_summary:{ enrolled_sources:0, current_sources:0, selected_sources:0, selected_exchanges:0,
+      source_completeness:'unknown' }, grants:[], profile_options:[], block_reasons:[] };
+  const missing = await renderAttentionPanel(base);
+  const absent = await renderAttentionPanel({ ...base, pending_assessment:null });
+  const captured = await renderAttentionPanel({ ...base, pending_assessment:{ id:'captured-1', status:'captured', producer:'operator' } });
+  const invalid = await renderAttentionPanel({ ...base, pending_assessment:{ id:'pending-1', status:'queued', producer:'model' } });
+  assert.match(missing.html, /Ранее созданная оценка:<\/strong> данные не указаны/);
+  assert.match(absent.html, /Ранее созданная оценка:<\/strong> нет ожидающей оценки/);
+  assert.match(captured.html, /Ранее созданная оценка:<\/strong> снимок сохранён, анализ не начат/);
+  assert.doesNotMatch(captured.html, /анализ выполняется|новое разрешение выдано/i);
+  assert.match(invalid.html, /Ранее созданная оценка:<\/strong> данные не указаны/);
+  assert.doesNotMatch(invalid.html, /анализ выполняется|новое разрешение выдано/i);
+  assert.deepEqual(missing.calls, []);
+  assert.deepEqual(absent.calls, []);
+  assert.deepEqual(captured.calls, []);
+  assert.deepEqual(invalid.calls, []);
+});
+
 test('authenticated goal attention UI grants then revokes its frozen grant without enabling model execution', async t => {
   const previousKey = process.env.PARTNER_MODEL_API_KEY;
   process.env.PARTNER_MODEL_API_KEY = 'offline-attention-grant-ui-test-key';
