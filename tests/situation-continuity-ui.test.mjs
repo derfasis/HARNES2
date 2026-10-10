@@ -13,7 +13,7 @@ function harness({ modelEnabled = false, assessmentStatus = 'captured', emptyOut
   const need = { id:'n1', goal_id:'g1', assessment_id:'as-old', title:'Need', hypothesis:'Old interpretation',
     status:'accepted', revision:4, basis_fingerprint:'basis-old', current:true, support_quotes:[], evidence_event_ids:[],
     counterevidence_event_ids:[], exchange_ids:[], unknowns:[] };
-  const oldAssessment = { id:'as-old', status:'captured', current:true, packet:{ exchanges:[], unknowns:[] } };
+  const oldAssessment = { id:'as-old', goal_id:'g1', status:'captured', current:true, packet:{ exchanges:[], unknowns:[] } };
   let focused = null;
   const context = { available:true, current:false, reasons:[hostile], context_fingerprint:'context-fp', need_id:'n1',
     need_revision:4, need_basis_fingerprint:'basis-old', prior_exchange_ids:['old-x'], new_exchange_ids:['new-x'],
@@ -37,7 +37,7 @@ function harness({ modelEnabled = false, assessmentStatus = 'captured', emptyOut
   const view = createAudienceView({ api, command:async (action,payload) => {
     calls.push({ action, payload });
     if (action === 'audience.reassess') {
-      focused = { id:'as-focused', status:assessmentStatus, current:true, basis_fingerprint:'context-fp',
+      focused = { id:'as-focused', goal_id:'g1', status:assessmentStatus, current:true, basis_fingerprint:'context-fp',
         packet:{ reassessment:{ version:1, need_id:'n1', need_revision:4, need_basis_fingerprint:'basis-old', context_fingerprint:'context-fp' }, exchanges:[] },
         output:emptyOutput ? { needs:[] } : null };
       goal.assessments = [{ id:'as-focused', status:assessmentStatus, reassessment:{ version:1, need_id:'n1', need_revision:4, need_basis_fingerprint:'basis-old', context_fingerprint:'context-fp' } }];

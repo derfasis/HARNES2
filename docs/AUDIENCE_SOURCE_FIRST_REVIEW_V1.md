@@ -24,13 +24,24 @@ No new parser, API, schema, model judge, worker, profile, or inference call is n
 - Show full source text without model paraphrase or excerpt substitution, account
   author, source, message/event IDs, version, and distinct source clocks. Account
   identity is not a verified human identity; missing authors/dates remain unknown.
-- Label selected support/counter/context as the model's selection, not established
-  author criteria. Unselected packet messages remain visible. Mark model narrative
+- Label selected support/counter/context with the proposal's actual producer
+  (`model`, `operator`, or unknown), not established author criteria. Unselected
+  packet messages remain visible. Mark proposal narrative
   as unverified and make no claim that current technical evidence proves continuing
   intent, semantic truth, contact consent, or authority.
 - Require the displayed assessment ID/goal to match the need's durable association.
+  The need must also match the selected need and goal. Assessment panels require
+  their own explicit selection and a present matching goal; the API's required
+  goal field is not optional legacy authority.
   Missing required source text/references or duplicate event IDs fail closed for
   this source block. Never substitute another assessment or a model quotation.
+- Neutral need-list and panel headings precede the source; the proposed title is
+  part of the separate unverified interpretation, below the source messages.
+- Without a usable source snapshot, withhold acceptance, preview import, text
+  approval and Continuity open/refresh in both rendering and direct action paths.
+  Recheck the snapshot/currentness on modal submission, pinned to the displayed
+  need revision and basis. Keep rejection, withdrawal and independent focused
+  reassessment cancellation available under their existing contracts.
 - Stale needs show a historical-source banner. Rendering does not repair, refresh,
   accept, reject, revise, grant, send, or import anything. Existing command payloads,
   exact material hashes, and source/revocation/restart boundaries stay unchanged.
@@ -55,8 +66,14 @@ it is not a substitute for a reliable model or a verified commercial offer.
 
 ## Verification
 
-- Six new black-box UI cases were **6/6 red** before implementation and **6/6
-  green** after it. They also require the source block to exclude the fabricated
+- The first six black-box UI cases were **6/6 red** before implementation. Final
+  coverage is **16/16 PASS**, including the separately red-first producer label,
+  source/action/modal gates, strict selected-goal binding and title-order cases.
+  Positive acceptance/import controls and retained rejection/withdrawal/cancel
+  prevent a blanket-blocking false green. The unselected-message case now checks
+  both a peer's cancellation and a later cancellation by the original author,
+  including the original author ID, message/version and distinct source clocks.
+  Tests also require the source block to exclude the fabricated
   model paraphrase while the separate unverified interpretation remains unchanged.
   Wrong-assessment/goal markers cannot appear anywhere in the need view.
 - Independent Luna review caught a possible fallback through the older source
@@ -68,7 +85,14 @@ it is not a substitute for a reliable model or a verified commercial offer.
   hid focused reassessment/cancellation. The fence now binds the assessment panel
   to its explicit selection, independently of the need's immutable source link.
   Existing Continuity and cancellation tests pass without changing their semantics.
-- Final full gate: `npm test -- --test-concurrency=4` — **1,636/1,636 PASS**;
+- Dev's review found blind positive controls and title placement; independent
+  review found ambiguous producer labels and optional assessment goal binding.
+  These are now closed, including direct-action and modal-submit paths. Two old
+  UI fixtures now include the production schema/API's mandatory assessment goal;
+  their review/cancel assertions remain unchanged. A final independent read-only
+  review found no remaining blocker in this UI change. Semantic model failures
+  remain unresolved and are not covered up by a green UI gate.
+- Final full gate: `npm test -- --test-concurrency=4` — **1,646/1,646 PASS**;
   `npm run test:credentials` — **25/25 PASS**; `npm run build` and
   `git diff --check` — **PASS**. No tests are filtered. A prior default-concurrency
   run had one pre-existing short-expiry activation test expire during startup;
