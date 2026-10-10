@@ -215,7 +215,10 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
       ${a.created_at ? `<small>${esc(new Date(a.created_at).toLocaleString('ru-RU'))}</small>` : ''}
       ${button('Открыть сбор', 'audience-assessment', a.id)}</article>`).join('')
       || empty('Сборов пока нет', 'Сбор сохраняет версионированное основание для ручного предложения.'));
-    if (assessment) html += assessmentPanel(assessment);
+    // A focused reassessment may be selected alongside its historical need.
+    // Its own review/cancel surface stays independent of the need's source block.
+    if (assessment?.id === selectedAssessment && (assessment.goal_id == null || assessment.goal_id === selectedGoal))
+      html += assessmentPanel(assessment);
     return html;
   }
   function hasPendingReassessment(needId) {
@@ -503,6 +506,45 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
       await load();
     });
   }
+  function sourceStatements(n) {
+    const unavailable = { exchanges: [], html:'<p class="section-note">Сохранённое основание недоступно или не совпадает с этой гипотезой.</p>' };
+    const exchanges = assessment?.packet?.exchanges;
+    if (!n.assessment_id || !n.goal_id || assessment?.id !== n.assessment_id
+      || assessment?.goal_id !== n.goal_id || !Array.isArray(exchanges)) return unavailable;
+    const groups = [n.evidence_event_ids, n.counterevidence_event_ids, n.context_event_ids ?? []];
+    if (groups.some(group => !Array.isArray(group) || group.some(ref => typeof ref !== 'string' || !ref))) return unavailable;
+    const rows = [], seen = new Set();
+    for (const exchange of exchanges) {
+      if (!Array.isArray(exchange?.evidence)) return unavailable;
+      for (const item of exchange.evidence) {
+        const ref = item?.source_event_id;
+        if (typeof ref !== 'string' || !ref || seen.has(ref)
+          || typeof item.text !== 'string' || !item.text.trim()) return unavailable;
+        seen.add(ref);
+        rows.push({ item, exchange });
+      }
+    }
+    if (!rows.length || groups.flat().some(ref => !seen.has(ref))) return unavailable;
+    const selection = ref => {
+      const labels = ['поддержка', 'контрсвидетельство', 'контекст'];
+      const chosen = groups.flatMap((group, index) => group.includes(ref) ? [labels[index]] : []);
+      return chosen.length ? `Выбрано моделью: ${chosen.join(', ')}` : 'Не выбрано моделью в основание этой гипотезы';
+    };
+    // Only the need's own frozen packet supplies these words. The model's quote
+    // selection cannot omit a supplied cancellation or a peer's full statement.
+    return { exchanges, html:`<section class="source-statements"><h3>Слова участников · сохранённый снимок</h3>
+      <p>Это весь предоставленный ограниченный снимок, не полная история источника. Выбор модели не подтверждает критерии автора. Автор — ID аккаунта, не проверенная личность человека.</p>
+      <p><strong>Текущее намерение и разрешение на контакт этим снимком не подтверждены.</strong></p>
+      ${n.current === true ? '' : '<p><strong>Исторический снимок; основание гипотезы сейчас неактуально.</strong></p>'}
+      ${rows.map(({ item, exchange }) => `<article class="workspace-evidence">
+        <p><strong>Автор:</strong> ${esc(typeof item.author_id === 'string' && item.author_id.trim() ? item.author_id : 'неизвестен')} · источник ${esc(item.source_ref ?? exchange.source_ref ?? 'неизвестен')}</p>
+        <blockquote>${esc(item.text)}</blockquote>
+        <p><small>Событие ${esc(item.source_event_id)} · сообщение ${esc(item.message_id ?? 'неизвестно')} · версия ${esc(item.message_version ?? 'неизвестно')} · обмен ${esc(exchange.id ?? 'неизвестен')}</small></p>
+        <p><small>опубликовано ${esc(sourceDate(item.published_at))} · источник изменён ${esc(sourceDate(item.source_updated_at))} · наблюдалось ${esc(sourceDate(item.observed_at))}${item.confirmed_at ? ` · Browser подтвердил ${esc(sourceDate(item.confirmed_at))}` : ''}</small></p>
+        <p class="muted tiny">${esc(selection(item.source_event_id))}</p>
+      </article>`).join('')}
+    </section>` };
+  }
   function needPanel(n) {
     const current = n.current === true;
     const accepted = n.status === 'accepted';
@@ -510,8 +552,9 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
     const counter = n.counterevidence_event_ids ?? [];
     const exchanges = n.exchange_ids ?? [];
     const quotes = n.support_quotes ?? [];
-    const evidenceById = new Map((assessment?.packet?.exchanges ?? []).flatMap(x => x.evidence ?? []).map(x => [x.source_event_id, x]));
-    const exchangeById = new Map((assessment?.packet?.exchanges ?? []).map(x => [x.id, x]));
+    const source = sourceStatements(n);
+    const evidenceById = new Map(source.exchanges.flatMap(x => x.evidence ?? []).map(x => [x.source_event_id, x]));
+    const exchangeById = new Map(source.exchanges.map(x => [x.id, x]));
     const refs = ids => ids.map(id => {
       const e = evidenceById.get(id);
       return `<article class="workspace-evidence"><p>${esc(e?.text ?? 'Текст не сохранён в доступном снимке.')}</p><small>${esc(id)}${e?.source_ref ? ` · ${esc(e.source_ref)}` : ''} · опубликовано ${esc(sourceDate(e?.published_at))} · источник изменён ${esc(sourceDate(e?.source_updated_at))} · наблюдалось ${esc(sourceDate(e?.observed_at))}</small></article>`;
@@ -580,6 +623,8 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
     })() : '';
     return panel(n.title ?? 'Потребность', `<p>${badge(n.status)} · ревизия ${esc(n.revision ?? '—')} · ${current ? 'основание актуально' : 'основание неактуально'}</p>
       <p><strong>Эпистемический статус:</strong> ${esc(n.epistemic_status ?? 'не указан')}</p>
+      ${source.html}
+      <h3>Непроверенная интерпретация модели</h3>
       <p><strong>Гипотеза:</strong> ${esc(n.hypothesis ?? '')}</p><p><strong>Почему сейчас:</strong> ${esc(n.why_now ?? 'Не указано')}</p>
       <p><strong>Возможный следующий шаг:</strong> ${esc(n.next_step ?? 'Не указан')}</p><p><strong>Основание:</strong> ${esc(n.reason ?? 'Не указано')}</p>
       <p><strong>Неизвестно:</strong> ${esc((n.unknowns ?? []).join('; ') || 'Не указано')}</p>
