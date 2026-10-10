@@ -176,7 +176,7 @@ test('the real authenticated recovery UI creates one retry child and can cancel 
 });
 
 test('retry controls are withheld when unavailable and closed receipt metadata is escaped', async () => {
-  const parent = { id:'<parent>', status:'interrupted', current:true, basis_fingerprint:'attempt-fp',
+  const parent = { id:'<parent>', goal_id:'g1', status:'interrupted', current:true, basis_fingerprint:'attempt-fp',
     packet:{ reassessment:{ version:1, need_id:'n1', context_fingerprint:'context-fp' }, exchanges:[] },
     attempt_receipt:{ run_id:'<run>', status:'failed', model_api_calls:null, input_tokens:null,
       output_tokens:null, usage_status:'unknown', cost_status:'unknown', estimated_cost_usd:null,

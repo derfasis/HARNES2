@@ -165,7 +165,7 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
     });
   }
   const selectedRows = (rows, type, selected) => rows.map(row => `<button class="person-card ${row.id === selected?'active':''}" data-do="audience-${type}" data-id="${esc(row.id)}">
-    <strong>${esc(row.title ?? row.id)}</strong><small>${badge(row.status)} · ревизия ${esc(row.revision ?? '—')}</small>
+    <strong>${esc(type === 'need' ? `Гипотеза ${row.id}` : row.title ?? row.id)}</strong><small>${badge(row.status)} · ревизия ${esc(row.revision ?? '—')}</small>
     ${row.objective ? `<small>${esc(row.objective)}</small>` : ''}</button>`).join('');
 
   function render() {
@@ -215,7 +215,10 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
       ${a.created_at ? `<small>${esc(new Date(a.created_at).toLocaleString('ru-RU'))}</small>` : ''}
       ${button('Открыть сбор', 'audience-assessment', a.id)}</article>`).join('')
       || empty('Сборов пока нет', 'Сбор сохраняет версионированное основание для ручного предложения.'));
-    if (assessment) html += assessmentPanel(assessment);
+    // A focused reassessment may be selected alongside its historical need.
+    // Its own review/cancel surface stays independent of the need's source block.
+    if (assessment?.id === selectedAssessment && assessment.goal_id === selectedGoal)
+      html += assessmentPanel(assessment);
     return html;
   }
   function hasPendingReassessment(needId) {
@@ -503,6 +506,47 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
       await load();
     });
   }
+  function sourceStatements(n) {
+    const unavailable = { available:false, exchanges: [], html:'<p class="section-note">Сохранённое основание недоступно или не совпадает с этой гипотезой. Принятие и перенос материалов отключены; отклонение и отмена остаются отдельными действиями.</p>' };
+    const exchanges = assessment?.packet?.exchanges;
+    if (n.id !== selectedNeed || n.goal_id !== selectedGoal || !n.assessment_id || !n.goal_id || assessment?.id !== n.assessment_id
+      || assessment?.goal_id !== n.goal_id || !Array.isArray(exchanges)) return unavailable;
+    const groups = [n.evidence_event_ids, n.counterevidence_event_ids, n.context_event_ids ?? []];
+    if (groups.some(group => !Array.isArray(group) || group.some(ref => typeof ref !== 'string' || !ref))) return unavailable;
+    const rows = [], seen = new Set();
+    for (const exchange of exchanges) {
+      if (!Array.isArray(exchange?.evidence)) return unavailable;
+      for (const item of exchange.evidence) {
+        const ref = item?.source_event_id;
+        if (typeof ref !== 'string' || !ref || seen.has(ref)
+          || typeof item.text !== 'string' || !item.text.trim()) return unavailable;
+        seen.add(ref);
+        rows.push({ item, exchange });
+      }
+    }
+    if (!rows.length || groups.flat().some(ref => !seen.has(ref))) return unavailable;
+    const selector = assessment.producer === 'model' ? 'моделью'
+      : assessment.producer === 'operator' ? 'оператором' : 'автором гипотезы';
+    const selection = ref => {
+      const labels = ['поддержка', 'контрсвидетельство', 'контекст'];
+      const chosen = groups.flatMap((group, index) => group.includes(ref) ? [labels[index]] : []);
+      return chosen.length ? `Выбрано ${selector}: ${chosen.join(', ')}` : `Не выбрано ${selector} в основание этой гипотезы`;
+    };
+    // Only the need's own frozen packet supplies these words. The model's quote
+    // selection cannot omit a supplied cancellation or a peer's full statement.
+    return { available:true, exchanges, html:`<section class="source-statements"><h3>Слова участников · сохранённый снимок</h3>
+      <p>Это весь предоставленный ограниченный снимок, не полная история источника. Выбор в гипотезе не подтверждает критерии автора. Автор — ID аккаунта, не проверенная личность человека.</p>
+      <p><strong>Текущее намерение и разрешение на контакт этим снимком не подтверждены.</strong></p>
+      ${n.current === true ? '' : '<p><strong>Исторический снимок; основание гипотезы сейчас неактуально.</strong></p>'}
+      ${rows.map(({ item, exchange }) => `<article class="workspace-evidence">
+        <p><strong>Автор:</strong> ${esc(typeof item.author_id === 'string' && item.author_id.trim() ? item.author_id : 'неизвестен')} · источник ${esc(item.source_ref ?? exchange.source_ref ?? 'неизвестен')}</p>
+        <blockquote class="workspace-pre">${esc(item.text)}</blockquote>
+        <p><small>Событие ${esc(item.source_event_id)} · сообщение ${esc(item.message_id ?? 'неизвестно')} · версия ${esc(item.message_version ?? 'неизвестно')} · обмен ${esc(exchange.id ?? 'неизвестен')}</small></p>
+        <p><small>опубликовано ${esc(sourceDate(item.published_at))} · источник изменён ${esc(sourceDate(item.source_updated_at))} · наблюдалось ${esc(sourceDate(item.observed_at))}${item.confirmed_at ? ` · Browser подтвердил ${esc(sourceDate(item.confirmed_at))}` : ''}</small></p>
+        <p class="muted tiny">${esc(selection(item.source_event_id))}</p>
+      </article>`).join('')}
+    </section>` };
+  }
   function needPanel(n) {
     const current = n.current === true;
     const accepted = n.status === 'accepted';
@@ -510,8 +554,11 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
     const counter = n.counterevidence_event_ids ?? [];
     const exchanges = n.exchange_ids ?? [];
     const quotes = n.support_quotes ?? [];
-    const evidenceById = new Map((assessment?.packet?.exchanges ?? []).flatMap(x => x.evidence ?? []).map(x => [x.source_event_id, x]));
-    const exchangeById = new Map((assessment?.packet?.exchanges ?? []).map(x => [x.id, x]));
+    const source = sourceStatements(n);
+    const producer = n.goal_id === selectedGoal && assessment?.id === n.assessment_id && assessment?.goal_id === n.goal_id ? assessment.producer : null;
+    const interpretationOrigin = producer === 'model' ? 'модели' : producer === 'operator' ? 'оператора' : '· автор не указан';
+    const evidenceById = new Map(source.exchanges.flatMap(x => x.evidence ?? []).map(x => [x.source_event_id, x]));
+    const exchangeById = new Map(source.exchanges.map(x => [x.id, x]));
     const refs = ids => ids.map(id => {
       const e = evidenceById.get(id);
       return `<article class="workspace-evidence"><p>${esc(e?.text ?? 'Текст не сохранён в доступном снимке.')}</p><small>${esc(id)}${e?.source_ref ? ` · ${esc(e.source_ref)}` : ''} · опубликовано ${esc(sourceDate(e?.published_at))} · источник изменён ${esc(sourceDate(e?.source_updated_at))} · наблюдалось ${esc(sourceDate(e?.observed_at))}</small></article>`;
@@ -542,7 +589,7 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
       <p><strong>Полное основание материала:</strong> ${esc((n.preview_basis_event_ids ?? []).join(', ') || 'не подтверждено сервером')}. Связанный контекст сохраняется независимо от списка цитат модели.</p>
       ${n.linked_work_case?.id ? `<p><strong>Связанное дело Work:</strong> ${esc(n.linked_work_case.id)} · ревизия ${esc(n.linked_work_case.revision ?? '—')} · ${n.linked_work_case.current === true ? 'актуально' : 'не подтверждено'}</p>` : '<p>Дело Work не связано.</p>'}
       <p class="muted tiny">Импорт добавит точный текст как предложенный материал в открытое дело Work. Он всё ещё требует проверки материала в Work и отдельного разрешения Action.</p>
-      ${current && accepted && n.linked_work_case?.current === true && n.linked_work_case?.id && n.preview_sha256 && responseImportReady ? button('Импортировать предпросмотр в дело Work', 'audience-import-preview', n.id, 'secondary') : ''}</section>`
+      ${source.available && current && accepted && n.linked_work_case?.current === true && n.linked_work_case?.id && n.preview_sha256 && responseImportReady ? button('Импортировать предпросмотр в дело Work', 'audience-import-preview', n.id, 'secondary') : ''}</section>`
       : contextVersion ? '<section class="material-preview"><h3>Предпросмотр материала</h3><p>Предпросмотр не сохранён.</p></section>' : '';
     const firstContact = n.first_contact ? (() => {
       const binding = contactBinding, state = n.first_contact_state;
@@ -551,7 +598,7 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
       const canReject = binding.valid && binding.freshnessCurrent && current
         && ['proposed','accepted'].includes(n.status) && binding.state.state === 'pending';
       const canWithdraw = binding.valid && binding.freshnessCurrent && current && accepted && binding.state.state === 'approved';
-      const canApprove = canReject && accepted && binding.proposal.channel === 'public_reply'
+      const canApprove = source.available && canReject && accepted && binding.proposal.channel === 'public_reply'
         && binding.freshnessCurrent && !!n.material_preview?.content;
       const stateNote = binding.valid
         ? `${stateLabels[binding.state.state] ?? 'Неизвестное состояние'} · соответствие ситуации: неизвестно · результат: не наблюдался`
@@ -578,8 +625,11 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
         <p class="muted tiny">Одобрение относится только к точному тексту и предложенному публичному каналу. Оно не создаёт получателя, разрешение на контакт или отправку. Никакой ответ или результат не наблюдался.</p>
         <div class="actions">${canApprove ? button('Одобрить только это предложение', 'audience-first-contact-approve', n.id, 'primary') : ''}${canWithdraw ? button('Отозвать одобрение предложения', 'audience-first-contact-reject', n.id, 'danger') : canReject ? button('Отклонить предложение', 'audience-first-contact-reject', n.id, 'danger') : ''}</div></section>`;
     })() : '';
-    return panel(n.title ?? 'Потребность', `<p>${badge(n.status)} · ревизия ${esc(n.revision ?? '—')} · ${current ? 'основание актуально' : 'основание неактуально'}</p>
+    return panel(`Гипотеза ${n.id}`, `<p>${badge(n.status)} · ревизия ${esc(n.revision ?? '—')} · ${current ? 'основание актуально' : 'основание неактуально'}</p>
       <p><strong>Эпистемический статус:</strong> ${esc(n.epistemic_status ?? 'не указан')}</p>
+      ${source.html}
+      <h3>Непроверенная интерпретация ${interpretationOrigin}</h3>
+      <p><strong>Название предложения:</strong> ${esc(n.title ?? 'Не указано')}</p>
       <p><strong>Гипотеза:</strong> ${esc(n.hypothesis ?? '')}</p><p><strong>Почему сейчас:</strong> ${esc(n.why_now ?? 'Не указано')}</p>
       <p><strong>Возможный следующий шаг:</strong> ${esc(n.next_step ?? 'Не указан')}</p><p><strong>Основание:</strong> ${esc(n.reason ?? 'Не указано')}</p>
       <p><strong>Неизвестно:</strong> ${esc((n.unknowns ?? []).join('; ') || 'Не указано')}</p>
@@ -592,9 +642,9 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
       ${firstContact}
       <p><strong>Актуальность основания:</strong> ${current ? 'ссылки и основание актуальны по сохранённой проверке; существование нерешённой проблемы этим не подтверждается' : esc((n.reasons ?? []).join('; ') || 'не подтверждена')}</p>
       <p class="muted tiny">Это гипотеза для рассмотрения. Принятие её не предоставляет разрешение на контакт или отправку. Для Continuity должна быть включена отдельная конфигурация.</p>
-      <div class="actions">${current && n.status === 'proposed' ? button('Принять гипотезу', 'audience-accept', n.id, 'primary') : ''}
+      <div class="actions">${source.available && current && n.status === 'proposed' ? button('Принять гипотезу', 'audience-accept', n.id, 'primary') : ''}
       ${['proposed','stale'].includes(n.status) ? button('Отклонить', 'audience-reject', n.id, 'danger') : ''}
-      ${current && accepted ? button(n.thread_id ? 'Обновить предложение Continuity' : 'Открыть работу в Continuity', n.thread_id ? 'audience-refresh-work' : 'audience-open-work', n.id, 'secondary') : ''}</div>`);
+      ${source.available && current && accepted ? button(n.thread_id ? 'Обновить предложение Continuity' : 'Открыть работу в Continuity', n.thread_id ? 'audience-refresh-work' : 'audience-open-work', n.id, 'secondary') : ''}</div>`);
   }
   function validDecisionReview(review, exchanges) {
     if (!review || typeof review !== 'object' || Array.isArray(review) || review.version !== 1
@@ -990,7 +1040,8 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
     if (action === 'audience-cancel-reassessment') {
       const a = assessment;
       const target = a?.packet?.reassessment;
-      if (!a || a.id !== id || target?.version !== 1 || !['captured','running'].includes(a.status)) {
+      if (!a || a.id !== id || a.id !== selectedAssessment || a.goal_id !== selectedGoal
+        || target?.version !== 1 || !['captured','running'].includes(a.status)) {
         throw new Error('Отменить можно только ожидающий или выполняющийся пересмотр для открытой оценки.');
       }
       await command('audience.cancel_reassessment', { assessment_id: a.id,
@@ -1042,10 +1093,17 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
     if (!need || need.id !== id) throw new Error('Сначала откройте гипотезу.');
     if (action === 'audience-accept' || action === 'audience-reject') {
       const decision = action.endsWith('accept') ? 'accept' : 'reject';
+      const frozen = need;
+      if (decision === 'accept' && (!sourceStatements(frozen).available || frozen.current !== true || frozen.status !== 'proposed'))
+        throw new Error('Принять гипотезу можно только после просмотра её доступного актуального основания. Обновите данные.');
       modal(`${decision === 'accept' ? 'Принять' : 'Отклонить'} гипотезу`, field('note', 'Основание решения', 'textarea'), async p => {
-        if (!p.note.trim()) throw new Error('Укажите основание решения.');
-        await command('audience.review', { need_id: need.id, expected_revision: need.revision,
-          expected_basis_fingerprint: need.basis_fingerprint, decision, note: p.note.trim() });
+        if (selectedNeed !== frozen.id || need?.id !== frozen.id || need.revision !== frozen.revision
+          || need.basis_fingerprint !== frozen.basis_fingerprint
+          || decision === 'accept' && (!sourceStatements(need).available || need.current !== true || need.status !== 'proposed'))
+          throw new Error('Гипотеза или её основание изменились. Обновите данные и проверьте снова.');
+        if (!p.note?.trim()) throw new Error('Укажите основание решения.');
+        await command('audience.review', { need_id: frozen.id, expected_revision: frozen.revision,
+          expected_basis_fingerprint: frozen.basis_fingerprint, decision, note: p.note.trim() });
       }); return;
     }
     if (action === 'audience-first-contact-approve' || action === 'audience-first-contact-reject') {
@@ -1056,7 +1114,7 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
       const allowed = binding.valid && binding.freshnessCurrent && frozen.id === id && selectedNeed === id && frozen.current === true
         && ['proposed','accepted'].includes(frozen.status)
         && (binding.state.state === 'pending' || isWithdrawal && frozen.status === 'accepted')
-        && (decision === 'reject' || frozen.status === 'accepted' && binding.state.state === 'pending'
+        && (decision === 'reject' || sourceStatements(frozen).available && frozen.status === 'accepted' && binding.state.state === 'pending'
           && binding.proposal.channel === 'public_reply' && binding.freshnessCurrent
           && typeof frozen.material_preview?.content === 'string' && !!frozen.material_preview.content.trim());
       if (!allowed) throw new Error('Предложение нельзя рассмотреть: обновите гипотезу и проверьте её точный текст и основание.');
@@ -1070,7 +1128,7 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
             && (currentBinding.state.state === 'pending' || currentWithdrawal && latest.status === 'accepted')
             && currentBinding.state.proposal_sha256 === binding.state.proposal_sha256
             && latest.current === true && ['proposed','accepted'].includes(latest.status)
-            && (decision === 'reject' || latest.status === 'accepted' && currentBinding.state.state === 'pending'
+            && (decision === 'reject' || sourceStatements(latest).available && latest.status === 'accepted' && currentBinding.state.state === 'pending'
               && currentBinding.proposal.channel === 'public_reply' && currentBinding.freshnessCurrent
               && typeof latest.material_preview?.content === 'string' && !!latest.material_preview.content.trim());
           if (!stillAllowed) throw new Error('Гипотеза или предложение изменились. Обновите страницу и проверьте снова.');
@@ -1082,6 +1140,8 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
     }
     if (action === 'audience-open-work' || action === 'audience-refresh-work') {
       const n = need;
+      if (!sourceStatements(n).available || n.current !== true || n.status !== 'accepted')
+        throw new Error('Открыть или обновить работу можно только после просмотра основания принятой актуальной гипотезы. Обновите данные.');
       const r = await command(action === 'audience-refresh-work' ? 'audience.refresh_work' : 'audience.open_work',
         { need_id: n.id, expected_revision: n.revision, expected_basis_fingerprint: n.basis_fingerprint });
       if (r.thread_id) notify(`Предложение Continuity для ветки ${r.thread_id} сохранено. Проверьте его в разделе «Исследования»; дело Workspace само не открыто.`);
@@ -1090,7 +1150,7 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
     if (action === 'audience-import-preview') {
       const n = need;
       const linked = n.linked_work_case;
-      if (n.id !== id || n.status !== 'accepted' || n.current !== true || !linked?.id || linked.current !== true || !n.preview_sha256) {
+      if (!sourceStatements(n).available || n.id !== id || n.status !== 'accepted' || n.current !== true || !linked?.id || linked.current !== true || !n.preview_sha256) {
         throw new Error('Предпросмотр можно импортировать только для принятой актуальной гипотезы и актуального связанного дела Work. Обновите данные и проверьте снова.');
       }
       if (n.first_contact) {
