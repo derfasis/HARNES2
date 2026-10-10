@@ -47,6 +47,8 @@ No new parser, API, schema, model judge, worker, profile, or inference call is n
   exact material hashes, and source/revocation/restart boundaries stay unchanged.
 - Escape all original text and metadata. Do not load additional source history,
   call a model, infer a person, or convert source text into an instruction.
+  Source quotations use the existing `workspace-pre` stylesheet class to preserve
+  line breaks and spaces in the actual operator interface, not just the UI replay.
 
 Black-box UI tests are written and run red before this change. They exercise the
 public view's load/action/render path, including source-vs-fabricated-paraphrase,

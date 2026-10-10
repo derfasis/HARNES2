@@ -540,7 +540,7 @@ export function createAudienceView({ api, command, esc, panel, button, empty, fi
       ${n.current === true ? '' : '<p><strong>Исторический снимок; основание гипотезы сейчас неактуально.</strong></p>'}
       ${rows.map(({ item, exchange }) => `<article class="workspace-evidence">
         <p><strong>Автор:</strong> ${esc(typeof item.author_id === 'string' && item.author_id.trim() ? item.author_id : 'неизвестен')} · источник ${esc(item.source_ref ?? exchange.source_ref ?? 'неизвестен')}</p>
-        <blockquote>${esc(item.text)}</blockquote>
+        <blockquote class="workspace-pre">${esc(item.text)}</blockquote>
         <p><small>Событие ${esc(item.source_event_id)} · сообщение ${esc(item.message_id ?? 'неизвестно')} · версия ${esc(item.message_version ?? 'неизвестно')} · обмен ${esc(exchange.id ?? 'неизвестен')}</small></p>
         <p><small>опубликовано ${esc(sourceDate(item.published_at))} · источник изменён ${esc(sourceDate(item.source_updated_at))} · наблюдалось ${esc(sourceDate(item.observed_at))}${item.confirmed_at ? ` · Browser подтвердил ${esc(sourceDate(item.confirmed_at))}` : ''}</small></p>
         <p class="muted tiny">${esc(selection(item.source_event_id))}</p>
