@@ -132,13 +132,30 @@ the 25 Python tests. `git diff --check` passes. Hosted verification for a previo
 head must not be substituted for CI on the next commit.
 
 This is sufficient to move to a **read-only, operator-reviewed real-data pilot**,
-not unattended outreach. The next practical test is a fixed chronological sample
-of 20 complete available discussions from already approved sources, including
-ordinary negatives. Freeze the selection before inference, retain author/date/
-reply/quote evidence, inspect both proposed and rejected cases, and record missing
-history. Do not silently select only impressive hits or call no-result a solved need.
+not unattended outreach. The next practical test uses the first at most three
+successive current native Audience packets from two already joined sources,
+including ordinary negatives. The existing packet selects at most eight bounded
+reply scopes with round-robin fairness; it cannot accept a globally frozen list
+of twenty discussions. Predeclare that selection and the finite call cap, retain
+each durable pre-dispatch packet with author/date/reply/quote evidence, inspect
+both proposed and rejected cases, and record actual counts and missing history.
+Do not silently select impressive hits or call no-result a solved need. A new
+finite activation and separate source/audit/model grants are required; expired
+historical test records remain expired.
 
 Leave commercial intent, last stated status, offer fit and contact authority
 separate. No automatic sends, new contact permission or default-on runtime follow
 from this report. The precision/recall of real retrieval, ongoing monitoring,
 owner usefulness and economic scalability remain untested.
+
+### Exact hosted run follow-up
+
+Run `38170401645` on `5c92c36e2314316eafcfff8b25fbb56196478d42`
+finished **1659/1660 Node PASS**: the existing source-loop activation-expiry test
+expired its 1800 ms allowance during busy Windows startup, before the first
+browser read. This was not a verified full hosted gate. The test now uses Node's
+built-in clock controls, starts expiry only after first-reader admission, and
+keeps real monotonic bounded assertion polling. The drain, no-second-reader,
+no-late-current-evidence and durable receipt assertions are unchanged. Production
+activation/permission code and the workflow are unchanged. Focused deployment
+lifecycle verification is **14/14 PASS**; the next head needs its own hosted gate.
