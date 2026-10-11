@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "baseline_sha": "d74329d7c027c2cf1a924788ff57fcd3370ac6a9",
+  "max_logical_attempts": 8,
+  "files": {
+    "benchmarks/commercial-task-fidelity-v1/cases.json": "9eaa9bf5b2a3e0feadbee9bd8060762ccfd67c3ecb11905765d583bad2d34966",
+    "benchmarks/commercial-task-fidelity-v1/gold.json": "57ea038df47ed9a5ce92430c0db9ca9860b6cb725807581b52bda4750f3b67f7",
+    "experiments/commercial-task-fidelity-v1/prompts/A.md": "4edf1a5ddf4058bf3f9c713990edb0b913efa214f90cba0d628487e5a77e99fe",
+    "experiments/commercial-task-fidelity-v1/prompts/B.md": "e6aa06842f7a2b69883f47b325d0ac2149a56ce60f59e878e9587f636ca8a90b",
+    "partner/audience-reasoning.md": "4edf1a5ddf4058bf3f9c713990edb0b913efa214f90cba0d628487e5a77e99fe",
+    "contracts/audience-assessment.schema.json": "18a9e73f39b3aaefe9529983f5e50586123c6e7ee0c0a4eaf302ca1cb12dae0c",
+    "business/audience-reasoning.mjs": "f3d78ac1a77f26bae55689efcca9113f813b610f743a647c71aec279c696e2a8",
+    "business/runtime.mjs": "1dbb6f7634155ddd527b1c835acf92c7ef44daca43ee99d276c813006a3d3acd",
+    "scripts/situation_router_worker.py": "885d6063d9038de5560a9b1e6abbdf7b115088e82cedb770a3f317babeec235b"
+  }
+}

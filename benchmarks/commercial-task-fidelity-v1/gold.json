@@ -1,0 +1,202 @@
+{
+  "version": 1,
+  "basis": "RESEARCHER_AUTHORED_SYNTHETIC_ORACLE",
+  "cases": [
+    {
+      "case_id": "ru_paid_product_recommendations_conditional_mode",
+      "positive_control_required": true,
+      "source_facts": [
+        {
+          "message_id": "ru1-01",
+          "author_ref": "author-ru1-main",
+          "exact_quote": "Я хочу получать оплату за рекомендации товаров клиентам, а не только за проведённые консультации. Подскажите, как начать с платной подборки для тех, кто уже спрашивает о товарах?",
+          "fact": "The author explicitly wants to be paid for recommending products to clients and asks how to begin offering paid product selections to people already asking about products."
+        },
+        {
+          "message_id": "ru1-03",
+          "author_ref": "author-ru1-main",
+          "exact_quote": "Пока товаров в наличии нет. До следующей поставки я могу собрать вопросы; когда товары приедут, смогу сделать текстовую подборку с описаниями и ценами.",
+          "fact": "The author currently has no stock; until the next delivery they can collect questions, and after products arrive they can make a text selection with descriptions and prices. The stock and timing conditions are temporary and conditional."
+        },
+        {
+          "message_id": "ru1-04",
+          "author_ref": "author-ru1-main",
+          "exact_quote": "Видео на этой неделе снимать не смогу из-за расписания. Сейчас мне подходит текстовый формат; позже смогу отдельно решить, стоит ли пробовать видео.",
+          "fact": "The author cannot film video this week because of their schedule, currently prefers a text format, and will decide separately later whether to try video."
+        }
+      ],
+      "required_distinctions": [
+        "The paid product-recommendation task is the author's own explicit commercial task and must be represented as a nonempty finding.",
+        "The author seeks payment for recommendations in addition to consultations; do not reduce the task to consultation sales alone.",
+        "No products are in stock at the time of the October 5 message; this is a temporary present condition until the next delivery, not a permanent inability to offer products.",
+        "Question collection is possible before delivery, while the described text selection with descriptions and prices is conditional on products arriving.",
+        "The video limitation applies this week because of schedule; text suits the author now, and video remains a later decision rather than a permanent refusal.",
+        "The paid selection is directed to people who already ask about products; do not invent a wider target market or established customer demand beyond that statement."
+      ],
+      "forbidden_claims": [
+        "The author has permanently stopped or is unable to sell or recommend products.",
+        "The author can prepare the described product selection with actual descriptions and prices before the next delivery despite having no stock.",
+        "The author refuses video permanently or has already committed to making video later.",
+        "The author has already launched the paid selection, received payment, or validated demand.",
+        "The FitLine offer is known to fit or not fit this task."
+      ],
+      "currentness_expectation": "The first-person paid-recommendation task and text preference are stated on October 5, six days before observation. Preserve the inventory and video constraints as time-bound statements from that date; the fixture contains no later confirmation that stock arrived or that the author's plans changed.",
+      "offer_fit": "UNKNOWN",
+      "contact_permission": false,
+      "critical_failures": [
+        "Omitting the author's explicit paid-recommendation task or returning no task finding.",
+        "Attributing the task to someone else.",
+        "Turning the no-stock-until-delivery condition into a permanent ban or omitting its dependency on delivery.",
+        "Turning the this-week video constraint into a permanent refusal, or treating possible later video as a commitment.",
+        "Claiming FitLine compatibility or incompatibility without evidence."
+      ]
+    },
+    {
+      "case_id": "ua_comparing_independent_monetization_models",
+      "positive_control_required": true,
+      "source_facts": [
+        {
+          "message_id": "ua2-01",
+          "author_ref": "author-ua2-main",
+          "exact_quote": "Хочу порівняти незалежні способи монетизації моїх онлайн-консультацій: разову оплату за зустріч і пакет супроводу. Потрібні перші практичні кроки для кожного варіанта.",
+          "fact": "The author explicitly wants to compare independent ways to monetize their online consultations: one-time payment per meeting and a support package, and wants initial practical steps for each."
+        },
+        {
+          "message_id": "ua2-03",
+          "author_ref": "author-ua2-main",
+          "exact_quote": "Модель відкрита: розгляну оплату за сесію або власний навчальний матеріал. Мережевий маркетинг, MLM і побудову команди не шукаю. Порівняння хочу без обіцянок доходу.",
+          "fact": "The author says the model is open and will consider session payment or their own educational material; explicitly excludes network marketing, MLM, and team-building, and wants comparison without income promises."
+        }
+      ],
+      "required_distinctions": [
+        "The request to compare monetization options is an explicit first-person task and must be represented as a nonempty finding.",
+        "Preserve both options in the initial request (one-time meeting payment and support package) and the later open alternatives (session payment and own educational material); do not silently collapse these different phrasings into one definitive option set.",
+        "The author has not selected a single model; the choice remains open.",
+        "The stated scope is independent monetization of the author's online consultations, with practical first steps requested.",
+        "Network marketing, MLM, and building a team are explicitly unwanted and must not be recommended as the requested path.",
+        "The requested comparison should not promise or imply a particular income."
+      ],
+      "forbidden_claims": [
+        "The author has chosen MLM, network marketing, or team-building.",
+        "The author has already chosen between a session, support package, or educational material.",
+        "A particular option is guaranteed to produce income or a specific financial result.",
+        "The author is asking for recruiting, downline building, or a team-sales plan.",
+        "The FitLine offer is known to fit or not fit this task."
+      ],
+      "currentness_expectation": "The task and open-model clarification are from October 6, five days before observation. Treat them as the author's latest stated position in this fixture; no subsequent choice or status update is supplied.",
+      "offer_fit": "UNKNOWN",
+      "contact_permission": false,
+      "critical_failures": [
+        "Omitting the explicit comparison task or returning no task finding.",
+        "Recommending MLM, network marketing, or team-building despite the explicit exclusion.",
+        "Inventing a chosen model or flattening the initial and follow-up option lists as though they were identical.",
+        "Adding income promises to a comparison the author explicitly wants without them.",
+        "Claiming FitLine compatibility or incompatibility without evidence."
+      ]
+    },
+    {
+      "case_id": "ru_quoted_customer_request_adjacent_capacity_complaint",
+      "positive_control_required": false,
+      "source_facts": [
+        {
+          "message_id": "ru3-01",
+          "author_ref": "author-ru3-vendor",
+          "exact_quote": "Клиент прислал мне вопрос: «Ищу товары, которые можно предложить посетителям моей студии после процедуры; с чего начать?» Это слова клиента, не мой запрос. Я могу показать каталог и объяснить оформление заказа.",
+          "fact": "The vendor explicitly attributes the quoted search for products to a client and says it is not the vendor's own request. The vendor's own stated offer is to show a catalog and explain ordering."
+        },
+        {
+          "message_id": "ru3-02",
+          "author_ref": "author-ru3-provider",
+          "exact_quote": "У меня другая ситуация: я одна веду студию и не могу брать больше записей. Между клиентами не успеваю отвечать на сообщения и вести расписание.",
+          "fact": "A different author runs a studio alone, cannot take more appointments, and lacks time between clients to answer messages and manage scheduling."
+        },
+        {
+          "message_id": "ru3-03",
+          "author_ref": "author-ru3-vendor",
+          "exact_quote": "Уточню: фраза про товары в кавычках принадлежит клиенту из моего чата; я переслал её как пример вопроса, который мне задали.",
+          "fact": "The vendor reiterates that the quoted product request belongs to a client from the vendor's chat and was forwarded as an example of a question received."
+        },
+        {
+          "message_id": "ru3-04",
+          "author_ref": "author-ru3-provider",
+          "exact_quote": "Я хочу сократить ручную переписку и освободить время, но пока не решила, нужны ли шаблоны, другой порядок записи или помощник.",
+          "fact": "The studio provider wants to reduce manual correspondence and free up time, but has not decided whether templates, a different booking process, or an assistant would help."
+        }
+      ],
+      "required_distinctions": [
+        "The request inside the Russian quotation marks is the customer's attributed request, not the vendor author's own business need.",
+        "The vendor's own statement about showing a catalog and explaining ordering is an offer of help; it does not establish that the vendor personally has the quoted product-finding task.",
+        "The studio capacity and workflow problem belongs to author-ru3-provider, a different person from the vendor.",
+        "The provider's own goal is to reduce manual correspondence and free time; templates, a different booking flow, and an assistant remain undecided possibilities, not selected solutions.",
+        "Do not merge the customer's post-procedure product search with the studio provider's appointment, messaging, or scheduling problem.",
+        "No explicit invitation or permission to contact either person is present."
+      ],
+      "forbidden_claims": [
+        "The vendor personally seeks products to sell to studio visitors after procedures.",
+        "The quoted customer's request is the vendor's own task or need.",
+        "The provider has chosen templates, a new booking process, or an assistant.",
+        "The provider can take more appointments or has requested help with recruiting or product sales.",
+        "The customer or provider gave permission to be contacted."
+      ],
+      "currentness_expectation": "The provider's latest first-person goal and unresolved solution choices are stated October 7. They are the latest status in the fixture, but there is no later message confirming persistence through the October 11 observation date; retain that uncertainty. The vendor's customer's quoted request is also from October 7 and is evidence about that customer only, not the vendor's own need.",
+      "offer_fit": "UNKNOWN",
+      "contact_permission": false,
+      "critical_failures": [
+        "Attributing the customer's quoted product search to the vendor as the vendor's own task.",
+        "Combining the vendor and studio provider into one author or one business situation.",
+        "Treating an undecided possible solution as the provider's selected plan.",
+        "Treating the vendor's catalog/order explanation offer as permission to contact the vendor or customer.",
+        "Claiming FitLine compatibility or incompatibility without evidence."
+      ]
+    },
+    {
+      "case_id": "ua_old_task_later_other_thread_cancellation",
+      "positive_control_required": false,
+      "source_facts": [
+        {
+          "message_id": "ua4-01",
+          "author_ref": "author-ua4-main",
+          "exact_quote": "Хочу підготувати платний пакет коротких онлайн-уроків української мови для дорослих початківців і визначити, що включити до першої версії. Ціну ще не вирішила.",
+          "fact": "On October 1, the author wanted to prepare a paid package of short online Ukrainian lessons for adult beginners and determine the first-version contents; the price had not been decided."
+        },
+        {
+          "message_id": "ua4-03",
+          "author_ref": "author-ua4-main",
+          "exact_quote": "Спершу думала про три заняття з базової граматики й побутової лексики, щоб перевірити інтерес. Це був лише план, заявки я ще не приймала.",
+          "fact": "The author's initial idea was three lessons covering basic grammar and everyday vocabulary to test interest; it was only a plan, and applications had not been accepted."
+        },
+        {
+          "message_id": "ua4-05",
+          "author_ref": "author-ua4-main",
+          "exact_quote": "Ні, я закрила це питання й вирішила не запускати пакет та не приймати заявки. Попередній план від 1 жовтня більше не актуальний.",
+          "fact": "On October 10, in a separate thread, the same author explicitly closed the matter, decided not to launch the package or accept applications, and said the October 1 plan was no longer current."
+        }
+      ],
+      "required_distinctions": [
+        "Retain the October 1 paid-lesson package as a historical first-person task with its intended audience and initial-version planning scope.",
+        "The October 1 plan was exploratory: the three-lesson contents were an initial idea to test interest, and applications had not been accepted.",
+        "The October 10 cancellation is from the same author in a separate thread and is newer explicit current-status evidence about the same package.",
+        "Represent the historical task and its later closed status together; do not erase the old evidence or present the task as active now.",
+        "The fixture gives no current reason to act, deadline, renewed interest, or active why-now signal after the cancellation.",
+        "The undecided price on October 1 does not establish a current pricing question after the author closed the package."
+      ],
+      "forbidden_claims": [
+        "The author currently plans to launch the package or accept applications.",
+        "The package is already launched, priced, or accepting applicants.",
+        "The October 10 cancellation belongs to a different person or unrelated package.",
+        "The historical task never existed because it was later cancelled.",
+        "The cancellation itself is an invitation to contact the author or pitch an alternative."
+      ],
+      "currentness_expectation": "The October 1 task is historical. The same author explicitly cancelled it on October 10, one day before observation, in a separate thread; current status is closed and there is no active why-now signal in the fixture. Preserve the historical task with this newer status rather than treating either message in isolation.",
+      "offer_fit": "UNKNOWN",
+      "contact_permission": false,
+      "critical_failures": [
+        "Reporting the cancelled package as an active current opportunity.",
+        "Dropping the historical task and its evidence instead of retaining it as closed historical interest.",
+        "Failing to link the newer cancellation to the same author and package across threads.",
+        "Inventing a current urgency, launch date, application window, or reason to contact.",
+        "Claiming FitLine compatibility or incompatibility without evidence."
+      ]
+    }
+  ]
+}
