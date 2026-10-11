@@ -1,0 +1,161 @@
+{
+  "version": 1,
+  "basis": "SYNTHETIC_AUTHORED_TEST_CORPUS",
+  "cases": [
+    {
+      "id": "ru_paid_product_recommendations_conditional_mode",
+      "language": "ru",
+      "objective": "Identify the author's own task of being paid for product recommendations while preserving the present inventory condition and temporary format limit as conditional, time-bound context.",
+      "source_ref": "public:synthetic-commercial-task-fidelity-ru-01",
+      "observed_at": "2026-10-11T12:00:00.000Z",
+      "messages": [
+        {
+          "id": "ru1-01",
+          "author_ref": "author-ru1-main",
+          "published_at": "2026-10-05T09:00:00.000Z",
+          "text": "Я хочу получать оплату за рекомендации товаров клиентам, а не только за проведённые консультации. Подскажите, как начать с платной подборки для тех, кто уже спрашивает о товарах?",
+          "reply_to": null
+        },
+        {
+          "id": "ru1-02",
+          "author_ref": "author-ru1-peer",
+          "published_at": "2026-10-05T09:03:00.000Z",
+          "text": "У тебя сейчас есть товары в наличии или пока только вопросы от клиентов?",
+          "reply_to": "ru1-01"
+        },
+        {
+          "id": "ru1-03",
+          "author_ref": "author-ru1-main",
+          "published_at": "2026-10-05T09:08:00.000Z",
+          "text": "Пока товаров в наличии нет. До следующей поставки я могу собрать вопросы; когда товары приедут, смогу сделать текстовую подборку с описаниями и ценами.",
+          "reply_to": "ru1-02"
+        },
+        {
+          "id": "ru1-04",
+          "author_ref": "author-ru1-main",
+          "published_at": "2026-10-05T09:12:00.000Z",
+          "text": "Видео на этой неделе снимать не смогу из-за расписания. Сейчас мне подходит текстовый формат; позже смогу отдельно решить, стоит ли пробовать видео.",
+          "reply_to": "ru1-03"
+        }
+      ]
+    },
+    {
+      "id": "ua_comparing_independent_monetization_models",
+      "language": "uk",
+      "objective": "Identify an explicit task to compare independent monetization options, preserve openness about the model, and preserve the author's stated lack of interest in MLM or team-building.",
+      "source_ref": "public:synthetic-commercial-task-fidelity-ua-02",
+      "observed_at": "2026-10-11T12:00:00.000Z",
+      "messages": [
+        {
+          "id": "ua2-01",
+          "author_ref": "author-ua2-main",
+          "published_at": "2026-10-06T14:00:00.000Z",
+          "text": "Хочу порівняти незалежні способи монетизації моїх онлайн-консультацій: разову оплату за зустріч і пакет супроводу. Потрібні перші практичні кроки для кожного варіанта.",
+          "reply_to": null
+        },
+        {
+          "id": "ua2-02",
+          "author_ref": "author-ua2-peer",
+          "published_at": "2026-10-06T14:04:00.000Z",
+          "text": "Ти вже обрала конкретну модель, чи ще розглядаєш варіанти?",
+          "reply_to": "ua2-01"
+        },
+        {
+          "id": "ua2-03",
+          "author_ref": "author-ua2-main",
+          "published_at": "2026-10-06T14:09:00.000Z",
+          "text": "Модель відкрита: розгляну оплату за сесію або власний навчальний матеріал. Мережевий маркетинг, MLM і побудову команди не шукаю. Порівняння хочу без обіцянок доходу.",
+          "reply_to": "ua2-02"
+        },
+        {
+          "id": "ua2-04",
+          "author_ref": "author-ua2-peer",
+          "published_at": "2026-10-06T14:13:00.000Z",
+          "text": "Тоді можна зіставити витрати часу, потрібні матеріали й перший крок для кожного з двох форматів.",
+          "reply_to": "ua2-03"
+        }
+      ]
+    },
+    {
+      "id": "ru_quoted_customer_request_adjacent_capacity_complaint",
+      "language": "ru",
+      "objective": "Separate a vendor's explicitly attributed customer quotation from that vendor's own voice, and keep it distinct from another author's service-capacity complaint.",
+      "source_ref": "public:synthetic-commercial-task-fidelity-ru-03",
+      "observed_at": "2026-10-11T12:00:00.000Z",
+      "messages": [
+        {
+          "id": "ru3-01",
+          "author_ref": "author-ru3-vendor",
+          "published_at": "2026-10-07T16:00:00.000Z",
+          "text": "Клиент прислал мне вопрос: «Ищу товары, которые можно предложить посетителям моей студии после процедуры; с чего начать?» Это слова клиента, не мой запрос. Я могу показать каталог и объяснить оформление заказа.",
+          "reply_to": null
+        },
+        {
+          "id": "ru3-02",
+          "author_ref": "author-ru3-provider",
+          "published_at": "2026-10-07T16:02:00.000Z",
+          "text": "У меня другая ситуация: я одна веду студию и не могу брать больше записей. Между клиентами не успеваю отвечать на сообщения и вести расписание.",
+          "reply_to": null
+        },
+        {
+          "id": "ru3-03",
+          "author_ref": "author-ru3-vendor",
+          "published_at": "2026-10-07T16:05:00.000Z",
+          "text": "Уточню: фраза про товары в кавычках принадлежит клиенту из моего чата; я переслал её как пример вопроса, который мне задали.",
+          "reply_to": "ru3-01"
+        },
+        {
+          "id": "ru3-04",
+          "author_ref": "author-ru3-provider",
+          "published_at": "2026-10-07T16:11:00.000Z",
+          "text": "Я хочу сократить ручную переписку и освободить время, но пока не решила, нужны ли шаблоны, другой порядок записи или помощник.",
+          "reply_to": "ru3-02"
+        }
+      ]
+    },
+    {
+      "id": "ua_old_task_later_other_thread_cancellation",
+      "language": "uk",
+      "objective": "Retain an older first-person task and its dated thread context while recognizing the same author's later explicit cancellation in a separate thread as current status context.",
+      "source_ref": "public:synthetic-commercial-task-fidelity-ua-04",
+      "observed_at": "2026-10-11T12:00:00.000Z",
+      "messages": [
+        {
+          "id": "ua4-01",
+          "author_ref": "author-ua4-main",
+          "published_at": "2026-10-01T08:30:00.000Z",
+          "text": "Хочу підготувати платний пакет коротких онлайн-уроків української мови для дорослих початківців і визначити, що включити до першої версії. Ціну ще не вирішила.",
+          "reply_to": null
+        },
+        {
+          "id": "ua4-02",
+          "author_ref": "author-ua4-peer",
+          "published_at": "2026-10-01T08:34:00.000Z",
+          "text": "Які теми ти хотіла б включити до пробного пакета?",
+          "reply_to": "ua4-01"
+        },
+        {
+          "id": "ua4-03",
+          "author_ref": "author-ua4-main",
+          "published_at": "2026-10-01T08:39:00.000Z",
+          "text": "Спершу думала про три заняття з базової граматики й побутової лексики, щоб перевірити інтерес. Це був лише план, заявки я ще не приймала.",
+          "reply_to": "ua4-02"
+        },
+        {
+          "id": "ua4-04",
+          "author_ref": "author-ua4-peer",
+          "published_at": "2026-10-10T10:00:00.000Z",
+          "text": "Повертаюся до окремого питання про пробний пакет: ти вирішила його запускати?",
+          "reply_to": null
+        },
+        {
+          "id": "ua4-05",
+          "author_ref": "author-ua4-main",
+          "published_at": "2026-10-10T10:06:00.000Z",
+          "text": "Ні, я закрила це питання й вирішила не запускати пакет та не приймати заявки. Попередній план від 1 жовтня більше не актуальний.",
+          "reply_to": "ua4-04"
+        }
+      ]
+    }
+  ]
+}

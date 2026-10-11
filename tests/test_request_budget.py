@@ -288,31 +288,13 @@ class WorkerRequestBudgetIntegrationTests(unittest.TestCase):
                 usage = {"prompt_tokens": 17, "completion_tokens": completion_tokens,
                          "total_tokens": 17 + completion_tokens}
                 response_id = f"chatcmpl-{len(generation_paths)}"
-                chunks = [
-                    {"id": response_id, "object": "chat.completion.chunk", "created": 1,
-                     "model": "offline-stub-model", "choices": [{"index": 0,
-                     "delta": {"role": "assistant"}, "finish_reason": None}]},
-                ]
-                if answer:
-                    chunks.append({"id": response_id, "object": "chat.completion.chunk", "created": 1,
-                                   "model": "offline-stub-model", "choices": [{"index": 0,
-                                   "delta": {"content": answer}, "finish_reason": None}]})
-                chunks.extend([
-                    {"id": response_id, "object": "chat.completion.chunk", "created": 1,
-                     "model": "offline-stub-model", "choices": [{"index": 0,
-                     "delta": {}, "finish_reason": "stop"}]},
-                    {"id": response_id, "object": "chat.completion.chunk", "created": 1,
-                     "model": "offline-stub-model", "choices": [], "usage": usage},
-                ])
-                stream_body = "".join(
-                    "data: " + json.dumps(chunk) + "\n\n" for chunk in chunks
-                ) + "data: [DONE]\n\n"
-                encoded = stream_body.encode()
-                self.send_response(200)
-                self.send_header("Content-Type", "text/event-stream")
-                self.send_header("Content-Length", str(len(encoded)))
-                self.end_headers()
-                self.wfile.write(encoded)
+                if parsed.get("stream", False) is not False:
+                    self.send_error(400, "Bounded decision endpoint requires non-streaming")
+                    return
+                self._json({"id": response_id, "object": "chat.completion", "created": 1,
+                            "model": "offline-stub-model",
+                            "choices": [{"index": 0, "message": {"role": "assistant", "content": answer},
+                                         "finish_reason": "stop"}], "usage": usage})
 
             def log_message(self, *_args):
                 return
@@ -373,7 +355,7 @@ class WorkerRequestBudgetIntegrationTests(unittest.TestCase):
         self.assertEqual(result.get("usage", {}).get("output_tokens"), 0)
         self.assertNotIn("offline-test-key", completed.stdout + completed.stderr)
 
-    def test_valid_hermes_stream_is_not_mistaken_for_budget_exhaustion(self):
+    def test_valid_hermes_nonstream_response_is_not_mistaken_for_budget_exhaustion(self):
         answer = "По предоставленным данным подтверждённого предложения нет."
         completed, result, generation_paths, _metadata_requests = self._run_worker(answer)
         self.assertEqual(len(generation_paths), 1)

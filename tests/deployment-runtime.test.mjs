@@ -8,6 +8,7 @@ import path from 'node:path';
 import net from 'node:net';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
+import { setTimeout as delay } from 'node:timers/promises';
 import { start } from '../business/server.mjs';
 import { ROOT, readJson } from '../business/config.mjs';
 import { id } from '../business/store.mjs';
@@ -106,10 +107,10 @@ function counts(service, grantId) {
 }
 
 const waitFor = async (predicate, message, timeoutMs = 4000) => {
-  const until = Date.now() + timeoutMs;
-  while (Date.now() < until) {
+  const until = performance.now() + timeoutMs;
+  while (performance.now() < until) {
     if (predicate()) return;
-    await new Promise(resolve => setTimeout(resolve, 10));
+    await delay(10);
   }
   assert.ok(predicate(), message);
 };
@@ -428,6 +429,9 @@ test('final stopped-receipt failure is reported while listener, owner, and SQLit
 });
 
 test('source loop does not admit a second reader after activation expiry and drains the admitted read', async t => {
+  // Startup and reconciliation may exceed a short wall-clock deadline on a busy runner.
+  // Expire the real activation timer only after the first read has been admitted.
+  t.mock.timers.enable({ apis:['Date','setTimeout'], now:Date.now() });
   const browserSources = ['browser-a','browser-b'].map((sourceId, index) => ({ sourceId,
     sourceKind:'live_snapshot', processingBasis:'Synthetic local lifecycle read.',
     url:`https://example${index ? '.org' : '.com'}/public`, pollEverySeconds:1, maxLagSeconds:5 }));
@@ -456,6 +460,7 @@ test('source loop does not admit a second reader after activation expiry and dra
   }
   const pass = app.scheduler.sourceTick();
   await waitFor(() => firstReaderCalls === 1 && typeof releaseRead === 'function', 'first browser read was not admitted');
+  t.mock.timers.tick(1800);
   await waitFor(() => Date.now() >= Date.parse(activation.expiresAt) && !app.server.listening,
     'expiry did not begin closing the service');
   assert.equal(app.scheduler.busy, true, 'the admitted source pass remains busy during expiry drain');
@@ -463,6 +468,7 @@ test('source loop does not admit a second reader after activation expiry and dra
     'the store and process-owner receipt remain open until the admitted read settles');
   releaseRead();
   await pass;
+  t.mock.timers.tick(50);
   await app.close();
   assert.equal(firstReaderCalls, 1);
   assert.equal(readerMethodChecks, 2,
