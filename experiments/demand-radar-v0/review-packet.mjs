@@ -49,29 +49,52 @@ export function buildDemandReviewPacket(input) {
   const readable = [...probe.candidates, ...probe.unselected];
   const byId = new Map(readable.map(m => [m.message_id, m]));
   const opaque = new Map(probe.omitted.map(m => [m.message_id, m]));
+  // The verified sample is capped at 1,500 rows, so this index bounds descendant
+  // traversal and avoids rescanning every message for each parent.
+  const childrenByParent = new Map();
+  for (const row of [...readable, ...probe.omitted]) if (row.reply_to) {
+    if (!childrenByParent.has(row.reply_to)) childrenByParent.set(row.reply_to, []);
+    childrenByParent.get(row.reply_to).push(row);
+  }
+  for (const children of childrenByParent.values()) children.sort(oldest);
   const groups = selected.map(({ anchor, route }) => {
     const context = [], seen = new Set([anchor.message_id]);
     const add = row => { if (!seen.has(row.message_id)) { seen.add(row.message_id); context.push(row); } };
+    const missing = new Set(probe.omitted.filter(m => m.reply_to === anchor.message_id
+      || anchor.author_ref !== null && m.author_ref === anchor.author_ref).map(m => m.message_id));
     let ancestor = anchor;
     while (ancestor.reply_to && byId.has(ancestor.reply_to)) {
       ancestor = byId.get(ancestor.reply_to); if (seen.has(ancestor.message_id)) break; add(ancestor);
     }
-    for (const row of readable.filter(m => m.reply_to === anchor.message_id).sort(oldest)) add(row);
+    // Preserve the complete known descendant branch, not only replies directly
+    // to the anchor. Opaque replies are disclosed by ID while their known children
+    // are still traversed so a depth-2 counterstatement cannot disappear silently.
+    const walked = new Set(seen), queue = [anchor.message_id];
+    let cycleDetected = false;
+    for (let index = 0; index < queue.length && walked.size <= readable.length + opaque.size; index++) {
+      const parentId = queue[index];
+      for (const child of childrenByParent.get(parentId) ?? []) {
+        if (walked.has(child.message_id)) { cycleDetected = true; continue; }
+        walked.add(child.message_id); queue.push(child.message_id);
+        if (opaque.has(child.message_id)) missing.add(child.message_id);
+        else add(child);
+      }
+    }
     if (anchor.author_ref !== null) for (const row of readable.filter(m => m.author_ref === anchor.author_ref)
-      .sort((a, b) => -oldest(a, b))) add(row);
-    const missing = new Set(probe.omitted.filter(m => m.reply_to === anchor.message_id
-      || anchor.author_ref !== null && m.author_ref === anchor.author_ref).map(m => m.message_id));
-    // Same-author context can belong to another thread. Preserve that thread's
-    // ancestry too, or explicitly disclose it when the packet budget omits it.
-    for (const row of context) {
+      .sort((a, b) => -oldest(a, b))) {
+      // Same-author context can belong to another thread. Put its known ancestry
+      // before that row, or disclose the unresolved parent instead of implying a
+      // complete context packet.
+      const chain = [], path = new Set([row.message_id]);
       let parentId = row.reply_to;
-      const chain = new Set([row.message_id]);
-      while (parentId && !chain.has(parentId)) {
-        chain.add(parentId);
+      while (parentId && !path.has(parentId)) {
+        path.add(parentId);
         const parent = byId.get(parentId);
         if (!parent) { missing.add(parentId); break; }
-        add(parent); parentId = parent.reply_to;
+        chain.push(parent); parentId = parent.reply_to;
       }
+      for (const parent of chain.reverse()) add(parent);
+      add(row);
     }
     const messages = [structuredClone(anchor)];
     let incomplete = false;
@@ -86,7 +109,7 @@ export function buildDemandReviewPacket(input) {
       if (row.reply_to && opaque.has(row.reply_to)) missing.add(row.reply_to);
     }
     return { anchor_message_id: anchor.message_id, route, messages,
-      context_incomplete: incomplete || missing.size > 0,
+      context_incomplete: incomplete || cycleDetected || missing.size > 0,
       omitted_context_message_ids: [...missing] };
   });
   const remaining = ['matched', 'exploration'].reduce((n, route) => n + queues[route].length - offsets[route], 0);

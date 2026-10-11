@@ -182,3 +182,38 @@ Next engineering step is the frozen native semantic experiment and an
 independently admitted corpus, then a thin integration with existing Scout
 and current-event Discovery. Do not widen live collection, monitor grants,
 contact authority or sending to hide missing evidence.
+
+## Independent Dev review: nested replies correction
+
+After push of `5b77a5b`, Dev identified a real remaining context bug: a
+different author's reply to a reply could disappear while the packet claimed
+`context_incomplete: false`. A new depth-three black-box test failed against
+the old implementation: only IDs 100 and 110 survived, while counterevidence
+120 and 130 was silently omitted.
+
+The packet now indexes the bounded sealed sample's parent/child relationships
+and traverses all known descendants of the selected anchor. It retains full
+texts, traverses through opaque children while disclosing them, and lists every
+known row excluded by the 32-row or shared character limit. Unknown context
+is visible, never reconstructed. Same-author side-thread ancestry remains
+preserved ahead of its dependent reply. No source-currentness, authority,
+production or dispatch semantics changed.
+
+Four focused regressions cover depth-three counterevidence, an opaque child
+with a readable grandchild, eight omitted rows at the 32-row cap, and a
+nested branch excluded by the character budget. Restoring direct-only
+gathering in a separate copied-module sandbox makes the depth and cap tests
+fail at assertions, not setup/syntax errors.
+
+The native Scout digest does not cover `sample.id`, `candidate_id`,
+`finished_at` or the seal status. They are caller-provided metadata, not
+independently authenticated lineage. A future integration must compare
+the current Scout DB record, permission epoch and sample status separately;
+the offline bridge cannot establish those facts by hashing a submitted file.
+
+Combined local verification of the correction: 33/33 focused, 1679/1679
+Node (no skipped/pending/failed tests), 25/25 Python credential-isolation,
+build (265 JavaScript/JSON, 11 Python), and diff check PASS. The old head
+`5b77a5b` separately reached hosted SUCCESS in run `38148194024`; the
+corrected head needs its own hosted result. Exact release head is recorded
+in the handoff and local owner journal, avoiding a self-referential doc hash.

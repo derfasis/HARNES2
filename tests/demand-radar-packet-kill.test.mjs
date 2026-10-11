@@ -88,6 +88,71 @@ test('context order is anchor, ancestry, direct replies, then latest same-author
   assert.equal(packet.groups[0].messages.find(row => row.message_id === '130').text, rows[5].text);
 });
 
+test('keeps nested replies from other authors through depth three, including newest counterevidence', async t => {
+  const rows = [
+    matched(100, { author_ref: 'author-a', reply_to: null, date: new Date(Date.now() - 240000).toISOString() }),
+    plain(110, 'Could you explain what this request means?', { author_ref: 'author-b', reply_to: '100', date: new Date(Date.now() - 180000).toISOString() }),
+    plain(120, 'I think the earlier phrase was quoted from someone else.', { author_ref: 'author-c', reply_to: '110', date: new Date(Date.now() - 120000).toISOString() }),
+    plain(130, 'That is right: this was another person’s request, and I do not want the offer.', { author_ref: 'author-d', reply_to: '120', date: new Date(Date.now() - 60000).toISOString() }),
+  ];
+  const probe = await verifiedProbe(t, rows);
+  const packet = buildDemandReviewPacket({ probe, max_anchors: 1, max_characters: 2000, exploration_slots: 0 });
+  const group = packet.groups[0];
+  assert.deepEqual(names(group), ['100', '110', '120', '130']);
+  assert.equal(group.messages[3].text, rows[3].text);
+  assert.equal(group.context_incomplete, false);
+});
+
+test('walks through an opaque descendant, discloses its ID, and retains readable nested context', async t => {
+  const rows = [
+    matched(100, { author_ref: 'author-a', reply_to: null }),
+    plain(110, null, { author_ref: 'author-b', reply_to: '100', unsupported: true }),
+    plain(120, 'This was someone else’s question; I do not want more information.',
+      { author_ref: 'author-c', reply_to: '110' }),
+  ];
+  const probe = await verifiedProbe(t, rows);
+  const packet = buildDemandReviewPacket({ probe, max_anchors: 1, max_characters: 2000, exploration_slots: 0 });
+  const group = packet.groups[0];
+  assert.deepEqual(names(group), ['100', '120']);
+  assert.equal(group.messages[1].text, rows[2].text);
+  assert.ok(group.omitted_context_message_ids.includes('110'));
+  assert.equal(group.context_incomplete, true);
+});
+
+test('caps a nested reply branch at 32 rows and lists every omitted descendant', async t => {
+  const rows = [matched(100, { author_ref: 'author-0', reply_to: null,
+    date: new Date(Date.now() - 100000).toISOString() })];
+  for (let id = 101; id < 140; id++) rows.push(plain(id,
+    `Reply ${id} adds context without matching the acquisition phrase.`,
+    { author_ref: `author-${id}`, reply_to: String(id - 1), date: new Date(Date.now() - (140 - id) * 1000 - 50000).toISOString() }));
+  const probe = await verifiedProbe(t, rows);
+  const packet = buildDemandReviewPacket({ probe, max_anchors: 1, max_characters: 24000, exploration_slots: 0 });
+  const group = packet.groups[0];
+  assert.equal(group.messages.length, 32);
+  assert.deepEqual(group.omitted_context_message_ids, ['132', '133', '134', '135', '136', '137', '138', '139']);
+  assert.equal(group.context_incomplete, true);
+});
+
+test('character budget discloses a deferred grandchild and deeper reply without slicing text', async t => {
+  const anchor = matched(100, { author_ref: 'author-a', reply_to: null });
+  const direct = plain(110, 'A short direct reply.', { author_ref: 'author-b', reply_to: '100' });
+  const grandchild = plain(120, `A long nested reply ${'x'.repeat(180)}.`,
+    { author_ref: 'author-c', reply_to: '110' });
+  const deeper = plain(130, 'The deepest reply contains a counterstatement.',
+    { author_ref: 'author-d', reply_to: '120' });
+  const probe = await verifiedProbe(t, [anchor, direct, grandchild, deeper]);
+  const budget = anchor.text.length + direct.text.length;
+  const packet = buildDemandReviewPacket({ probe, max_anchors: 1, max_characters: budget, exploration_slots: 0 });
+  const group = packet.groups[0];
+  assert.deepEqual(names(group), ['100', '110']);
+  assert.deepEqual(group.omitted_context_message_ids, ['120', '130']);
+  assert.equal(group.context_incomplete, true);
+  assert.equal(packet.characters, budget);
+  assert.equal(group.messages[0].text, anchor.text);
+  assert.equal(group.messages[1].text, direct.text);
+  assert.ok(!group.messages.some(row => row.text.includes('xxxxx')));
+});
+
 test('skips incomplete ancestry without consuming the only anchor slot', async t => {
   const rows = [
     matched(100, { reply_to: '999' }),
