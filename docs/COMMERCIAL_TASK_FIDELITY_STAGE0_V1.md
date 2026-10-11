@@ -108,3 +108,72 @@ history; crash restart; concurrent lock; changed model; tool-call rejection.
 These checks prove the experiment's control/fidelity plumbing. They do not
 prove Gemini understands the conversations. Native call results, full gate,
 reviewer judgments and any stop condition are recorded after execution.
+
+## Actual native outcome: BLOCKED — RUNTIME
+
+Frozen pre-call commit: `994f806eaf9b8e51eb558db3ebe338f1063c6566`.
+No case/gold/prompt/manifest byte was changed after the first dispatch.
+
+| Operation | Logical dispatches | Requested alias | Native failure | Valid completion |
+| --- | --- | --- | --- | --- |
+| Frozen Stage0, cell 1A | 1 of cap 8 | gemini-3.7-flash-high | provider_error, HTTP 404 | 0 |
+| Separate operational prerequisite smoke | 1 of independent cap 1 | gemini-3.8-flash | provider_error, HTTP 403 | 0 |
+
+Cell 1A's durable reservation remains consumed with
+`RUNTIME_OR_CONTRACT_OR_SAFETY_FAILURE`. No reset, retry, 1B or later cell
+was dispatched. Raw response is empty, output and reported served identity
+are null, decision review is not recorded. Every RU/UA intent/fidelity
+judgment is `NOT_TESTED`; B and causal comparison are also `NOT_TESTED`.
+
+After read-only operational investigation, one separately announced route
+smoke reused the unchanged `scripts/audience-conformance.mjs` English synthetic
+test on an explicitly configured alias. Its own one-attempt operator marker
+was persisted before invocation; it is not a replay of Stage0 or a new gold
+test. It also failed before a valid response, so no third call was made.
+
+Across both distinct operations: two logical native dispatches, no valid
+model completion, zero business effect artifacts, both one-attempt attention
+grants revoked. Person, contact permission, conversation, draft, delivery,
+work transfer and action proposal counts were independently read from each
+SQLite store and remain zero. Runtime/scheduler/Telegram/send stayed disabled.
+Reported Hermes API-call counter is 1 per failed operation, not an HTTP or
+upstream count. Local input/output counters report zero; these do not prove
+zero upstream usage or cost. Wire count, billed tokens and price remain UNKNOWN.
+
+Evidence retained locally, without keys: `.cache/commercial-task-fidelity-stage0-v1/1A.json`
+and `history.json`; `.cache/audience-conformance/latest.json`, `summary.json`,
+and isolated SQLite stores; `.cache/fidelity-native-route-smoke-reservation.json`.
+The local bootstrap reads the owner's existing proxy credential in memory
+and provides it only to the authorized child environment. It is ignored,
+contains no embedded key, and never writes or prints credential values.
+
+Read-only source/config facts: pinned Hermes passes a custom-provider model
+unchanged, preserves explicit chat_completions mode and uses the supplied
+base URL for the OpenAI-compatible POST. Proxy metadata lists the first alias;
+successful GET /models does not prove completion support. Current proxy config
+contains explicit mappings for other Gemini aliases and configured upstream
+compatibility providers; it declares round-robin and request-retry 25. This
+further prevents inferring upstream request counts from a logical reservation.
+These facts do NOT isolate the causes of 404 or 403: model mapping, provider
+access, route or upstream policy are still hypotheses. No provider/config
+mutation, credential rotation, model fallback or production activation was
+performed. No serving identity attests a Google model or its weights here.
+
+Final combined local gate on this implementation:
+
+| Check | Result |
+| --- | --- |
+| Focused freeze + offline native CLI | 14/14 PASS |
+| npm test | 1660/1660 PASS, no failures/skips/pending |
+| npm run test:credentials | 25/25 Python PASS |
+| npm run build | PASS, 262 JavaScript/JSON + 11 Python |
+| git diff --check | PASS |
+| Frozen RU/UA model fidelity | NOT_TESTED — native provider failure |
+
+The next prerequisite is a positively verified native model route with known
+requested/reported identity and truthful usage. Then explicitly admit a new
+finite fidelity protocol; never erase this stopped experiment's history or
+declare B adopted. If a causal prompt comparison is needed, arrange identical
+prepared input/state in advance or retain the independent-observation label.
+The useful-source/current-demand pilot is still unproved; this experiment
+does not authorize new live collection, contact, or sending.
