@@ -1,7 +1,14 @@
 # Native proxy readiness — bounded operational prerequisite
 
-Final status: **PRE_DISPATCH_BLOCKED — SHARED_PROXY_NOT_QUIESCENT**.
-No new model dispatch, no proxy handover, no operational upgrade applied.
+Current status: **ACTUAL HARNES ROUTE RESPONSE VERIFIED** after owner-admitted
+maintenance. CLIProxyAPI is now v8.0.23; the original configuration and shared
+editor/adapter were preserved. The requested model token and provider-reported
+served token differ. Provider origin, upstream retry count and billing remain
+UNKNOWN. See the appended maintenance result and the separate blind replay report.
+
+The sections below retain the **initial pre-maintenance terminal admission**:
+PRE_DISPATCH_BLOCKED — SHARED_PROXY_NOT_QUIESCENT. Its record, frozen Stage0
+manifest and consumed attempt were not reset or retrospectively relabeled.
 
 The frozen Stage0 experiment remains stopped at its consumed first reservation.
 The 404 on `gemini-3.7-flash-high` and the separate 403 on `gemini-3.8-flash`
@@ -9,7 +16,7 @@ have no valid model completion. The latter alias is explicitly configured to
 the third-party `apinex.bond` compatibility route; it does not test the owner's
 Google OAuth accounts. Historical request logs do not correlate to these calls.
 
-The running official CLIProxyAPI is version 6.10.8, exact upstream commit
+At the initial admission the running official CLIProxyAPI was version 6.10.8, exact upstream commit
 `da6c599efd8da34d23d3668371fbb5ac70399e9d` (May 4, 2026). Its fallback
 Antigravity version is 1.21.9. The [upstream issue and fix](https://github.com/router-for-me/CLIProxyAPI/issues/5175)
 postdate this build. This is a justified upgrade prerequisite, not proof that
@@ -164,3 +171,46 @@ handover that preserves other clients and exclusive ownership of the OAuth
 store. Only then may a newly recorded finite native conformance run proceed.
 Do not run a second live daemon against this shared auth directory, copy OAuth
 tokens, fall back to web Gemini, guess another alias, or reset the stopped Stage0.
+
+## Owner-admitted maintenance and actual route result
+
+The owner subsequently admitted the maintenance window (`Можно организовать
+сейчас`). A separately reserved cooperative shutdown targeted the exact service
+console; the old Go process exited, the Python adapter survived, and the ZCode
+editor was preserved. No force-kill or desktop launcher's kill sequence was used.
+
+Official v8.0.23 now occupies the original default public executable path.
+The original private config stayed byte-identical; its SHA256 remains
+`17a9eb9a108bb995a311540d3acf46372b6fe162da71b904105a7695add0a7f7`.
+The standing process owns its loopback listener on 8317; 188 catalog entries and
+80 configured compatibility aliases recovered. Adapter 8085 advertises its
+16-model metadata catalog. This proves listener/catalog recovery, not every
+alias's completion health. No private YAML/OAuth backup, copied credential or
+parallel live-auth daemon was introduced.
+
+The isolated native-only admission stopped before dispatch when its exact alias
+was not published at that check (0 model calls). The same alias subsequently
+appeared on the standing service. Publication timing/root cause is UNKNOWN;
+absence of the embedded catalog entry was not proven as the cause.
+
+A separately recorded standing-route attempt hit a local gateway 400 before any
+upstream forward: Hermes preferred streaming. The bounded no-tools worker now
+uses the pinned runtime's supported `model.streaming: false`. Existing Hermes
+code and licenses remain unchanged. Real worker/SDK controls now require ordinary
+JSON and retain the actual request cap and token accounting.
+
+The next separately recorded call returned HTTP 200 and a valid HARNES proposal,
+receipt and child exit 0. The one-off verifier initially miscompared typed identity
+with a string; its original terminal/report were not rewritten. Independent
+posthoc audit bound the actual saved gateway receipt to report/ledger/run/SQLite,
+verified `model_identity.model_id`, current application and all seven effect
+tables zero, with the test grant revoked. **Actual route response verified**;
+requested alias is `gemini-3.7-flash-high`, reported token `gemini-3.8-flash-n`.
+Provider origin, model weights, original-config upstream retries and billing
+remain UNKNOWN. The conformance ledger is now consumed at 3/3, not reset.
+
+Four frozen RU/UA and ten RepoLab synthetic discussions then completed through
+fresh bounded admissions. Transport/contract 14/14 PASS; strict fidelity 10/14
+acceptable, 4/14 defective. See the actual outputs, failures, token counts and
+next read-only pilot boundary in
+[`NATIVE_AUDIENCE_BLIND_REPLAY_2026-10-11.md`](NATIVE_AUDIENCE_BLIND_REPLAY_2026-10-11.md).

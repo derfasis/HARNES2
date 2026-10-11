@@ -23,6 +23,14 @@ function makeSandbox(t) {
     fs.cpSync(path.join(sourceRoot, directory), path.join(root, directory), { recursive: true });
   for (const relative of ['experiments/commercial-task-fidelity-v1', 'benchmarks/commercial-task-fidelity-v1'])
     fs.cpSync(path.join(sourceRoot, relative), path.join(root, relative), { recursive: true });
+  // This is a fresh offline CLI fixture using the current worker. The retained
+  // Stage0 manifest and consumed live ledger remain immutable in the real repo.
+  const fixtureManifestPath = path.join(root, 'experiments/commercial-task-fidelity-v1/manifest.json');
+  const fixtureManifest = JSON.parse(fs.readFileSync(fixtureManifestPath, 'utf8'));
+  fixtureManifest.files['scripts/situation_router_worker.py'] = createHash('sha256')
+    .update(fs.readFileSync(path.join(root, 'scripts/situation_router_worker.py'), 'utf8').replace(/\r\n?/g, '\n'))
+    .digest('hex');
+  fs.writeFileSync(fixtureManifestPath, `${JSON.stringify(fixtureManifest, null, 2)}\n`, 'utf8');
   const modules = path.join(sourceRoot, 'node_modules');
   assert.ok(fs.existsSync(modules), 'workspace dependencies are present');
   fs.symlinkSync(modules, path.join(root, 'node_modules'), 'junction');

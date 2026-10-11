@@ -1,0 +1,3886 @@
+[
+  {
+    "dataset": "commercial_tasks",
+    "cell_id": "1A",
+    "case_id": "ru_paid_product_recommendations_conditional_mode",
+    "original_report_sha256": "ad0b1a33650a38231c1ebc6ed56683490314f73836247df5e77ffd46c2764f37",
+    "original_gateway_sha256": "81b46146ebe074c29741a2aab9b194cf96284a2f7f106cc61e80dc80243c309e",
+    "manifest_hash": "d881e306a6388f58c74dacf3d09b02491386b7adb03ba00cbdb5fe4fb7943e27",
+    "model_input_hash": "08fd75b7d7d33a48277e7f7690f4d338eb99a71762ad25440045fcdabc26f321",
+    "output_hash": "88305b82515213e5c7b65286cdf119a84c12ff874a252f28976a55a69b56c456",
+    "gold_case_hash": "db3277bb40c71b429676989bfe5c275cd115f769fadaf3d83426b9e3e0af1a73",
+    "requested_model": "gemini-3.7-flash-high",
+    "provider_reported_model": "gemini-3.8-flash-n",
+    "provider_origin": "UNKNOWN",
+    "billing": "UNKNOWN",
+    "upstream_wire_requests": null,
+    "child_exit": 0,
+    "child_exit_proven": true,
+    "gateway_forwards": 1,
+    "gateway_receipt": {
+      "state": "completed",
+      "http_status": 200,
+      "content_type": "application/json",
+      "error_code": null,
+      "error_code_number": null,
+      "error_status": null,
+      "error_reason": null,
+      "error_type": null,
+      "request_id_hash": "7e743ac2f4639142d9148f828ef5160dc6766ec35f4b63f9a632cb6ee188222e",
+      "requested_model": "gemini-3.7-flash-high",
+      "returned_model": "gemini-3.8-flash-n",
+      "identity_attested": false,
+      "usage": {
+        "prompt_tokens": 6140,
+        "completion_tokens": 3344,
+        "total_tokens": 9484
+      }
+    },
+    "source_packet": {
+      "objective": "Find participants’ own commercial tasks in these supplied conversations. Preserve speaker, resources, conditions, alternative models and later status. Prepare only an internal owner brief; no external contact. Offer facts and compatibility are unknown. A task can be useful to understand even when it does not fit our offer.",
+      "exchanges": [
+        {
+          "id": "75f4c17c-baf6-4398-9bc7-753e0fe47c5e",
+          "source_ref": "public:synthetic-commercial-task-fidelity-ru-01",
+          "anchor_id": "ru1-01",
+          "fingerprint": "0b5b996b9d3df283b8a82bdc4be48a80b858b867a8c012d76be08a475e37b20d",
+          "current": true,
+          "reasons": [],
+          "evidence": [
+            {
+              "source_event_id": "3",
+              "source_ref": "public:synthetic-commercial-task-fidelity-ru-01",
+              "author_id": "author-ru1-main",
+              "message_id": "ru1-01",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:39:40.760Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-05T09:00:00.000Z",
+              "source_updated_at": "2026-10-05T09:00:00.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Я хочу получать оплату за рекомендации товаров клиентам, а не только за проведённые консультации. Подскажите, как начать с платной подборки для тех, кто уже спрашивает о товарах?",
+              "truncated": false
+            },
+            {
+              "source_event_id": "5",
+              "source_ref": "public:synthetic-commercial-task-fidelity-ru-01",
+              "author_id": "author-ru1-peer",
+              "message_id": "ru1-02",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:39:40.761Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-05T09:03:00.000Z",
+              "source_updated_at": "2026-10-05T09:03:00.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "У тебя сейчас есть товары в наличии или пока только вопросы от клиентов?",
+              "truncated": false
+            },
+            {
+              "source_event_id": "7",
+              "source_ref": "public:synthetic-commercial-task-fidelity-ru-01",
+              "author_id": "author-ru1-main",
+              "message_id": "ru1-03",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:39:40.762Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-05T09:08:00.000Z",
+              "source_updated_at": "2026-10-05T09:08:00.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Пока товаров в наличии нет. До следующей поставки я могу собрать вопросы; когда товары приедут, смогу сделать текстовую подборку с описаниями и ценами.",
+              "truncated": false
+            },
+            {
+              "source_event_id": "9",
+              "source_ref": "public:synthetic-commercial-task-fidelity-ru-01",
+              "author_id": "author-ru1-main",
+              "message_id": "ru1-04",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:39:40.763Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-05T09:12:00.000Z",
+              "source_updated_at": "2026-10-05T09:12:00.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Видео на этой неделе снимать не смогу из-за расписания. Сейчас мне подходит текстовый формат; позже смогу отдельно решить, стоит ли пробовать видео.",
+              "truncated": false
+            }
+          ],
+          "unsupported_count": 0,
+          "coverage": "bounded_explicit_reply_exchange_not_complete_history",
+          "considered": false
+        }
+      ],
+      "coverage": {
+        "batch_exchanges": 8,
+        "max_messages_per_exchange": 32,
+        "source_capacity": 100,
+        "selection": "bounded_reply_scopes_not_all_audience",
+        "source_completeness": "unknown",
+        "identity_independence": "unproven"
+      },
+      "source_summary": {
+        "enrolled_sources": 1,
+        "current_sources": 1,
+        "selected_sources": 1,
+        "selected_exchanges": 1,
+        "source_completeness": "unknown"
+      },
+      "contact_permission": false,
+      "executable": false,
+      "allowed_effects": []
+    },
+    "actual_capture_at": "2026-10-11T19:39:40.783Z",
+    "declared_fixture_observed_at": "2026-10-11T12:00:00.000Z",
+    "disposition": "proposal_created",
+    "output": {
+      "decision_review": {
+        "version": 1,
+        "scope": "supplied_packet_only",
+        "disposition": "needs_proposed",
+        "summary": "В предоставленном диалоге участник (author-ru1-main) формулирует собственную коммерческую задачу: монетизировать рекомендации товаров клиентам через платные текстовые подборки с описаниями и ценами в условиях отсутствия текущего склада.",
+        "unknowns": [
+          "Точная ниша, категория товаров и специфика консультаций участника",
+          "Ценовая модель платной подборки и готовность клиентов платить за рекомендации отдельно",
+          "Сроки следующей поставки товаров и итоговый статус реализации идеи"
+        ],
+        "exchange_reviews": [
+          {
+            "exchange_id": "75f4c17c-baf6-4398-9bc7-753e0fe47c5e",
+            "judgment": "relevant",
+            "reason": "Участник напрямую заявляет о намерении запустить платную подборку товаров для консультируемых клиентов, фиксирует ограничения по ресурсам (нет наличия, ограничено время) и выбранный формат (только текст).",
+            "evidence_event_ids": [
+              "3",
+              "5",
+              "7",
+              "9"
+            ],
+            "support_quotes": [
+              {
+                "source_event_id": "3",
+                "quote": "Я хочу получать оплату за рекомендации товаров клиентам, а не только за проведённые консультации. Подскажите, как начать с платной подборки для тех, кто уже спрашивает о товарах?"
+              },
+              {
+                "source_event_id": "5",
+                "quote": "У тебя сейчас есть товары в наличии или пока только вопросы от клиентов?"
+              },
+              {
+                "source_event_id": "7",
+                "quote": "Пока товаров в наличии нет. До следующей поставки я могу собрать вопросы; когда товары приедут, смогу сделать текстовую подборку с описаниями и ценами."
+              },
+              {
+                "source_event_id": "9",
+                "quote": "Видео на этой неделе снимать не смогу из-за расписания. Сейчас мне подходит текстовый формат; позже смогу отдельно решить, стоит ли пробовать видео."
+              }
+            ]
+          }
+        ]
+      },
+      "needs": [
+        {
+          "proposal_version": 2,
+          "need_id": null,
+          "title": "Организация платных текстовых подборок товаров для клиентов консультаций",
+          "hypothesis": "Консультант стремится расширить монетизацию практики за счёт платных рекомендаций товаров существующим клиентам, планируя собирать входящие запросы до прибытия поставки и оформлять подборки исключительно в текстовом виде с ценами и описаниями.",
+          "why_now": "Диалог состоялся 5 октября 2026 года и зафиксирован 11 октября 2026 года. Участник находится на этапе ожидания поставки товаров и предварительного сбора клиентских вопросов, решая вопрос структуры услуги.",
+          "exchange_ids": [
+            "75f4c17c-baf6-4398-9bc7-753e0fe47c5e"
+          ],
+          "evidence_event_ids": [
+            "3",
+            "7",
+            "9"
+          ],
+          "counterevidence_event_ids": [],
+          "context_event_ids": [
+            "5"
+          ],
+          "context_review": [
+            {
+              "exchange_id": "75f4c17c-baf6-4398-9bc7-753e0fe47c5e",
+              "classification": "supporting",
+              "evidence_event_ids": [
+                "3",
+                "5",
+                "7",
+                "9"
+              ],
+              "reason": "Диалог содержит прямое описание задачи монетизации (event 3), контекстный вопрос собеседника о ресурсах (event 5) и фиксацию условий, ресурсов и ограничений участника (events 7, 9)."
+            }
+          ],
+          "support_quotes": [
+            {
+              "source_event_id": "3",
+              "quote": "Я хочу получать оплату за рекомендации товаров клиентам, а не только за проведённые консультации. Подскажите, как начать с платной подборки для тех, кто уже спрашивает о товарах?"
+            },
+            {
+              "source_event_id": "5",
+              "quote": "У тебя сейчас есть товары в наличии или пока только вопросы от клиентов?"
+            },
+            {
+              "source_event_id": "7",
+              "quote": "Пока товаров в наличии нет. До следующей поставки я могу собрать вопросы; когда товары приедут, смогу сделать текстовую подборку с описаниями и ценами."
+            },
+            {
+              "source_event_id": "9",
+              "quote": "Видео на этой неделе снимать не смогу из-за расписания. Сейчас мне подходит текстовый формат; позже смогу отдельно решить, стоит ли пробовать видео."
+            }
+          ],
+          "next_step": "prepare_material",
+          "material_preview": {
+            "title": "Внутренний бриф: Коммерческая задача участника по платным товарным подборкам",
+            "content": "### Внутренний аналитический бриф (без внешнего контакта)\n\n**Инициатор задачи:** `author-ru1-main`  \n**Исходная ситуация:** Участник проводит консультации и сталкивается с запросами клиентов на рекомендации конкретных товаров. Текущий доход ограничен оплатой самих консультаций.\n\n#### 1. Коммерческая цель\n- Внедрение отдельной платной услуги по подборке товаров для клиентов, которые уже проявляют интерес к покупкам.\n- Переход от бесплатных советов к монетизируемому формату рекомендаций.\n\n#### 2. Ресурсы и условия\n- **Наличие товаров:** В настоящий момент товаров в наличии нет; ожидается следующая поставка.\n- **Промежуточный план:** До прихода товаров автор планирует аккумулировать вопросы клиентов.\n- **Формат исполнения:** Исключительно текстовый формат (описания и цены). Видеоформат исключён на текущей неделе из-за загруженного расписания (возможность тестирования видео отложена на будущее).\n\n#### 3. Неизвестные факторы\n- Юридическая и финансовая схема (будет ли это агентская комиссия, фиксированная плата за файл/список или наценка на товар).\n- Конкретная товарная категория и специфика аудитории консультаций.\n- Совместимость с продуктами или партнёрскими моделями владельца остаётся неустановленной.",
+            "evidence_event_ids": [
+              "3",
+              "7",
+              "9"
+            ]
+          },
+          "reason": "Задача и её практические ограничения полностью сформулированы участником; сформирован внутренний бриф для анализа коммерческого сценария без внешних коммуникаций.",
+          "unknowns": [
+            "Планируемая стоимость услуги подборки для клиентов",
+            "Точный профиль товаров и консультируемой аудитории",
+            "Реальные сроки поступления товаров и статус последующей реализации"
+          ]
+        }
+      ]
+    },
+    "receipt": {
+      "disposition": "proposal_created",
+      "goal_id": "181ba0c6-5495-49e2-aded-51cd2af07949",
+      "assessment_id": "dd312f64-2222-4878-ba61-39dee5d4acaa",
+      "decision_contract_version": 1,
+      "model_projection_version": 1,
+      "model_input_fingerprint": "08fd75b7d7d33a48277e7f7690f4d338eb99a71762ad25440045fcdabc26f321",
+      "output_fingerprint": "88305b82515213e5c7b65286cdf119a84c12ff874a252f28976a55a69b56c456",
+      "run_id": "9233af63-bd5f-4a9c-a7b8-b3c9ac8aed1c",
+      "model_identity": {
+        "model_id": "gemini-3.8-flash-n",
+        "model_version": "gemini-3.8-flash-n"
+      },
+      "model_identity_reason": null,
+      "model_api_calls": 1,
+      "failure_cause": null
+    },
+    "usage": {
+      "input_tokens": 6140,
+      "output_tokens": 3344,
+      "estimated_cost_usd": null,
+      "cost_status": "unknown"
+    },
+    "checks": {
+      "output_applied_with_current_receipt": true,
+      "tools_empty": true,
+      "receipt_matches_actual_prompt": true,
+      "all_fixture_messages_preserved": true,
+      "no_contact_artifacts": true,
+      "production_runtime_disabled": true,
+      "telegram_disabled": true,
+      "scheduler_disabled": true
+    },
+    "side_effect_counts": {
+      "persons": 0,
+      "contact_permissions": 0,
+      "conversations": 0,
+      "drafts": 0,
+      "delivery_attempts": 0,
+      "audience_work_links": 0,
+      "action_proposals": 0
+    },
+    "test_authority_closed": true,
+    "original_semantic_verdict": "NOT_REVIEWED"
+  },
+  {
+    "dataset": "commercial_tasks",
+    "cell_id": "2A",
+    "case_id": "ua_comparing_independent_monetization_models",
+    "original_report_sha256": "08ef06bb8acb85ab213455eb5f75e2009e4f7e95c92310136e5bcb1434eac26c",
+    "original_gateway_sha256": "dd6937bdbe5f92a7e2f2294e9281f8b651d8cecd439e25c4c7bc068f1144a3be",
+    "manifest_hash": "d881e306a6388f58c74dacf3d09b02491386b7adb03ba00cbdb5fe4fb7943e27",
+    "model_input_hash": "8b73a369897f19f15c007110ebaae76ecb2a38eb4fcfc593077017ad7aeac181",
+    "output_hash": "a80b6150c239f1818955fa6bbc4260f5e957c47838eea61fb8f1686d60ad3435",
+    "gold_case_hash": "03cd4c836a1ea6fe5e3d82d72b5e0d6412d5756724cb0843f77aae58307aafa0",
+    "requested_model": "gemini-3.7-flash-high",
+    "provider_reported_model": "gemini-3.8-flash-n",
+    "provider_origin": "UNKNOWN",
+    "billing": "UNKNOWN",
+    "upstream_wire_requests": null,
+    "child_exit": 0,
+    "child_exit_proven": true,
+    "gateway_forwards": 1,
+    "gateway_receipt": {
+      "state": "completed",
+      "http_status": 200,
+      "content_type": "application/json",
+      "error_code": null,
+      "error_code_number": null,
+      "error_status": null,
+      "error_reason": null,
+      "error_type": null,
+      "request_id_hash": "98a31cb75d86644230e80bfce277e8715fd10865b481e7de045d53e95d46189c",
+      "requested_model": "gemini-3.7-flash-high",
+      "returned_model": "gemini-3.8-flash-n",
+      "identity_attested": false,
+      "usage": {
+        "prompt_tokens": 6164,
+        "completion_tokens": 2790,
+        "total_tokens": 8954
+      }
+    },
+    "source_packet": {
+      "objective": "Find participants’ own commercial tasks in these supplied conversations. Preserve speaker, resources, conditions, alternative models and later status. Prepare only an internal owner brief; no external contact. Offer facts and compatibility are unknown. A task can be useful to understand even when it does not fit our offer.",
+      "exchanges": [
+        {
+          "id": "0b44f710-68c2-4d9b-bd40-68b6f1b10037",
+          "source_ref": "public:synthetic-commercial-task-fidelity-ua-02",
+          "anchor_id": "ua2-01",
+          "fingerprint": "ef79d1b3d3af6fd0824e65e0c5c65d78dca54226bcc1ebaf48648563944279ab",
+          "current": true,
+          "reasons": [],
+          "evidence": [
+            {
+              "source_event_id": "3",
+              "source_ref": "public:synthetic-commercial-task-fidelity-ua-02",
+              "author_id": "author-ua2-main",
+              "message_id": "ua2-01",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:40:08.158Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-06T14:00:00.000Z",
+              "source_updated_at": "2026-10-06T14:00:00.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Хочу порівняти незалежні способи монетизації моїх онлайн-консультацій: разову оплату за зустріч і пакет супроводу. Потрібні перші практичні кроки для кожного варіанта.",
+              "truncated": false
+            },
+            {
+              "source_event_id": "5",
+              "source_ref": "public:synthetic-commercial-task-fidelity-ua-02",
+              "author_id": "author-ua2-peer",
+              "message_id": "ua2-02",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:40:08.159Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-06T14:04:00.000Z",
+              "source_updated_at": "2026-10-06T14:04:00.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Ти вже обрала конкретну модель, чи ще розглядаєш варіанти?",
+              "truncated": false
+            },
+            {
+              "source_event_id": "7",
+              "source_ref": "public:synthetic-commercial-task-fidelity-ua-02",
+              "author_id": "author-ua2-main",
+              "message_id": "ua2-03",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:40:08.160Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-06T14:09:00.000Z",
+              "source_updated_at": "2026-10-06T14:09:00.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Модель відкрита: розгляну оплату за сесію або власний навчальний матеріал. Мережевий маркетинг, MLM і побудову команди не шукаю. Порівняння хочу без обіцянок доходу.",
+              "truncated": false
+            },
+            {
+              "source_event_id": "9",
+              "source_ref": "public:synthetic-commercial-task-fidelity-ua-02",
+              "author_id": "author-ua2-peer",
+              "message_id": "ua2-04",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:40:08.161Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-06T14:13:00.000Z",
+              "source_updated_at": "2026-10-06T14:13:00.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Тоді можна зіставити витрати часу, потрібні матеріали й перший крок для кожного з двох форматів.",
+              "truncated": false
+            }
+          ],
+          "unsupported_count": 0,
+          "coverage": "bounded_explicit_reply_exchange_not_complete_history",
+          "considered": false
+        }
+      ],
+      "coverage": {
+        "batch_exchanges": 8,
+        "max_messages_per_exchange": 32,
+        "source_capacity": 100,
+        "selection": "bounded_reply_scopes_not_all_audience",
+        "source_completeness": "unknown",
+        "identity_independence": "unproven"
+      },
+      "source_summary": {
+        "enrolled_sources": 1,
+        "current_sources": 1,
+        "selected_sources": 1,
+        "selected_exchanges": 1,
+        "source_completeness": "unknown"
+      },
+      "contact_permission": false,
+      "executable": false,
+      "allowed_effects": []
+    },
+    "actual_capture_at": "2026-10-11T19:40:08.181Z",
+    "declared_fixture_observed_at": "2026-10-11T12:00:00.000Z",
+    "disposition": "proposal_created",
+    "output": {
+      "decision_review": {
+        "version": 1,
+        "scope": "supplied_packet_only",
+        "disposition": "needs_proposed",
+        "summary": "У предоставленном обмене участник формулирует собственную коммерческую задачу по выбору и сравнению независимых моделей монетизации онлайн-консультаций (разовая оплата за встречу, пакет сопровождения или собственный обучающий материал). Участник прямо исключает MLM, сетевой маркетинг и построение команды, запрашивая первые практические шаги без необоснованных обещаний дохода.",
+        "unknowns": [
+          "Точная тематика и экспертная область онлайн-консультаций автора.",
+          "Текущий объем клиентской базы и имеющиеся ресурсы для создания учебных материалов.",
+          "Итоговый выбор модели после диалога с собеседником."
+        ],
+        "exchange_reviews": [
+          {
+            "exchange_id": "0b44f710-68c2-4d9b-bd40-68b6f1b10037",
+            "judgment": "relevant",
+            "reason": "Диалог содержит прямой запрос автора на сопоставление практических шагов для независимой монетизации онлайн-консультаций с четкими граничными условиями.",
+            "evidence_event_ids": [
+              "3",
+              "7"
+            ],
+            "support_quotes": [
+              {
+                "source_event_id": "3",
+                "quote": "Хочу порівняти незалежні способи монетизації моїх онлайн-консультацій: разову оплату за зустріч і пакет супроводу. Потрібні перші практичні кроки для кожного варіанта."
+              },
+              {
+                "source_event_id": "7",
+                "quote": "Модель відкрита: розгляну оплату за сесію або власний навчальний матеріал. Мережевий маркетинг, MLM і побудову команди не шукаю. Порівняння хочу без обіцянок доходу."
+              }
+            ]
+          }
+        ]
+      },
+      "needs": [
+        {
+          "need_id": null,
+          "proposal_version": 2,
+          "title": "Анализ независимых моделей монетизации онлайн-консультаций автора",
+          "hypothesis": "Участник находится на этапе выбора формата коммерциализации своих онлайн-консультаций, рассматривая разовую оплату за сессию, пакетное сопровождение или разработку учебных материалов. Ему требуется нейтральный разбор практических первых шагов и трудозатрат для каждого формата при строгом исключении сетевого маркетинга (MLM) и рекрутинга.",
+          "why_now": "Запрос опубликован 06.10.2026, где автор явно подтверждает, что выбор модели остается открытым и актуальным для него в текущий момент.",
+          "exchange_ids": [
+            "0b44f710-68c2-4d9b-bd40-68b6f1b10037"
+          ],
+          "evidence_event_ids": [
+            "3",
+            "7"
+          ],
+          "counterevidence_event_ids": [],
+          "context_event_ids": [
+            "5",
+            "9"
+          ],
+          "context_review": [
+            {
+              "exchange_id": "0b44f710-68c2-4d9b-bd40-68b6f1b10037",
+              "classification": "supporting",
+              "evidence_event_ids": [
+                "3",
+                "5",
+                "7",
+                "9"
+              ],
+              "reason": "Обмен содержит исходную формулировку задачи автора, уточняющий вопрос собеседника и фиксацию критериев отбора моделей без сетевого маркетинга."
+            }
+          ],
+          "support_quotes": [
+            {
+              "source_event_id": "3",
+              "quote": "Хочу порівняти незалежні способи монетизації моїх онлайн-консультацій: разову оплату за зустріч і пакет супроводу. Потрібні перші практичні кроки для кожного варіанта."
+            },
+            {
+              "source_event_id": "5",
+              "quote": "Ти вже обрала конкретну модель, чи ще розглядаєш варіанти?"
+            },
+            {
+              "source_event_id": "7",
+              "quote": "Модель відкрита: розгляну оплату за сесію або власний навчальний матеріал. Мережевий маркетинг, MLM і побудову команди не шукаю. Порівняння хочу без обіцянок доходу."
+            },
+            {
+              "source_event_id": "9",
+              "quote": "Тоді можна зіставити витрати часу, потрібні матеріали й перший крок для кожного з двох форматів."
+            }
+          ],
+          "next_step": "prepare_material",
+          "material_preview": {
+            "title": "Внутренний бриф: Коммерческая задача автора по выбору модели монетизации консультаций",
+            "content": "### Внутренний аналитический бриф (без внешнего контакта)\n\n#### 1. Описание участника и задачи\n- **Инициатор задачи:** Автор публикации (`author-ua2-main`).\n- **Исходный запрос:** Сравнение независимых форматов монетизации практики онлайн-консультирования с определением первых практических шагов для каждого сценария.\n- **Рассматриваемые альтернативы:**\n  1. Разовая оплата за встречу / сессию.\n  2. Пакет долгосрочного сопровождения.\n  3. Собственный учебный/образовательный материал.\n\n#### 2. Заданные условия и ограничения\n- **Категорические исключения:** Сетевой маркетинг (MLM), построение команды, рекрутинг.\n- **Требования к анализу:** Объективное сопоставление затрат времени и ресурсов без рекламных обещаний дохода.\n\n#### 3. Текущий статус и неопределенности\n- Выбор модели остается открытым.\n- Неизвестны конкретная предметная ниша автора, текущий поток клиентов и юридический статус ведения деятельности.\n- В соответствии с директивой владельца внешний контакт исключен.",
+            "evidence_event_ids": [
+              "3",
+              "7"
+            ]
+          },
+          "reason": "Задача полностью соответствует директиве владельца: зафиксированы автор, альтернативные модели, жесткие ограничения и текущий статус задачи исключительно во внутреннем формате без внешних коммуникаций.",
+          "unknowns": [
+            "Тематическая направленность консультаций автора.",
+            "Уровень готовности учебных материалов или методики сопровождения.",
+            "Какая из моделей в итоге оказалась предпочтительной для автора после обсуждения."
+          ]
+        }
+      ]
+    },
+    "receipt": {
+      "disposition": "proposal_created",
+      "goal_id": "c1554327-3b22-4d5f-a0ae-ebe763b1353c",
+      "assessment_id": "bc9f2132-15bd-446c-b094-c1e2b9cc1605",
+      "decision_contract_version": 1,
+      "model_projection_version": 1,
+      "model_input_fingerprint": "8b73a369897f19f15c007110ebaae76ecb2a38eb4fcfc593077017ad7aeac181",
+      "output_fingerprint": "a80b6150c239f1818955fa6bbc4260f5e957c47838eea61fb8f1686d60ad3435",
+      "run_id": "a5139629-860b-408e-9541-3bf7e0585273",
+      "model_identity": {
+        "model_id": "gemini-3.8-flash-n",
+        "model_version": "gemini-3.8-flash-n"
+      },
+      "model_identity_reason": null,
+      "model_api_calls": 1,
+      "failure_cause": null
+    },
+    "usage": {
+      "input_tokens": 6164,
+      "output_tokens": 2790,
+      "estimated_cost_usd": null,
+      "cost_status": "unknown"
+    },
+    "checks": {
+      "output_applied_with_current_receipt": true,
+      "tools_empty": true,
+      "receipt_matches_actual_prompt": true,
+      "all_fixture_messages_preserved": true,
+      "no_contact_artifacts": true,
+      "production_runtime_disabled": true,
+      "telegram_disabled": true,
+      "scheduler_disabled": true
+    },
+    "side_effect_counts": {
+      "persons": 0,
+      "contact_permissions": 0,
+      "conversations": 0,
+      "drafts": 0,
+      "delivery_attempts": 0,
+      "audience_work_links": 0,
+      "action_proposals": 0
+    },
+    "test_authority_closed": true,
+    "original_semantic_verdict": "NOT_REVIEWED"
+  },
+  {
+    "dataset": "commercial_tasks",
+    "cell_id": "3A",
+    "case_id": "ru_quoted_customer_request_adjacent_capacity_complaint",
+    "original_report_sha256": "1b89ff37fb9ebe964e636154171f9ce12127ec9f9382e2b48cfc1e367a1caaff",
+    "original_gateway_sha256": "eff393b92c88a3175bc9c16cddcc643989ac8978b4a2886e316891dc781f6b80",
+    "manifest_hash": "d881e306a6388f58c74dacf3d09b02491386b7adb03ba00cbdb5fe4fb7943e27",
+    "model_input_hash": "c5625a0ddd1e2ae61c03aacf47282488f4c09a4575cc21f6541c57a62136cede",
+    "output_hash": "10ecf19b9befcef7299cd1a7b2745a73315ef774542406c745dddea1a6c737e0",
+    "gold_case_hash": "f057dde4fc6137269f537e62f8d10d086e6e9a0f4025cce90d5efacf52269c88",
+    "requested_model": "gemini-3.7-flash-high",
+    "provider_reported_model": "gemini-3.8-flash-n",
+    "provider_origin": "UNKNOWN",
+    "billing": "UNKNOWN",
+    "upstream_wire_requests": null,
+    "child_exit": 0,
+    "child_exit_proven": true,
+    "gateway_forwards": 1,
+    "gateway_receipt": {
+      "state": "completed",
+      "http_status": 200,
+      "content_type": "application/json",
+      "error_code": null,
+      "error_code_number": null,
+      "error_status": null,
+      "error_reason": null,
+      "error_type": null,
+      "request_id_hash": "2450da1f42d12ee3ca4e34c172718788331b5dbf304662ae22658c05891c1629",
+      "requested_model": "gemini-3.7-flash-high",
+      "returned_model": "gemini-3.8-flash-n",
+      "identity_attested": false,
+      "usage": {
+        "prompt_tokens": 6312,
+        "completion_tokens": 7226,
+        "total_tokens": 13538
+      }
+    },
+    "source_packet": {
+      "objective": "Find participants’ own commercial tasks in these supplied conversations. Preserve speaker, resources, conditions, alternative models and later status. Prepare only an internal owner brief; no external contact. Offer facts and compatibility are unknown. A task can be useful to understand even when it does not fit our offer.",
+      "exchanges": [
+        {
+          "id": "faa3dec3-c964-4b33-a1f7-128c3c0b846f",
+          "source_ref": "public:synthetic-commercial-task-fidelity-ru-03",
+          "anchor_id": "ru3-01",
+          "fingerprint": "063913a78387203bc41f355f850a43047ed46c127ce461dbb76b35cb87f2e803",
+          "current": true,
+          "reasons": [],
+          "evidence": [
+            {
+              "source_event_id": "3",
+              "source_ref": "public:synthetic-commercial-task-fidelity-ru-03",
+              "author_id": "author-ru3-vendor",
+              "message_id": "ru3-01",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:40:35.606Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-07T16:00:00.000Z",
+              "source_updated_at": "2026-10-07T16:00:00.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Клиент прислал мне вопрос: «Ищу товары, которые можно предложить посетителям моей студии после процедуры; с чего начать?» Это слова клиента, не мой запрос. Я могу показать каталог и объяснить оформление заказа.",
+              "truncated": false
+            },
+            {
+              "source_event_id": "7",
+              "source_ref": "public:synthetic-commercial-task-fidelity-ru-03",
+              "author_id": "author-ru3-vendor",
+              "message_id": "ru3-03",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:40:35.607Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-07T16:05:00.000Z",
+              "source_updated_at": "2026-10-07T16:05:00.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Уточню: фраза про товары в кавычках принадлежит клиенту из моего чата; я переслал её как пример вопроса, который мне задали.",
+              "truncated": false
+            }
+          ],
+          "unsupported_count": 0,
+          "coverage": "bounded_explicit_reply_exchange_not_complete_history",
+          "considered": false
+        },
+        {
+          "id": "58d89caa-2f2f-4a3a-b632-fd77a57452b2",
+          "source_ref": "public:synthetic-commercial-task-fidelity-ru-03",
+          "anchor_id": "ru3-02",
+          "fingerprint": "45f5044bf87c12ab3c45d0c5c70018b729f7cad0431a515ef6b7aabb1590e836",
+          "current": true,
+          "reasons": [],
+          "evidence": [
+            {
+              "source_event_id": "5",
+              "source_ref": "public:synthetic-commercial-task-fidelity-ru-03",
+              "author_id": "author-ru3-provider",
+              "message_id": "ru3-02",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:40:35.607Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-07T16:02:00.000Z",
+              "source_updated_at": "2026-10-07T16:02:00.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "У меня другая ситуация: я одна веду студию и не могу брать больше записей. Между клиентами не успеваю отвечать на сообщения и вести расписание.",
+              "truncated": false
+            },
+            {
+              "source_event_id": "9",
+              "source_ref": "public:synthetic-commercial-task-fidelity-ru-03",
+              "author_id": "author-ru3-provider",
+              "message_id": "ru3-04",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:40:35.608Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-07T16:11:00.000Z",
+              "source_updated_at": "2026-10-07T16:11:00.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Я хочу сократить ручную переписку и освободить время, но пока не решила, нужны ли шаблоны, другой порядок записи или помощник.",
+              "truncated": false
+            }
+          ],
+          "unsupported_count": 0,
+          "coverage": "bounded_explicit_reply_exchange_not_complete_history",
+          "considered": false
+        }
+      ],
+      "coverage": {
+        "batch_exchanges": 8,
+        "max_messages_per_exchange": 32,
+        "source_capacity": 100,
+        "selection": "bounded_reply_scopes_not_all_audience",
+        "source_completeness": "unknown",
+        "identity_independence": "unproven"
+      },
+      "source_summary": {
+        "enrolled_sources": 1,
+        "current_sources": 1,
+        "selected_sources": 1,
+        "selected_exchanges": 2,
+        "source_completeness": "unknown"
+      },
+      "contact_permission": false,
+      "executable": false,
+      "allowed_effects": []
+    },
+    "actual_capture_at": "2026-10-11T19:40:35.633Z",
+    "declared_fixture_observed_at": "2026-10-11T12:00:00.000Z",
+    "disposition": "proposal_created",
+    "output": {
+      "decision_review": {
+        "version": 1,
+        "scope": "supplied_packet_only",
+        "disposition": "needs_proposed",
+        "summary": "В выборке выявлена одна самостоятельная коммерческая задача участника author-ru3-provider, связанная с операционной перегрузкой соло-студии (дефицит времени на расписание и сообщения). Соседний тред с пересылкой вопроса стороннего клиента о продаже товаров квалифицирован как не содержащий собственного запроса автора.",
+        "unknowns": [
+          "Актуальный статус решения задачи author-ru3-provider на момент анализа (выбраны ли шаблоны, регламент записи или помощник после 07.10.2026)",
+          "Используемые каналы связи, тип студии и технический стек автора author-ru3-provider",
+          "Совместимость выявленной операционной задачи с продуктами и возможностями владельца"
+        ],
+        "exchange_reviews": [
+          {
+            "exchange_id": "faa3dec3-c964-4b33-a1f7-128c3c0b846f",
+            "judgment": "no_proposal",
+            "reason": "Участник author-ru3-vendor явно указывает, что приведённый вопрос о товарах принадлежит его клиенту («Это слова клиента, не мой запрос»), а не является его собственной потребностью. Собственной коммерческой задачи не сформулировано.",
+            "evidence_event_ids": [
+              "3",
+              "7"
+            ],
+            "support_quotes": [
+              {
+                "source_event_id": "3",
+                "quote": "Клиент прислал мне вопрос: «Ищу товары, которые можно предложить посетителям моей студии после процедуры; с чего начать?» Это слова клиента, не мой запрос. Я могу показать каталог и объяснить оформление заказа."
+              },
+              {
+                "source_event_id": "7",
+                "quote": "Уточню: фраза про товары в кавычках принадлежит клиенту из моего чата; я переслал её как пример вопроса, который мне задали."
+              }
+            ]
+          },
+          {
+            "exchange_id": "58d89caa-2f2f-4a3a-b632-fd77a57452b2",
+            "judgment": "relevant",
+            "reason": "Участник author-ru3-provider формулирует личную практическую задачу управления студией: высокая загрузка, нехватка времени на ответы и расписание между клиентами, поиск вариантов снижения ручной переписки.",
+            "evidence_event_ids": [
+              "5",
+              "9"
+            ],
+            "support_quotes": [
+              {
+                "source_event_id": "5",
+                "quote": "У меня другая ситуация: я одна веду студию и не могу брать больше записей. Между клиентами не успеваю отвечать на сообщения и вести расписание."
+              },
+              {
+                "source_event_id": "9",
+                "quote": "Я хочу сократить ручную переписку и освободить время, но пока не решила, нужны ли шаблоны, другой порядок записи или помощник."
+              }
+            ]
+          }
+        ]
+      },
+      "needs": [
+        {
+          "proposal_version": 2,
+          "need_id": null,
+          "title": "Оптимизация рутинной коммуникации и ведения расписания в соло-студии",
+          "hypothesis": "Владелица студии (автор author-ru3-provider) работает без команды при предельной загрузке записями, не успевая обрабатывать входящие сообщения и календарь, и ищет решение для снижения ручной переписки, выбирая между шаблонами, изменением процесса записи и наймом ассистента.",
+          "why_now": "Сообщения опубликованы 07.10.2026 и получены на анализ 11.10.2026 (интервал около 4 дней). Участник обозначил открытую развилку решений («пока не решила»), статус внедрения изменений на текущий момент не подтверждён.",
+          "exchange_ids": [
+            "58d89caa-2f2f-4a3a-b632-fd77a57452b2"
+          ],
+          "evidence_event_ids": [
+            "5",
+            "9"
+          ],
+          "counterevidence_event_ids": [],
+          "context_event_ids": [],
+          "support_quotes": [
+            {
+              "source_event_id": "5",
+              "quote": "У меня другая ситуация: я одна веду студию и не могу брать больше записей. Между клиентами не успеваю отвечать на сообщения и вести расписание."
+            },
+            {
+              "source_event_id": "9",
+              "quote": "Я хочу сократить ручную переписку и освободить время, но пока не решила, нужны ли шаблоны, другой порядок записи или помощник."
+            }
+          ],
+          "context_review": [
+            {
+              "exchange_id": "58d89caa-2f2f-4a3a-b632-fd77a57452b2",
+              "classification": "supporting",
+              "evidence_event_ids": [
+                "5",
+                "9"
+              ],
+              "reason": "Прямое описание автором своей текущей коммерческой нагрузки, ограничений по ресурсам и рассматриваемых альтернатив оптимизации."
+            },
+            {
+              "exchange_id": "faa3dec3-c964-4b33-a1f7-128c3c0b846f",
+              "classification": "unrelated",
+              "evidence_event_ids": [
+                "3"
+              ],
+              "reason": "Обсуждение касается пересказанного запроса клиента о закупке товаров для перепродажи и готовности поставщика выслать каталог, что не относится к задаче организации записи author-ru3-provider."
+            }
+          ],
+          "material_preview": {
+            "title": "Внутренний бриф: коммерческая задача соло-мастера по оптимизации записи и коммуникаций",
+            "content": "# Внутренний бриф: Оптимизация записи и коммуникаций в студии\n\n## 1. Контекст и субъект задачи\n* **Участник:** `author-ru3-provider`.\n* **Роль и ресурсы:** Соло-мастер / единоличный владелец студии («я одна веду студию»).\n* **Текущее состояние мощностей:** Достигнут лимит по приёму клиентов («не могу брать больше записей»).\n\n## 2. Суть выявленной проблемы\n* Нехватка времени в паузах между процедурами для поддержания административной работы: автор физически не успевает отвечать на входящие сообщения и вести график («Между клиентами не успеваю отвечать на сообщения и вести расписание»).\n* Высокие затраты времени на ручные коммуникации («Я хочу сократить ручную переписку и освободить время»).\n\n## 3. Рассматриваемые участником альтернативы\nУчастник находится на стадии выбора пути решения и явно указал три конкурирующие модели:\n1. **Шаблоны сообщений** (снижение трудоёмкости на ручной ввод ответов без изменения архитектуры процесса).\n2. **Изменение порядка / регламента записи** (возможно, внедрение онлайн-записи, правил слотов или предоплаты).\n3. **Найм помощника / администратора** (делегирование функции живому сотруднику).\n\n## 4. Ограничения и неопределённости\n* **Внешний контакт исключён:** данный документ является исключительно внутренним аналитическим материалом.\n* **Решение не зафиксировано:** статус выбора на момент анализа неизвестен («пока не решила» от 07.10.2026).\n* **Специфика студии неизвестна:** направление услуг, средняя длительность процедуры и текущие каналы переписки в источнике не указаны.\n* **Совместимость с оффером:** факт применимости наших решений или экспертизы к данной задаче требует отдельной проверки владельцем.",
+            "evidence_event_ids": [
+              "5",
+              "9"
+            ]
+          },
+          "next_step": "prepare_material",
+          "reason": "Задача полностью сформулирована участником с указанием ресурсов и альтернатив. Подготовлен внутренний бриф для владельца без внешнего взаимодействия.",
+          "unknowns": [
+            "Какая из трёх альтернатив (шаблоны, регламент записи, помощник) предпочтительнее по критериям автора",
+            "В каких каналах происходит переписка (мессенджеры, директ, телефон)",
+            "Предпринимались ли автором шаги по изменению процесса после 07.10.2026",
+            "Есть ли у владельца релевантные наработки или решения для оптимизации расписания соло-студий"
+          ]
+        }
+      ]
+    },
+    "receipt": {
+      "disposition": "proposal_created",
+      "goal_id": "d23c2cbf-66eb-4592-b12d-ecc5116700bb",
+      "assessment_id": "8d7b9f92-2a0b-44f6-8d7f-52c2d9c856d0",
+      "decision_contract_version": 1,
+      "model_projection_version": 1,
+      "model_input_fingerprint": "c5625a0ddd1e2ae61c03aacf47282488f4c09a4575cc21f6541c57a62136cede",
+      "output_fingerprint": "10ecf19b9befcef7299cd1a7b2745a73315ef774542406c745dddea1a6c737e0",
+      "run_id": "c4557be0-e374-48f3-90a6-e1e8a3c2d0cb",
+      "model_identity": {
+        "model_id": "gemini-3.8-flash-n",
+        "model_version": "gemini-3.8-flash-n"
+      },
+      "model_identity_reason": null,
+      "model_api_calls": 1,
+      "failure_cause": null
+    },
+    "usage": {
+      "input_tokens": 6312,
+      "output_tokens": 7226,
+      "estimated_cost_usd": null,
+      "cost_status": "unknown"
+    },
+    "checks": {
+      "output_applied_with_current_receipt": true,
+      "tools_empty": true,
+      "receipt_matches_actual_prompt": true,
+      "all_fixture_messages_preserved": true,
+      "no_contact_artifacts": true,
+      "production_runtime_disabled": true,
+      "telegram_disabled": true,
+      "scheduler_disabled": true
+    },
+    "side_effect_counts": {
+      "persons": 0,
+      "contact_permissions": 0,
+      "conversations": 0,
+      "drafts": 0,
+      "delivery_attempts": 0,
+      "audience_work_links": 0,
+      "action_proposals": 0
+    },
+    "test_authority_closed": true,
+    "original_semantic_verdict": "NOT_REVIEWED"
+  },
+  {
+    "dataset": "commercial_tasks",
+    "cell_id": "4A",
+    "case_id": "ua_old_task_later_other_thread_cancellation",
+    "original_report_sha256": "446221ae97eb675b8b5f44686f95b19d6d953dbb86abbdba1adc945f5105614c",
+    "original_gateway_sha256": "c715fc755b2fde2044b17a2ba2f1c7abf9d507212f9efbe59735e9c978d5b5cd",
+    "manifest_hash": "d881e306a6388f58c74dacf3d09b02491386b7adb03ba00cbdb5fe4fb7943e27",
+    "model_input_hash": "fbea4a27638b2917cb103b954543ad6e83cee85481ae78cf4a4303c5215a29bb",
+    "output_hash": "f9a78def70008e93628b7f75af03c267c5edd14abeb50442f20d1a23a6ab8bef",
+    "gold_case_hash": "cb7dbd48b9cdc2c90f0ec27a68a74355ed1229f8e5d213f6bf26b20fd056de7f",
+    "requested_model": "gemini-3.7-flash-high",
+    "provider_reported_model": "gemini-3.8-flash-n",
+    "provider_origin": "UNKNOWN",
+    "billing": "UNKNOWN",
+    "upstream_wire_requests": null,
+    "child_exit": 0,
+    "child_exit_proven": true,
+    "gateway_forwards": 1,
+    "gateway_receipt": {
+      "state": "completed",
+      "http_status": 200,
+      "content_type": "application/json",
+      "error_code": null,
+      "error_code_number": null,
+      "error_status": null,
+      "error_reason": null,
+      "error_type": null,
+      "request_id_hash": "ee07eb0871b47a152d46ca63ed5cb9e3a5bd0b9f9162c00c845fafc95d36c16f",
+      "requested_model": "gemini-3.7-flash-high",
+      "returned_model": "gemini-3.8-flash-n",
+      "identity_attested": false,
+      "usage": {
+        "prompt_tokens": 6513,
+        "completion_tokens": 9826,
+        "total_tokens": 16339
+      }
+    },
+    "source_packet": {
+      "objective": "Find participants’ own commercial tasks in these supplied conversations. Preserve speaker, resources, conditions, alternative models and later status. Prepare only an internal owner brief; no external contact. Offer facts and compatibility are unknown. A task can be useful to understand even when it does not fit our offer.",
+      "exchanges": [
+        {
+          "id": "1a02c2f2-a96a-4eb5-9ebf-576756e2419e",
+          "source_ref": "public:synthetic-commercial-task-fidelity-ua-04",
+          "anchor_id": "ua4-01",
+          "fingerprint": "8142196ef7714d1fe4ba75ce1d55785f5b562a39bf699b4785a8e0874ee56ab2",
+          "current": true,
+          "reasons": [],
+          "evidence": [
+            {
+              "source_event_id": "3",
+              "source_ref": "public:synthetic-commercial-task-fidelity-ua-04",
+              "author_id": "author-ua4-main",
+              "message_id": "ua4-01",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:41:35.946Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-01T08:30:00.000Z",
+              "source_updated_at": "2026-10-01T08:30:00.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Хочу підготувати платний пакет коротких онлайн-уроків української мови для дорослих початківців і визначити, що включити до першої версії. Ціну ще не вирішила.",
+              "truncated": false
+            },
+            {
+              "source_event_id": "5",
+              "source_ref": "public:synthetic-commercial-task-fidelity-ua-04",
+              "author_id": "author-ua4-peer",
+              "message_id": "ua4-02",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:41:35.947Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-01T08:34:00.000Z",
+              "source_updated_at": "2026-10-01T08:34:00.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Які теми ти хотіла б включити до пробного пакета?",
+              "truncated": false
+            },
+            {
+              "source_event_id": "7",
+              "source_ref": "public:synthetic-commercial-task-fidelity-ua-04",
+              "author_id": "author-ua4-main",
+              "message_id": "ua4-03",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:41:35.948Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-01T08:39:00.000Z",
+              "source_updated_at": "2026-10-01T08:39:00.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Спершу думала про три заняття з базової граматики й побутової лексики, щоб перевірити інтерес. Це був лише план, заявки я ще не приймала.",
+              "truncated": false
+            }
+          ],
+          "unsupported_count": 0,
+          "coverage": "bounded_explicit_reply_exchange_not_complete_history",
+          "considered": false
+        },
+        {
+          "id": "22daffa3-f47f-4152-8d7b-cd6514b8434d",
+          "source_ref": "public:synthetic-commercial-task-fidelity-ua-04",
+          "anchor_id": "ua4-04",
+          "fingerprint": "4a3687419492ce3f1d43669408b9d40b0be9cfb82ce882134443ba74aeff88fc",
+          "current": true,
+          "reasons": [],
+          "evidence": [
+            {
+              "source_event_id": "9",
+              "source_ref": "public:synthetic-commercial-task-fidelity-ua-04",
+              "author_id": "author-ua4-peer",
+              "message_id": "ua4-04",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:41:35.948Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-10T10:00:00.000Z",
+              "source_updated_at": "2026-10-10T10:00:00.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Повертаюся до окремого питання про пробний пакет: ти вирішила його запускати?",
+              "truncated": false
+            },
+            {
+              "source_event_id": "11",
+              "source_ref": "public:synthetic-commercial-task-fidelity-ua-04",
+              "author_id": "author-ua4-main",
+              "message_id": "ua4-05",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:41:35.949Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-10T10:06:00.000Z",
+              "source_updated_at": "2026-10-10T10:06:00.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Ні, я закрила це питання й вирішила не запускати пакет та не приймати заявки. Попередній план від 1 жовтня більше не актуальний.",
+              "truncated": false
+            }
+          ],
+          "unsupported_count": 0,
+          "coverage": "bounded_explicit_reply_exchange_not_complete_history",
+          "considered": false
+        }
+      ],
+      "coverage": {
+        "batch_exchanges": 8,
+        "max_messages_per_exchange": 32,
+        "source_capacity": 100,
+        "selection": "bounded_reply_scopes_not_all_audience",
+        "source_completeness": "unknown",
+        "identity_independence": "unproven"
+      },
+      "source_summary": {
+        "enrolled_sources": 1,
+        "current_sources": 1,
+        "selected_sources": 1,
+        "selected_exchanges": 2,
+        "source_completeness": "unknown"
+      },
+      "contact_permission": false,
+      "executable": false,
+      "allowed_effects": []
+    },
+    "actual_capture_at": "2026-10-11T19:41:35.976Z",
+    "declared_fixture_observed_at": "2026-10-11T12:00:00.000Z",
+    "disposition": "proposal_created",
+    "output": {
+      "decision_review": {
+        "version": 1,
+        "scope": "supplied_packet_only",
+        "disposition": "needs_proposed",
+        "summary": "В предоставленных обсуждениях зафиксирована коммерческая задача участника author-ua4-main по подготовке платного пакета онлайн-уроков украинского языка для начинающих от 1 октября 2026 года, которая впоследствии, согласно сообщению от 10 октября 2026 года, была полностью отменена и закрыта самим автором. В соответствии с установкой владельца подготовлена внутренняя аналитическая сводка без внешних контактов.",
+        "unknowns": [
+          "Причины, по которым автор решила отказаться от запуска пакета и сбора заявок",
+          "Факты нашего коммерческого предложения и степень его совместимости с подобными инициативами",
+          "Планирует ли автор другие образовательные или коммерческие инициативы в будущем"
+        ],
+        "exchange_reviews": [
+          {
+            "exchange_id": "1a02c2f2-a96a-4eb5-9ebf-576756e2419e",
+            "judgment": "relevant",
+            "reason": "Участник author-ua4-main формулирует коммерческую задачу: создание платного пакета уроков украинского языка для начинающих, планируемое наполнение из трёх занятий и статус формирования цены.",
+            "evidence_event_ids": [
+              "3",
+              "7"
+            ],
+            "support_quotes": [
+              {
+                "source_event_id": "3",
+                "quote": "Хочу підготувати платний пакет коротких онлайн-уроків української мови для дорослих початківців і визначити, що включити до першої версії. Ціну ще не вирішила."
+              },
+              {
+                "source_event_id": "7",
+                "quote": "Спершу думала про три заняття з базової граматики й побутової лексики, щоб перевірити інтерес. Це був лише план, заявки я ще не приймала."
+              }
+            ]
+          },
+          {
+            "exchange_id": "22daffa3-f47f-4152-8d7b-cd6514b8434d",
+            "judgment": "relevant",
+            "reason": "Содержит контрсвидетельство: author-ua4-main сообщает о решении закрыть вопрос, не запускать продукт и не принимать заявки, аннулируя план от 1 октября.",
+            "evidence_event_ids": [
+              "11"
+            ],
+            "support_quotes": [
+              {
+                "source_event_id": "11",
+                "quote": "Ні, я закрила це питання й вирішила не запускати пакет та не приймати заявки. Попередній план від 1 жовтня більше не актуальний."
+              }
+            ]
+          }
+        ]
+      },
+      "needs": [
+        {
+          "need_id": null,
+          "title": "Коммерческая задача author-ua4-main: запуск платного пакета онлайн-уроков украинского языка (закрыта автором)",
+          "hypothesis": "Участник author-ua4-main планировала запустить коммерческий обучающий продукт — платный пакет коротких онлайн-уроков украинского языка для взрослых начинающих (3 занятия по базовой грамматике и бытовой лексике для проверки спроса; цена не была установлена, заявки не собирались). По состоянию на 10 октября 2026 года автор приняла решение не запускать пакет, не принимать заявки и закрыть данный проект.",
+          "why_now": "Инициатива была впервые опубликована 2026-10-01 (события 3, 7), однако 2026-10-10 (событие 11) автор однозначно отозвала её. Поступление данных зафиксировано 2026-10-11, что требует отражения фактического закрытого статуса задачи на момент анализа.",
+          "exchange_ids": [
+            "1a02c2f2-a96a-4eb5-9ebf-576756e2419e",
+            "22daffa3-f47f-4152-8d7b-cd6514b8434d"
+          ],
+          "evidence_event_ids": [
+            "3",
+            "7"
+          ],
+          "counterevidence_event_ids": [
+            "11"
+          ],
+          "context_event_ids": [],
+          "context_review": [
+            {
+              "exchange_id": "1a02c2f2-a96a-4eb5-9ebf-576756e2419e",
+              "classification": "supporting",
+              "evidence_event_ids": [
+                "3",
+                "7"
+              ],
+              "reason": "Содержит первичное описание задачи: разработка платного пакета уроков украинского языка для взрослых, структура из 3 занятий и отсутствие финальной цены."
+            },
+            {
+              "exchange_id": "22daffa3-f47f-4152-8d7b-cd6514b8434d",
+              "classification": "counterevidence",
+              "evidence_event_ids": [
+                "11"
+              ],
+              "reason": "Прямое контрсвидетельство: автор объявляет о закрытии инициативы и неактуальности планов запуска пакета уроков."
+            }
+          ],
+          "material_preview": {
+            "title": "Внутренняя сводка: коммерческая задача по запуску онлайн-уроков украинского языка (author-ua4-main)",
+            "content": "### Внутренняя сводка коммерческой задачи\n\n- **Инициатор (speaker):** `author-ua4-main`\n- **Исходная коммерческая задача:** Подготовка платного пакета коротких онлайн-уроков украинской мовы для взрослых начинающих.\n- **Ресурсы и планируемый объём:** Пробный формат из трёх занятий, охватывающих базовую грамматику и бытовую лексику с целью тестирования рыночного спроса.\n- **Коммерческие условия:** Цена на момент обсуждения установлена не была; сбор заявок не открывался.\n- **Позднейший статус (контрсвидетельство от 10.10.2026):** Проект закрыт автором. Запуск пакета отменён, приём заявок проводиться не будет, первоначальный план от 1 октября признан неактуальным.\n- **Совместимость и дальнейшие действия:** В соответствии с ограничением владельца внешние контакты и публикации исключены. Задача зафиксирована исключительно для внутреннего понимания предыстории участника.",
+            "evidence_event_ids": [
+              "3",
+              "7",
+              "11"
+            ]
+          },
+          "support_quotes": [
+            {
+              "source_event_id": "3",
+              "quote": "Хочу підготувати платний пакет коротких онлайн-уроків української мови для дорослих початківців і визначити, що включити до першої версії. Ціну ще не вирішила."
+            },
+            {
+              "source_event_id": "7",
+              "quote": "Спершу думала про три заняття з базової граматики й побутової лексики, щоб перевірити інтерес. Це був лише план, заявки я ще не приймала."
+            },
+            {
+              "source_event_id": "11",
+              "quote": "Ні, я закрила це питання й вирішила не запускати пакет та не приймати заявки. Попередній план від 1 жовтня більше не актуальний."
+            }
+          ],
+          "next_step": "prepare_material",
+          "reason": "Цель владельца требует подготовить только внутреннюю сводку с фиксацией автора, ресурсов, условий и итогового статуса без внешнего контакта. Подготовленный материал документирует задачу и факт её отмены автором.",
+          "unknowns": [
+            "Конкретные мотивы отказа автора от запуска продукта",
+            "Параметры и совместимость нашего коммерческого предложения",
+            "Возможность появления альтернативных образовательных инициатив у данного автора в будущем"
+          ],
+          "proposal_version": 2
+        }
+      ]
+    },
+    "receipt": {
+      "disposition": "proposal_created",
+      "goal_id": "c930663e-e20a-411b-84a8-1ed475d77fea",
+      "assessment_id": "4f140c85-ba15-4c68-8830-d4fe7dd9de35",
+      "decision_contract_version": 1,
+      "model_projection_version": 1,
+      "model_input_fingerprint": "fbea4a27638b2917cb103b954543ad6e83cee85481ae78cf4a4303c5215a29bb",
+      "output_fingerprint": "f9a78def70008e93628b7f75af03c267c5edd14abeb50442f20d1a23a6ab8bef",
+      "run_id": "43ddaa19-13e0-441a-aa18-993f2958a62a",
+      "model_identity": {
+        "model_id": "gemini-3.8-flash-n",
+        "model_version": "gemini-3.8-flash-n"
+      },
+      "model_identity_reason": null,
+      "model_api_calls": 1,
+      "failure_cause": null
+    },
+    "usage": {
+      "input_tokens": 6513,
+      "output_tokens": 9826,
+      "estimated_cost_usd": null,
+      "cost_status": "unknown"
+    },
+    "checks": {
+      "output_applied_with_current_receipt": true,
+      "tools_empty": true,
+      "receipt_matches_actual_prompt": true,
+      "all_fixture_messages_preserved": true,
+      "no_contact_artifacts": true,
+      "production_runtime_disabled": true,
+      "telegram_disabled": true,
+      "scheduler_disabled": true
+    },
+    "side_effect_counts": {
+      "persons": 0,
+      "contact_permissions": 0,
+      "conversations": 0,
+      "drafts": 0,
+      "delivery_attempts": 0,
+      "audience_work_links": 0,
+      "action_proposals": 0
+    },
+    "test_authority_closed": true,
+    "original_semantic_verdict": "NOT_REVIEWED"
+  },
+  {
+    "dataset": "repolab_audience",
+    "cell_id": "1A",
+    "case_id": "A001",
+    "original_report_sha256": "7ed30ef87f98400288d10b9d23902ae485b53ed72bb37e73df1f8c0d704cf08a",
+    "original_gateway_sha256": "ec30cee48a86f07651b49540640dced36012d4130e6305fab7be717f4290c519",
+    "manifest_hash": "d3f960ba2f90d75f24d9db88dfa6123060dfe3d32b2edd1ffe33f43d22987565",
+    "model_input_hash": "a9031f3ae2e593455c5dca3a3704634b7febba4d403853e89bcf446cbb1d6ad3",
+    "output_hash": "47ce6baa169e3f296421a320e6335bf12a115829a6bd9a3c3b0cd91c4566497a",
+    "gold_case_hash": "cb765d645f5cc29bbbdc5897e44ebe890b4178c9d1c91a4b75c6a630f06e894d",
+    "requested_model": "gemini-3.7-flash-high",
+    "provider_reported_model": "gemini-3.8-flash-n",
+    "provider_origin": "UNKNOWN",
+    "billing": "UNKNOWN",
+    "upstream_wire_requests": null,
+    "child_exit": 0,
+    "child_exit_proven": true,
+    "gateway_forwards": 1,
+    "gateway_receipt": {
+      "state": "completed",
+      "http_status": 200,
+      "content_type": "application/json",
+      "error_code": null,
+      "error_code_number": null,
+      "error_status": null,
+      "error_reason": null,
+      "error_type": null,
+      "request_id_hash": "d954c7cd6f1f4a718365f90b3f63469e4eff5b497bb8f5a00d912184a3f1f766",
+      "requested_model": "gemini-3.7-flash-high",
+      "returned_model": "gemini-3.8-flash-n",
+      "identity_attested": false,
+      "usage": {
+        "prompt_tokens": 6560,
+        "completion_tokens": 3792,
+        "total_tokens": 10352
+      }
+    },
+    "source_packet": {
+      "objective": "По данному обсуждению установи, кто лично ищет сторонние физические товары или партнёрскую программу для продажи за комиссию либо дополнительное товарное направление для собственных клиентов. Отличай поставщика, ищущего продавцов, чужую рекламу, цитату и вакансию от такого намерения. Учитывай отмену и неопределённость. Не придумывай коммерческое соответствие, FitLine fit, условия, согласие на контакт или страну. Только внутренний анализ для владельца, без контактов и сообщений людям.",
+      "exchanges": [
+        {
+          "id": "61ea3211-eb7c-4f73-8e5a-84417bca76df",
+          "source_ref": "public:repolab:chat:810001",
+          "anchor_id": "1000",
+          "fingerprint": "1ab26a20bb31f491676e0dfad788b11821fc9175baf0c69413a0a8460826fabb",
+          "current": true,
+          "reasons": [],
+          "evidence": [
+            {
+              "source_event_id": "3",
+              "source_ref": "public:repolab:chat:810001",
+              "author_id": "repolab-author:1:10",
+              "message_id": "1000",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:44:25.412Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:01:00.000Z",
+              "source_updated_at": "2026-10-09T00:01:00.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Какие способы дополнительного заработка сейчас обсуждаете?",
+              "truncated": false
+            },
+            {
+              "source_event_id": "5",
+              "source_ref": "public:repolab:chat:810001",
+              "author_id": "repolab-author:1:11",
+              "message_id": "1001",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:44:25.413Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:01:01.000Z",
+              "source_updated_at": "2026-10-09T00:01:01.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Я хочу продавать чужие физические товары за комиссию. Ищу партнёрскую программу без закупки склада.",
+              "truncated": false
+            },
+            {
+              "source_event_id": "7",
+              "source_ref": "public:repolab:chat:810001",
+              "author_id": "repolab-author:1:12",
+              "message_id": "1002",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:44:25.414Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:01:02.000Z",
+              "source_updated_at": "2026-10-09T00:01:02.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Ты производишь товары и набираешь продавцов или сам хочешь стать продавцом?",
+              "truncated": false
+            },
+            {
+              "source_event_id": "9",
+              "source_ref": "public:repolab:chat:810001",
+              "author_id": "repolab-author:1:11",
+              "message_id": "1003",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:44:25.415Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:01:03.000Z",
+              "source_updated_at": "2026-10-09T00:01:03.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Сам хочу стать продавцом. Своих товаров нет; нужны условия комиссии и поставщик, который отправляет покупателям.",
+              "truncated": false
+            },
+            {
+              "source_event_id": "11",
+              "source_ref": "public:repolab:chat:810001",
+              "author_id": "repolab-author:1:10",
+              "message_id": "1004",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:44:25.416Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:01:04.000Z",
+              "source_updated_at": "2026-10-09T00:01:04.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Понял, а страна и категория товаров уже выбраны?",
+              "truncated": false
+            },
+            {
+              "source_event_id": "13",
+              "source_ref": "public:repolab:chat:810001",
+              "author_id": "repolab-author:1:11",
+              "message_id": "1005",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:44:25.416Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:01:05.000Z",
+              "source_updated_at": "2026-10-09T00:01:05.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Пока нет. Сначала сравню условия, ничего ещё не выбрал.",
+              "truncated": false
+            }
+          ],
+          "unsupported_count": 0,
+          "coverage": "bounded_explicit_reply_exchange_not_complete_history",
+          "considered": false
+        }
+      ],
+      "coverage": {
+        "batch_exchanges": 8,
+        "max_messages_per_exchange": 32,
+        "source_capacity": 100,
+        "selection": "bounded_reply_scopes_not_all_audience",
+        "source_completeness": "unknown",
+        "identity_independence": "unproven"
+      },
+      "source_summary": {
+        "enrolled_sources": 1,
+        "current_sources": 1,
+        "selected_sources": 1,
+        "selected_exchanges": 1,
+        "source_completeness": "unknown"
+      },
+      "contact_permission": false,
+      "executable": false,
+      "allowed_effects": []
+    },
+    "actual_capture_at": "2026-10-11T19:44:25.438Z",
+    "declared_fixture_observed_at": "2026-10-11T19:00:00.000Z",
+    "disposition": "proposal_created",
+    "output": {
+      "decision_review": {
+        "version": 1,
+        "scope": "supplied_packet_only",
+        "disposition": "needs_proposed",
+        "summary": "Участник repolab-author:1:11 прямо заявил о намерении продавать чужие физические товары за комиссию без закупки склада и находится на этапе сравнения условий, не выбрав категорию и страну.",
+        "unknowns": [
+          "Целевая страна и география продаж участника",
+          "Предпочтительная категория физических товаров",
+          "Актуальный статус поиска после публикации 2026-10-09"
+        ],
+        "exchange_reviews": [
+          {
+            "exchange_id": "61ea3211-eb7c-4f73-8e5a-84417bca76df",
+            "judgment": "relevant",
+            "reason": "Диалог содержит явный запрос участника на партнёрскую программу/дропшиппинг физических товаров за комиссию с последующим уточнением критериев.",
+            "evidence_event_ids": [
+              "5",
+              "9",
+              "13"
+            ],
+            "support_quotes": [
+              {
+                "source_event_id": "5",
+                "quote": "Я хочу продавать чужие физические товары за комиссию. Ищу партнёрскую программу без закупки склада."
+              },
+              {
+                "source_event_id": "9",
+                "quote": "Сам хочу стать продавцом. Своих товаров нет; нужны условия комиссии и поставщик, который отправляет покупателям."
+              },
+              {
+                "source_event_id": "13",
+                "quote": "Пока нет. Сначала сравню условия, ничего ещё не выбрал."
+              }
+            ]
+          }
+        ]
+      },
+      "needs": [
+        {
+          "proposal_version": 2,
+          "need_id": null,
+          "title": "Поиск партнёрской программы для продажи физических товаров за комиссию без выкупа склада",
+          "hypothesis": "Участник ищет поставщика физических товаров с прямой доставкой клиентам и выплатой комиссии, планируя сравнивать условия без заранее определённой ниши или географии.",
+          "why_now": "Сообщение опубликовано 2026-10-09 и поступило в наблюдение 2026-10-11; на момент ветки участник зафиксировал открытый статус («ничего ещё не выбрал»), однако текущий статус спустя двое суток неизвестен.",
+          "exchange_ids": [
+            "61ea3211-eb7c-4f73-8e5a-84417bca76df"
+          ],
+          "evidence_event_ids": [
+            "5",
+            "9",
+            "13"
+          ],
+          "counterevidence_event_ids": [],
+          "context_event_ids": [
+            "3",
+            "7",
+            "11"
+          ],
+          "context_review": [
+            {
+              "exchange_id": "61ea3211-eb7c-4f73-8e5a-84417bca76df",
+              "classification": "supporting",
+              "evidence_event_ids": [
+                "3",
+                "5",
+                "7",
+                "9",
+                "11",
+                "13"
+              ],
+              "reason": "Содержит прямые высказывания участника о готовности стать продавцом за комиссию и контекстные уточняющие вопросы собеседников."
+            }
+          ],
+          "support_quotes": [
+            {
+              "source_event_id": "3",
+              "quote": "Какие способы дополнительного заработка сейчас обсуждаете?"
+            },
+            {
+              "source_event_id": "5",
+              "quote": "Я хочу продавать чужие физические товары за комиссию. Ищу партнёрскую программу без закупки склада."
+            },
+            {
+              "source_event_id": "7",
+              "quote": "Ты производишь товары и набираешь продавцов или сам хочешь стать продавцом?"
+            },
+            {
+              "source_event_id": "9",
+              "quote": "Сам хочу стать продавцом. Своих товаров нет; нужны условия комиссии и поставщик, который отправляет покупателям."
+            },
+            {
+              "source_event_id": "11",
+              "quote": "Понял, а страна и категория товаров уже выбраны?"
+            },
+            {
+              "source_event_id": "13",
+              "quote": "Пока нет. Сначала сравню условия, ничего ещё не выбрал."
+            }
+          ],
+          "next_step": "prepare_material",
+          "reason": "Запрос подтверждён цитатами автора; требуется подготовить внутренний аналитический бриф для владельца с фиксацией открытых параметров.",
+          "unknowns": [
+            "Категория товаров и каналы сбыта, которые планирует использовать участник",
+            "Страна и логистические ограничения",
+            "Критерии сравнения комиссионных условий и требований к поставщику",
+            "Актуальность потребности на момент текущей обработки"
+          ],
+          "material_preview": {
+            "title": "Внутренний бриф: запрос на партнёрскую программу физических товаров (автор repolab-author:1:11)",
+            "content": "### Внутренний анализ запроса\n\n- **Инициатор**: `repolab-author:1:11`\n- **Суть намерения**: личный поиск партнёрской программы или схемы работы с поставщиком физических товаров без закупки склада (дропшиппинг/комиссия).\n- **Зафиксированные требования**:\n  1. Продажа чужих физических товаров за комиссию.\n  2. Отсутствие необходимости выкупать склад.\n  3. Поставщик самостоятельно осуществляет отправку конечному покупателю.\n  4. Категория товаров и страна не определены; участник находится на этапе сравнения условий комиссий.\n- **Ограничения и неопределённости**:\n  - Нет данных о стране работы, каналах привлечения трафика и опыте продаж.\n  - Сообщение опубликовано 2026-10-09; текущее решение участника не верифицировано.\n  - Внешний контакт исключён согласно установкам владельца.",
+            "evidence_event_ids": [
+              "5",
+              "9",
+              "13"
+            ]
+          }
+        }
+      ]
+    },
+    "receipt": {
+      "disposition": "proposal_created",
+      "goal_id": "2356a5ff-e6e2-43fd-b7e4-12afb23c4f4b",
+      "assessment_id": "97fcd9a3-df7b-4f2d-ac30-a41a2c46c281",
+      "decision_contract_version": 1,
+      "model_projection_version": 1,
+      "model_input_fingerprint": "a9031f3ae2e593455c5dca3a3704634b7febba4d403853e89bcf446cbb1d6ad3",
+      "output_fingerprint": "47ce6baa169e3f296421a320e6335bf12a115829a6bd9a3c3b0cd91c4566497a",
+      "run_id": "c7376235-8985-4414-a3fb-a18724992992",
+      "model_identity": {
+        "model_id": "gemini-3.8-flash-n",
+        "model_version": "gemini-3.8-flash-n"
+      },
+      "model_identity_reason": null,
+      "model_api_calls": 1,
+      "failure_cause": null
+    },
+    "usage": {
+      "input_tokens": 6560,
+      "output_tokens": 3792,
+      "estimated_cost_usd": null,
+      "cost_status": "unknown"
+    },
+    "checks": {
+      "output_applied_with_current_receipt": true,
+      "tools_empty": true,
+      "receipt_matches_actual_prompt": true,
+      "all_fixture_messages_preserved": true,
+      "no_contact_artifacts": true,
+      "production_runtime_disabled": true,
+      "telegram_disabled": true,
+      "scheduler_disabled": true
+    },
+    "side_effect_counts": {
+      "persons": 0,
+      "contact_permissions": 0,
+      "conversations": 0,
+      "drafts": 0,
+      "delivery_attempts": 0,
+      "audience_work_links": 0,
+      "action_proposals": 0
+    },
+    "test_authority_closed": true,
+    "original_semantic_verdict": "NOT_REVIEWED"
+  },
+  {
+    "dataset": "repolab_audience",
+    "cell_id": "2A",
+    "case_id": "A002",
+    "original_report_sha256": "78672fe4c40c222aa0f4dcb81bcc92ba51f36a5bd880f22cb812de8c0d6a4cd9",
+    "original_gateway_sha256": "33ec008b4ab6e9447b5284a3620b9ec8efa88812e60bc239ea5a046272db5bdb",
+    "manifest_hash": "d3f960ba2f90d75f24d9db88dfa6123060dfe3d32b2edd1ffe33f43d22987565",
+    "model_input_hash": "4af79c30a5f81dc26716aba06c527f7be985e54d599ccc405f538b980fdc234f",
+    "output_hash": "0fc85a480e9832f8fa0b9830ea6933ad223a3985879faee660a557c227ff89f0",
+    "gold_case_hash": "6c0c0a755c6d154a5b69b0ea4e5b2f1116b6d80c0e41fdfafd93d0b7f84559ab",
+    "requested_model": "gemini-3.7-flash-high",
+    "provider_reported_model": "gemini-3.8-flash-n",
+    "provider_origin": "UNKNOWN",
+    "billing": "UNKNOWN",
+    "upstream_wire_requests": null,
+    "child_exit": 0,
+    "child_exit_proven": true,
+    "gateway_forwards": 1,
+    "gateway_receipt": {
+      "state": "completed",
+      "http_status": 200,
+      "content_type": "application/json",
+      "error_code": null,
+      "error_code_number": null,
+      "error_status": null,
+      "error_reason": null,
+      "error_type": null,
+      "request_id_hash": "fc6321124c1bdd699d0fa91854545dc92e72a7a104e4b8d14804013841990711",
+      "requested_model": "gemini-3.7-flash-high",
+      "returned_model": "gemini-3.8-flash-n",
+      "identity_attested": false,
+      "usage": {
+        "prompt_tokens": 6386,
+        "completion_tokens": 5359,
+        "total_tokens": 11745
+      }
+    },
+    "source_packet": {
+      "objective": "По данному обсуждению установи, кто лично ищет сторонние физические товары или партнёрскую программу для продажи за комиссию либо дополнительное товарное направление для собственных клиентов. Отличай поставщика, ищущего продавцов, чужую рекламу, цитату и вакансию от такого намерения. Учитывай отмену и неопределённость. Не придумывай коммерческое соответствие, FitLine fit, условия, согласие на контакт или страну. Только внутренний анализ для владельца, без контактов и сообщений людям.",
+      "exchanges": [
+        {
+          "id": "df2b67ae-c61a-4e1c-8efa-67a6d648e386",
+          "source_ref": "public:repolab:chat:810002",
+          "anchor_id": "1000",
+          "fingerprint": "f76922c7cc59f06864f70d9b49592ffddc5ba3fcf88ba574cb3a5b78a55d75bb",
+          "current": true,
+          "reasons": [],
+          "evidence": [
+            {
+              "source_event_id": "3",
+              "source_ref": "public:repolab:chat:810002",
+              "author_id": "repolab-author:2:20",
+              "message_id": "1000",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:44:59.392Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:02:00.000Z",
+              "source_updated_at": "2026-10-09T00:02:00.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Шукаю партнерську програму: хочу сам продавати чужі фізичні товари й отримувати комісію. Не послуги і не вакансію.",
+              "truncated": false
+            },
+            {
+              "source_event_id": "5",
+              "source_ref": "public:repolab:chat:810002",
+              "author_id": "repolab-author:2:21",
+              "message_id": "1001",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:44:59.393Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:02:01.000Z",
+              "source_updated_at": "2026-10-09T00:02:01.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "У мене власний бренд, шукаю дилерів. Ти теж шукаєш дилерів?",
+              "truncated": false
+            },
+            {
+              "source_event_id": "7",
+              "source_ref": "public:repolab:chat:810002",
+              "author_id": "repolab-author:2:20",
+              "message_id": "1002",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:44:59.394Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:02:02.000Z",
+              "source_updated_at": "2026-10-09T00:02:02.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Ні, власного бренду не маю. Хочу бути партнером чужого виробника, без початкової закупівлі.",
+              "truncated": false
+            },
+            {
+              "source_event_id": "9",
+              "source_ref": "public:repolab:chat:810002",
+              "author_id": "repolab-author:2:22",
+              "message_id": "1003",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:44:59.395Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:02:03.000Z",
+              "source_updated_at": "2026-10-09T00:02:03.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "А категорія та умови доставки?",
+              "truncated": false
+            },
+            {
+              "source_event_id": "11",
+              "source_ref": "public:repolab:chat:810002",
+              "author_id": "repolab-author:2:20",
+              "message_id": "1004",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:44:59.396Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:02:04.000Z",
+              "source_updated_at": "2026-10-09T00:02:04.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Ще не визначив; потрібні перевірені умови. Згоди на особисті повідомлення не давав.",
+              "truncated": false
+            }
+          ],
+          "unsupported_count": 0,
+          "coverage": "bounded_explicit_reply_exchange_not_complete_history",
+          "considered": false
+        }
+      ],
+      "coverage": {
+        "batch_exchanges": 8,
+        "max_messages_per_exchange": 32,
+        "source_capacity": 100,
+        "selection": "bounded_reply_scopes_not_all_audience",
+        "source_completeness": "unknown",
+        "identity_independence": "unproven"
+      },
+      "source_summary": {
+        "enrolled_sources": 1,
+        "current_sources": 1,
+        "selected_sources": 1,
+        "selected_exchanges": 1,
+        "source_completeness": "unknown"
+      },
+      "contact_permission": false,
+      "executable": false,
+      "allowed_effects": []
+    },
+    "actual_capture_at": "2026-10-11T19:44:59.417Z",
+    "declared_fixture_observed_at": "2026-10-11T19:00:00.000Z",
+    "disposition": "proposal_created",
+    "output": {
+      "decision_review": {
+        "version": 1,
+        "scope": "supplied_packet_only",
+        "disposition": "needs_proposed",
+        "summary": "Выявлен один участник, который прямо ищет партнёрскую программу для самостоятельной продажи сторонних физических товаров за комиссию без первоначальной закупки. При этом категория товара не определена, и участник прямо подчеркнул отсутствие согласия на личные сообщения. В соответствии с задачей сформирован только внутренний аналитический бриф для владельца.",
+        "unknowns": [
+          "Актуален ли поиск в настоящее время или участник уже нашёл подходящего партнёра",
+          "Целевые товарные категории, ценовой диапазон и регион доставки",
+          "Соответствуют ли условия владельца критерию работы без обязательного первоначального выкупа товара"
+        ],
+        "exchange_reviews": [
+          {
+            "exchange_id": "df2b67ae-c61a-4e1c-8efa-67a6d648e386",
+            "judgment": "relevant",
+            "reason": "Автор repolab-author:2:20 ищет партнёрскую программу производителя для продажи физических товаров за комиссию без закупки своего склада, при этом критерии по категории не выбраны и согласие на ЛС отсутствует.",
+            "evidence_event_ids": [
+              "3",
+              "7",
+              "11"
+            ],
+            "support_quotes": [
+              {
+                "source_event_id": "3",
+                "quote": "Шукаю партнерську програму: хочу сам продавати чужі фізичні товари й отримувати комісію. Не послуги і не вакансію."
+              },
+              {
+                "source_event_id": "7",
+                "quote": "Ні, власного бренду не маю. Хочу бути партнером чужого виробника, без початкової закупівлі."
+              },
+              {
+                "source_event_id": "11",
+                "quote": "Ще не визначив; потрібні перевірені умови. Згоди на особисті повідомлення не давав."
+              }
+            ]
+          }
+        ]
+      },
+      "needs": [
+        {
+          "need_id": null,
+          "proposal_version": 2,
+          "title": "Поиск партнёрской программы для продажи физических товаров без первоначальной закупки",
+          "hypothesis": "Участник заинтересован в сотрудничестве с производителем физических товаров по партнёрской модели за комиссию, исключая услуги, найм и необходимость предварительного выкупа партий.",
+          "why_now": "Сообщение опубликовано 2026-10-09T00:02:00.000Z и получено для анализа 2026-10-11T19:44:59.392Z (прошло менее трёх суток). Актуальность сохраняется в рамках свежей дискуссии, однако финальный статус решения остаётся неизвестным.",
+          "exchange_ids": [
+            "df2b67ae-c61a-4e1c-8efa-67a6d648e386"
+          ],
+          "evidence_event_ids": [
+            "3",
+            "7"
+          ],
+          "counterevidence_event_ids": [],
+          "context_event_ids": [
+            "11"
+          ],
+          "support_quotes": [
+            {
+              "source_event_id": "3",
+              "quote": "Шукаю партнерську програму: хочу сам продавати чужі фізичні товари й отримувати комісію. Не послуги і не вакансію."
+            },
+            {
+              "source_event_id": "7",
+              "quote": "Ні, власного бренду не маю. Хочу бути партнером чужого виробника, без початкової закупівлі."
+            },
+            {
+              "source_event_id": "11",
+              "quote": "Ще не визначив; потрібні перевірені умови. Згоди на особисті повідомлення не давав."
+            }
+          ],
+          "context_review": [
+            {
+              "exchange_id": "df2b67ae-c61a-4e1c-8efa-67a6d648e386",
+              "classification": "supporting",
+              "evidence_event_ids": [
+                "3",
+                "7",
+                "11"
+              ],
+              "reason": "Дискуссия подтверждает намерение автора найти партнёрскую программу без стартовых затрат на закупку, фиксируя невыбранную категорию и прямой запрет на контакт в ЛС."
+            }
+          ],
+          "next_step": "prepare_material",
+          "material_preview": {
+            "title": "Внутренний бриф: запрос на партнёрскую программу без выкупа товара",
+            "content": "### Внутренний аналитический бриф для владельца\n\n**Суть запроса:**\nУчастник публично заявил о поиске партнёрской программы для самостоятельной продажи чужих физических товаров за комиссионное вознаграждение. Модели с продажей услуг или поиском работы по найму исключены.\n\n**Ключевые критерии и ограничения:**\n- **Формат работы:** партнёр чужого производителя без початкової закупівлі (без стартового выкупа товара);\n- **Категория и логистика:** категория товаров и условия доставки автором пока не определены;\n- **Контактные ограничения:** участник прямо зафиксировал отсутствие согласия на личные сообщения («Згоди на особисті повідомлення не давав»).\n\n**Рекомендации владельцу:**\n1. Любые прямые контакты, рассылки или коммерческие предложения в ЛС исключены.\n2. Рассматривать данный кейс исключительно как ориентир спроса на партнёрские схемы безрискового дропшиппинга/аффилиатных продаж физической продукции.\n3. Сопоставить внутренние условия партнёрства (требуется ли первоначальная закупка, каков размер комиссии, правила доставки) для возможного публичного раскрытия в общих каналах, если подобная информация публикуется централизованно.",
+            "evidence_event_ids": [
+              "3",
+              "7"
+            ]
+          },
+          "reason": "Формирование внутреннего брифа позволяет зафиксировать критерии спроса без нарушения установленного запрета на контакт и с учётом прямого отказа автора от сообщений в ЛС.",
+          "unknowns": [
+            "Конкретные товарные ниши и страны реализации, приемлемые для участника",
+            "Текущий статус поиска партнёра на момент рассмотрения",
+            "Наличие у владельца открытых публичных программ с нулевым порогом закупки"
+          ]
+        }
+      ]
+    },
+    "receipt": {
+      "disposition": "proposal_created",
+      "goal_id": "0fe28b93-2c29-4fa7-9e54-07fd23b22f9c",
+      "assessment_id": "9b5515c6-0e0c-42e4-832d-d4ceca8ce7eb",
+      "decision_contract_version": 1,
+      "model_projection_version": 1,
+      "model_input_fingerprint": "4af79c30a5f81dc26716aba06c527f7be985e54d599ccc405f538b980fdc234f",
+      "output_fingerprint": "0fc85a480e9832f8fa0b9830ea6933ad223a3985879faee660a557c227ff89f0",
+      "run_id": "efc7d219-3df3-41b8-aab5-d6d67923474e",
+      "model_identity": {
+        "model_id": "gemini-3.8-flash-n",
+        "model_version": "gemini-3.8-flash-n"
+      },
+      "model_identity_reason": null,
+      "model_api_calls": 1,
+      "failure_cause": null
+    },
+    "usage": {
+      "input_tokens": 6386,
+      "output_tokens": 5359,
+      "estimated_cost_usd": null,
+      "cost_status": "unknown"
+    },
+    "checks": {
+      "output_applied_with_current_receipt": true,
+      "tools_empty": true,
+      "receipt_matches_actual_prompt": true,
+      "all_fixture_messages_preserved": true,
+      "no_contact_artifacts": true,
+      "production_runtime_disabled": true,
+      "telegram_disabled": true,
+      "scheduler_disabled": true
+    },
+    "side_effect_counts": {
+      "persons": 0,
+      "contact_permissions": 0,
+      "conversations": 0,
+      "drafts": 0,
+      "delivery_attempts": 0,
+      "audience_work_links": 0,
+      "action_proposals": 0
+    },
+    "test_authority_closed": true,
+    "original_semantic_verdict": "NOT_REVIEWED"
+  },
+  {
+    "dataset": "repolab_audience",
+    "cell_id": "3A",
+    "case_id": "A003",
+    "original_report_sha256": "3be0152589621d161dc92d166fe96c456e162aa6ee763516ad460acede7599c5",
+    "original_gateway_sha256": "eb73f43ef59593851c4c91b5358e19af4fa28906c35d2adfe267354ecae07d70",
+    "manifest_hash": "d3f960ba2f90d75f24d9db88dfa6123060dfe3d32b2edd1ffe33f43d22987565",
+    "model_input_hash": "309fb444774ed45fe8401461153f8b5e46dd20cc85ced1b656122382f3b1be8f",
+    "output_hash": "7b8df091498cfd957dd809c0011fc3b2e315878743b4324431c550285d2543bc",
+    "gold_case_hash": "11539f966bac1691930de7348f7ce30aac41849f2997f237cd2a2fef828c1a78",
+    "requested_model": "gemini-3.7-flash-high",
+    "provider_reported_model": "gemini-3.8-flash-n",
+    "provider_origin": "UNKNOWN",
+    "billing": "UNKNOWN",
+    "upstream_wire_requests": null,
+    "child_exit": 0,
+    "child_exit_proven": true,
+    "gateway_forwards": 1,
+    "gateway_receipt": {
+      "state": "completed",
+      "http_status": 200,
+      "content_type": "application/json",
+      "error_code": null,
+      "error_code_number": null,
+      "error_status": null,
+      "error_reason": null,
+      "error_type": null,
+      "request_id_hash": "4550ae6b012b923032b99811ab0b8b0076eac1a8d1e55d03e696997b2a152d3c",
+      "requested_model": "gemini-3.7-flash-high",
+      "returned_model": "gemini-3.8-flash-n",
+      "identity_attested": false,
+      "usage": {
+        "prompt_tokens": 6559,
+        "completion_tokens": 5291,
+        "total_tokens": 11850
+      }
+    },
+    "source_packet": {
+      "objective": "По данному обсуждению установи, кто лично ищет сторонние физические товары или партнёрскую программу для продажи за комиссию либо дополнительное товарное направление для собственных клиентов. Отличай поставщика, ищущего продавцов, чужую рекламу, цитату и вакансию от такого намерения. Учитывай отмену и неопределённость. Не придумывай коммерческое соответствие, FitLine fit, условия, согласие на контакт или страну. Только внутренний анализ для владельца, без контактов и сообщений людям.",
+      "exchanges": [
+        {
+          "id": "af4b535a-fa87-454f-ade4-3af2cf372bf8",
+          "source_ref": "public:repolab:chat:810003",
+          "anchor_id": "1000",
+          "fingerprint": "1ab26a20bb31f491676e0dfad788b11821fc9175baf0c69413a0a8460826fabb",
+          "current": true,
+          "reasons": [],
+          "evidence": [
+            {
+              "source_event_id": "3",
+              "source_ref": "public:repolab:chat:810003",
+              "author_id": "repolab-author:3:30",
+              "message_id": "1000",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:45:45.163Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:03:00.000Z",
+              "source_updated_at": "2026-10-09T00:03:00.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Коллеги, как организуете работу с клиентами после консультации?",
+              "truncated": false
+            },
+            {
+              "source_event_id": "5",
+              "source_ref": "public:repolab:chat:810003",
+              "author_id": "repolab-author:3:31",
+              "message_id": "1001",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:45:45.164Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:03:01.000Z",
+              "source_updated_at": "2026-10-09T00:03:01.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Я массажист, работаю со своими клиентами. Хочу добавить товарное направление: физические товары для домашнего ухода.",
+              "truncated": false
+            },
+            {
+              "source_event_id": "7",
+              "source_ref": "public:repolab:chat:810003",
+              "author_id": "repolab-author:3:32",
+              "message_id": "1002",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:45:45.165Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:03:02.000Z",
+              "source_updated_at": "2026-10-09T00:03:02.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Это совет клиенту или ты лично ищешь партнёрский ассортимент?",
+              "truncated": false
+            },
+            {
+              "source_event_id": "9",
+              "source_ref": "public:repolab:chat:810003",
+              "author_id": "repolab-author:3:31",
+              "message_id": "1003",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:45:45.166Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:03:03.000Z",
+              "source_updated_at": "2026-10-09T00:03:03.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Лично ищу ассортимент для своих клиентов как дополнительное направление. Сначала изучу составы, цены и условия; ничего не рекомендую пока.",
+              "truncated": false
+            },
+            {
+              "source_event_id": "11",
+              "source_ref": "public:repolab:chat:810003",
+              "author_id": "repolab-author:3:30",
+              "message_id": "1004",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:45:45.167Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:03:04.000Z",
+              "source_updated_at": "2026-10-09T00:03:04.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Есть уже выбранный бренд?",
+              "truncated": false
+            },
+            {
+              "source_event_id": "13",
+              "source_ref": "public:repolab:chat:810003",
+              "author_id": "repolab-author:3:31",
+              "message_id": "1005",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:45:45.167Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:03:05.000Z",
+              "source_updated_at": "2026-10-09T00:03:05.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Нет. Страна доставки и пригодность конкретных товаров ещё не установлены.",
+              "truncated": false
+            }
+          ],
+          "unsupported_count": 0,
+          "coverage": "bounded_explicit_reply_exchange_not_complete_history",
+          "considered": false
+        }
+      ],
+      "coverage": {
+        "batch_exchanges": 8,
+        "max_messages_per_exchange": 32,
+        "source_capacity": 100,
+        "selection": "bounded_reply_scopes_not_all_audience",
+        "source_completeness": "unknown",
+        "identity_independence": "unproven"
+      },
+      "source_summary": {
+        "enrolled_sources": 1,
+        "current_sources": 1,
+        "selected_sources": 1,
+        "selected_exchanges": 1,
+        "source_completeness": "unknown"
+      },
+      "contact_permission": false,
+      "executable": false,
+      "allowed_effects": []
+    },
+    "actual_capture_at": "2026-10-11T19:45:45.190Z",
+    "declared_fixture_observed_at": "2026-10-11T19:00:00.000Z",
+    "disposition": "proposal_created",
+    "output": {
+      "decision_review": {
+        "version": 1,
+        "scope": "supplied_packet_only",
+        "disposition": "needs_proposed",
+        "summary": "В предоставленной ветке зафиксирован участник (массажист), который прямо и лично заявляет о поиске физических товаров для домашнего ухода в качестве дополнительного товарного направления для своих клиентов. При этом бренд, страна доставки и требования к продукции пока не определены, а прямой контакт исключён целью владельца.",
+        "unknowns": [
+          "Конкретная страна и регион доставки товаров",
+          "Критерии состава, ценового диапазона и формата сотрудничества",
+          "Текущий статус поиска с момента публикации сообщения 2026-10-09"
+        ],
+        "exchange_reviews": [
+          {
+            "exchange_id": "af4b535a-fa87-454f-ade4-3af2cf372bf8",
+            "judgment": "relevant",
+            "reason": "Участник явно подтвердил личный поиск физических товаров как дополнительного товарного направления для собственных клиентов, одновременно указав на отсутствие выбранного бренда и неопределённость по стране доставки.",
+            "evidence_event_ids": [
+              "5",
+              "9",
+              "13"
+            ],
+            "support_quotes": [
+              {
+                "source_event_id": "5",
+                "quote": "Я массажист, работаю со своими клиентами. Хочу добавить товарное направление: физические товары для домашнего ухода."
+              },
+              {
+                "source_event_id": "9",
+                "quote": "Лично ищу ассортимент для своих клиентов как дополнительное направление. Сначала изучу составы, цены и условия; ничего не рекомендую пока."
+              },
+              {
+                "source_event_id": "13",
+                "quote": "Нет. Страна доставки и пригодность конкретных товаров ещё не установлены."
+              }
+            ]
+          }
+        ]
+      },
+      "needs": [
+        {
+          "proposal_version": 2,
+          "need_id": null,
+          "title": "Запрос массажиста на подбор физических товаров для домашнего ухода клиентам",
+          "hypothesis": "Специалист (массажист) заинтересован в расширении практики за счёт дополнительного товарного направления (физические товары для домашнего ухода), но находится на этапе предварительного изучения условий, составов и логистики без привязки к конкретному бренду.",
+          "why_now": "Сообщения опубликованы 2026-10-09 и поступили на анализ 2026-10-11 (~2 дня с момента публикации). Запрос свежий в рамках выборки, однако актуальное состояние поиска на текущий момент требует проверки.",
+          "exchange_ids": [
+            "af4b535a-fa87-454f-ade4-3af2cf372bf8"
+          ],
+          "evidence_event_ids": [
+            "5",
+            "9"
+          ],
+          "counterevidence_event_ids": [],
+          "context_event_ids": [
+            "13"
+          ],
+          "context_review": [
+            {
+              "exchange_id": "af4b535a-fa87-454f-ade4-3af2cf372bf8",
+              "classification": "supporting",
+              "evidence_event_ids": [
+                "5",
+                "9",
+                "13"
+              ],
+              "reason": "Участник прямо подтверждает намерение развивать товарное направление для клиентов (события 5, 9), отмечая отсутствие выбранного бренда и неопределённость логистики (событие 13)."
+            }
+          ],
+          "material_preview": {
+            "title": "Внутренняя справка: интерес массажиста к товарному направлению для клиентов",
+            "content": "### Внутренний аналитический бриф\n\n**Суть ситуации:**\nМассажист (`repolab-author:3:31`) в профессиональном диалоге сообщил о намерении добавить товарное направление физических товаров домашнего ухода для своих клиентов.\n\n**Ключевые факты из источника:**\n- Подтверждён личный характер поиска, а не рекомендация чужого продукта или посредничество: *«Лично ищу ассортимент для своих клиентов как дополнительное направление»*.\n- Приоритет критериев: сначала проверка составов, цен и условий партнёрства (*«Сначала изучу составы, цены и условия; ничего не рекомендую пока»*).\n- Отсутствие бренда и логистической привязки: бренд не выбран, страна доставки и пригодность товаров не установлены.\n\n**Ограничения и неизвестные параметры:**\n- География и юрисдикция практики неизвестны.\n- Ценовой сегмент и конкретные категории ухода не детализированы.\n- Соответствие продукции FitLine или иной конкретной линейке не установлено.\n- В соответствии с директивой владельца, внешняя коммуникация и сообщения участникам исключены; материал предназначен строго для внутреннего учёта.",
+            "evidence_event_ids": [
+              "5",
+              "9",
+              "13"
+            ]
+          },
+          "support_quotes": [
+            {
+              "source_event_id": "5",
+              "quote": "Я массажист, работаю со своими клиентами. Хочу добавить товарное направление: физические товары для домашнего ухода."
+            },
+            {
+              "source_event_id": "9",
+              "quote": "Лично ищу ассортимент для своих клиентов как дополнительное направление. Сначала изучу составы, цены и условия; ничего не рекомендую пока."
+            },
+            {
+              "source_event_id": "13",
+              "quote": "Нет. Страна доставки и пригодность конкретных товаров ещё не установлены."
+            }
+          ],
+          "next_step": "prepare_material",
+          "reason": "Поскольку внешние контакты прямо запрещены задачей, подготовлен внутренний аналитический бриф для владельца с фиксацией выявленных потребностей и ограничений.",
+          "unknowns": [
+            "Страна и город ведения практики специалиста",
+            "Ценовые ожидания и требования к сертификации продукции",
+            "Нашёл ли специалист подходящие варианты за время с момента публикации (2026-10-09)"
+          ]
+        }
+      ]
+    },
+    "receipt": {
+      "disposition": "proposal_created",
+      "goal_id": "e887f744-cff6-4b10-a57f-0ce82e17abff",
+      "assessment_id": "defe7a33-b0d3-47db-b947-09e83ced8386",
+      "decision_contract_version": 1,
+      "model_projection_version": 1,
+      "model_input_fingerprint": "309fb444774ed45fe8401461153f8b5e46dd20cc85ced1b656122382f3b1be8f",
+      "output_fingerprint": "7b8df091498cfd957dd809c0011fc3b2e315878743b4324431c550285d2543bc",
+      "run_id": "4d8e8115-4f85-4188-b3be-656bb210830f",
+      "model_identity": {
+        "model_id": "gemini-3.8-flash-n",
+        "model_version": "gemini-3.8-flash-n"
+      },
+      "model_identity_reason": null,
+      "model_api_calls": 1,
+      "failure_cause": null
+    },
+    "usage": {
+      "input_tokens": 6559,
+      "output_tokens": 5291,
+      "estimated_cost_usd": null,
+      "cost_status": "unknown"
+    },
+    "checks": {
+      "output_applied_with_current_receipt": true,
+      "tools_empty": true,
+      "receipt_matches_actual_prompt": true,
+      "all_fixture_messages_preserved": true,
+      "no_contact_artifacts": true,
+      "production_runtime_disabled": true,
+      "telegram_disabled": true,
+      "scheduler_disabled": true
+    },
+    "side_effect_counts": {
+      "persons": 0,
+      "contact_permissions": 0,
+      "conversations": 0,
+      "drafts": 0,
+      "delivery_attempts": 0,
+      "audience_work_links": 0,
+      "action_proposals": 0
+    },
+    "test_authority_closed": true,
+    "original_semantic_verdict": "NOT_REVIEWED"
+  },
+  {
+    "dataset": "repolab_audience",
+    "cell_id": "4A",
+    "case_id": "A004",
+    "original_report_sha256": "07b847c9b9d9fac8ea00b68650b78fca0babdc79932aef9f6e4921c07113c5a8",
+    "original_gateway_sha256": "dbc26b11e12be12112733e8f2e9dbc16015c4c4d0bc27b77df6d6e2f8359717a",
+    "manifest_hash": "d3f960ba2f90d75f24d9db88dfa6123060dfe3d32b2edd1ffe33f43d22987565",
+    "model_input_hash": "68897fabfc870a49b444758a08c0b630947c2c87291ff7598b0a247e01132245",
+    "output_hash": "d19c0f7b37a918f8b3efaabd802d7856ed24ce1894f84251a40aceee0fcb0de6",
+    "gold_case_hash": "68c23cb477355def43431267f19db08e8a47d7937b69abfefeec297cc54a4d73",
+    "requested_model": "gemini-3.7-flash-high",
+    "provider_reported_model": "gemini-3.8-flash-n",
+    "provider_origin": "UNKNOWN",
+    "billing": "UNKNOWN",
+    "upstream_wire_requests": null,
+    "child_exit": 0,
+    "child_exit_proven": true,
+    "gateway_forwards": 1,
+    "gateway_receipt": {
+      "state": "completed",
+      "http_status": 200,
+      "content_type": "application/json",
+      "error_code": null,
+      "error_code_number": null,
+      "error_status": null,
+      "error_reason": null,
+      "error_type": null,
+      "request_id_hash": "eadcee345415f787a3a57d17a03370a313bfb90b530b2edbab3e2d915a031d0d",
+      "requested_model": "gemini-3.7-flash-high",
+      "returned_model": "gemini-3.8-flash-n",
+      "identity_attested": false,
+      "usage": {
+        "prompt_tokens": 6395,
+        "completion_tokens": 4067,
+        "total_tokens": 10462
+      }
+    },
+    "source_packet": {
+      "objective": "По данному обсуждению установи, кто лично ищет сторонние физические товары или партнёрскую программу для продажи за комиссию либо дополнительное товарное направление для собственных клиентов. Отличай поставщика, ищущего продавцов, чужую рекламу, цитату и вакансию от такого намерения. Учитывай отмену и неопределённость. Не придумывай коммерческое соответствие, FitLine fit, условия, согласие на контакт или страну. Только внутренний анализ для владельца, без контактов и сообщений людям.",
+      "exchanges": [
+        {
+          "id": "c53a5540-8868-4841-8ec7-ceee047971c5",
+          "source_ref": "public:repolab:chat:810004",
+          "anchor_id": "1000",
+          "fingerprint": "f76922c7cc59f06864f70d9b49592ffddc5ba3fcf88ba574cb3a5b78a55d75bb",
+          "current": true,
+          "reasons": [],
+          "evidence": [
+            {
+              "source_event_id": "3",
+              "source_ref": "public:repolab:chat:810004",
+              "author_id": "repolab-author:4:40",
+              "message_id": "1000",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:46:30.673Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:04:00.000Z",
+              "source_updated_at": "2026-10-09T00:04:00.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Я тренерка з пілатесу. Особисто шукаю додатковий товарний напрям для моїх клієнтів: інвентар для занять удома.",
+              "truncated": false
+            },
+            {
+              "source_event_id": "5",
+              "source_ref": "public:repolab:chat:810004",
+              "author_id": "repolab-author:4:41",
+              "message_id": "1001",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:46:30.674Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:04:01.000Z",
+              "source_updated_at": "2026-10-09T00:04:01.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Це оголошення виробника чи твій власний запит?",
+              "truncated": false
+            },
+            {
+              "source_event_id": "7",
+              "source_ref": "public:repolab:chat:810004",
+              "author_id": "repolab-author:4:40",
+              "message_id": "1002",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:46:30.674Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:04:02.000Z",
+              "source_updated_at": "2026-10-09T00:04:02.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Мій запит як спеціалістки. Хочу порівняти партнерські умови і додати інвентар до роботи з клієнтами.",
+              "truncated": false
+            },
+            {
+              "source_event_id": "9",
+              "source_ref": "public:repolab:chat:810004",
+              "author_id": "repolab-author:4:42",
+              "message_id": "1003",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:46:30.675Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:04:03.000Z",
+              "source_updated_at": "2026-10-09T00:04:03.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "А харчові добавки також розглядаєш?",
+              "truncated": false
+            },
+            {
+              "source_event_id": "11",
+              "source_ref": "public:repolab:chat:810004",
+              "author_id": "repolab-author:4:40",
+              "message_id": "1004",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:46:30.676Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:04:04.000Z",
+              "source_updated_at": "2026-10-09T00:04:04.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Про добавки нічого не вирішувала. Поки йдеться лише про інвентар; бренд і доставку не обрала.",
+              "truncated": false
+            }
+          ],
+          "unsupported_count": 0,
+          "coverage": "bounded_explicit_reply_exchange_not_complete_history",
+          "considered": false
+        }
+      ],
+      "coverage": {
+        "batch_exchanges": 8,
+        "max_messages_per_exchange": 32,
+        "source_capacity": 100,
+        "selection": "bounded_reply_scopes_not_all_audience",
+        "source_completeness": "unknown",
+        "identity_independence": "unproven"
+      },
+      "source_summary": {
+        "enrolled_sources": 1,
+        "current_sources": 1,
+        "selected_sources": 1,
+        "selected_exchanges": 1,
+        "source_completeness": "unknown"
+      },
+      "contact_permission": false,
+      "executable": false,
+      "allowed_effects": []
+    },
+    "actual_capture_at": "2026-10-11T19:46:30.711Z",
+    "declared_fixture_observed_at": "2026-10-11T19:00:00.000Z",
+    "disposition": "proposal_created",
+    "output": {
+      "decision_review": {
+        "version": 1,
+        "scope": "supplied_packet_only",
+        "disposition": "needs_proposed",
+        "summary": "Выявлен прямой запрос от тренера по пилатесу, которая ищет партнерские условия на инвентарь для домашних тренировок своих клиентов. Добавки не рассматриваются, бренд и логистика не выбраны.",
+        "unknowns": [
+          "Требования к типу инвентаря, ценовому сегменту и объемам",
+          "Регион работы тренера и условия доставки клиентам",
+          "Формат партнерства (комиссия, дропшиппинг или оптовая закупка)"
+        ],
+        "exchange_reviews": [
+          {
+            "exchange_id": "c53a5540-8868-4841-8ec7-ceee047971c5",
+            "judgment": "relevant",
+            "reason": "Автор подтверждает личный запрос специалиста на поиск партнерских условий и товарного направления (инвентарь для дома), при этом пищевые добавки пока не рассматривает.",
+            "evidence_event_ids": [
+              "3",
+              "7",
+              "11"
+            ],
+            "support_quotes": [
+              {
+                "source_event_id": "3",
+                "quote": "Я тренерка з пілатесу. Особисто шукаю додатковий товарний напрям для моїх клієнтів: інвентар для занять удома."
+              },
+              {
+                "source_event_id": "7",
+                "quote": "Мій запит як спеціалістки. Хочу порівняти партнерські умови і додати інвентар до роботи з клієнтами."
+              },
+              {
+                "source_event_id": "11",
+                "quote": "Про добавки нічого не вирішувала. Поки йдеться лише про інвентар; бренд і доставку не обрала."
+              }
+            ]
+          }
+        ]
+      },
+      "needs": [
+        {
+          "need_id": null,
+          "proposal_version": 2,
+          "title": "Поиск партнерской программы на тренировочный инвентарь тренером по пилатесу",
+          "hypothesis": "Тренер по пилатесу ищет партнерские условия для интеграции физического товара (инвентарь для домашних тренировок) в работу со своими клиентами, исключая на данном этапе БАДы.",
+          "why_now": "Сообщение опубликовано 2026-10-09 и поступило на анализ 2026-10-11; автор активно уточняет рамки запроса и находится на стадии сравнения условий.",
+          "exchange_ids": [
+            "c53a5540-8868-4841-8ec7-ceee047971c5"
+          ],
+          "evidence_event_ids": [
+            "3",
+            "7"
+          ],
+          "counterevidence_event_ids": [],
+          "context_event_ids": [
+            "11"
+          ],
+          "context_review": [
+            {
+              "exchange_id": "c53a5540-8868-4841-8ec7-ceee047971c5",
+              "classification": "supporting",
+              "evidence_event_ids": [
+                "3",
+                "7",
+                "11"
+              ],
+              "reason": "Автор подтверждает личный поиск партнерских условий для клиентов под инвентарь и одновременно ограничивает рамки запроса, откладывая вопрос о пищевых добавках."
+            }
+          ],
+          "support_quotes": [
+            {
+              "source_event_id": "3",
+              "quote": "Я тренерка з пілатесу. Особисто шукаю додатковий товарний напрям для моїх клієнтів: інвентар для занять удома."
+            },
+            {
+              "source_event_id": "7",
+              "quote": "Мій запит як спеціалістки. Хочу порівняти партнерські умови і додати інвентар до роботи з клієнтами."
+            },
+            {
+              "source_event_id": "11",
+              "quote": "Про добавки нічого не вирішувала. Поки йдеться лише про інвентар; бренд і доставку не обрала."
+            }
+          ],
+          "next_step": "prepare_material",
+          "reason": "Подготовлен внутренний аналитический бриф для владельца с фиксацией параметров запроса, ограничений по товарной категории и отсутствия согласия на контакт.",
+          "unknowns": [
+            "Конкретные виды инвентаря (коврики, резина, кольца для пилатеса и т.д.)",
+            "География доставки и приемлемые сроки логистики",
+            "Ожидаемый процент комиссии или схема сотрудничества",
+            "Возможный будущий интерес к категории пищевых добавок"
+          ],
+          "material_preview": {
+            "title": "Внутренний бриф: запрос тренера по пилатесу на партнерство по инвентарю",
+            "content": "### Аналитическая записка по ситуации\n\n**Профиль участника:** Тренер по пилатесу, работающая с клиентами.\n\n**Суть запроса:**\n- Личный поиск партнерской программы / дополнительного товарного направления для продажи своим клиентам.\n- Товарная категория: исключительно инвентарь для домашних тренировок.\n\n**Границы и ограничения:**\n- Пищевые добавки прямо исключены на текущем этапе («Про добавки нічого не вирішувала. Поки йдеться лише про інвентар»).\n- Конкретный бренд и условия доставки не выбраны.\n- Коммерческое соответствие продуктам FitLine или пищевым добавкам отсутствует.\n\n**Статус контакта:** Внешний контакт или отправка сообщений участнику запрещены правилами текущего анализа.",
+            "evidence_event_ids": [
+              "3",
+              "7",
+              "11"
+            ]
+          }
+        }
+      ]
+    },
+    "receipt": {
+      "disposition": "proposal_created",
+      "goal_id": "34f04820-c95a-454b-8175-4a8466e5677f",
+      "assessment_id": "9c89a6da-529e-403c-8cd3-65594e3ecdb4",
+      "decision_contract_version": 1,
+      "model_projection_version": 1,
+      "model_input_fingerprint": "68897fabfc870a49b444758a08c0b630947c2c87291ff7598b0a247e01132245",
+      "output_fingerprint": "d19c0f7b37a918f8b3efaabd802d7856ed24ce1894f84251a40aceee0fcb0de6",
+      "run_id": "eca4a386-a9c5-4a8c-a46b-bcc716320ee3",
+      "model_identity": {
+        "model_id": "gemini-3.8-flash-n",
+        "model_version": "gemini-3.8-flash-n"
+      },
+      "model_identity_reason": null,
+      "model_api_calls": 1,
+      "failure_cause": null
+    },
+    "usage": {
+      "input_tokens": 6395,
+      "output_tokens": 4067,
+      "estimated_cost_usd": null,
+      "cost_status": "unknown"
+    },
+    "checks": {
+      "output_applied_with_current_receipt": true,
+      "tools_empty": true,
+      "receipt_matches_actual_prompt": true,
+      "all_fixture_messages_preserved": true,
+      "no_contact_artifacts": true,
+      "production_runtime_disabled": true,
+      "telegram_disabled": true,
+      "scheduler_disabled": true
+    },
+    "side_effect_counts": {
+      "persons": 0,
+      "contact_permissions": 0,
+      "conversations": 0,
+      "drafts": 0,
+      "delivery_attempts": 0,
+      "audience_work_links": 0,
+      "action_proposals": 0
+    },
+    "test_authority_closed": true,
+    "original_semantic_verdict": "NOT_REVIEWED"
+  },
+  {
+    "dataset": "repolab_audience",
+    "cell_id": "5A",
+    "case_id": "A005",
+    "original_report_sha256": "d79b32114dfc831a926f981bab9db4c2180d74bf4282f04c6b49dff5f9e14fed",
+    "original_gateway_sha256": "40d30097c29d28469473ad5175e024ef2d6558abf867c0301e0afd59f0c83ea7",
+    "manifest_hash": "d3f960ba2f90d75f24d9db88dfa6123060dfe3d32b2edd1ffe33f43d22987565",
+    "model_input_hash": "0dccbabba09b8f590918dec2e0d8c25a3982039e211a1521eeb9b8705558c473",
+    "output_hash": "101b97b81f13a69eb969425e35cc1b97295188d0081242809446f51f628761e4",
+    "gold_case_hash": "7b4ccada3d2187345f2afb2b3680b7c688453dc8494ae635318d160557f6835a",
+    "requested_model": "gemini-3.7-flash-high",
+    "provider_reported_model": "gemini-3.8-flash-n",
+    "provider_origin": "UNKNOWN",
+    "billing": "UNKNOWN",
+    "upstream_wire_requests": null,
+    "child_exit": 0,
+    "child_exit_proven": true,
+    "gateway_forwards": 1,
+    "gateway_receipt": {
+      "state": "completed",
+      "http_status": 200,
+      "content_type": "application/json",
+      "error_code": null,
+      "error_code_number": null,
+      "error_status": null,
+      "error_reason": null,
+      "error_type": null,
+      "request_id_hash": "1127d560022d82ad362b271843849016a8d1173b3058c8dafa3b6f1ddfdc17f3",
+      "requested_model": "gemini-3.7-flash-high",
+      "returned_model": "gemini-3.8-flash-n",
+      "identity_attested": false,
+      "usage": {
+        "prompt_tokens": 6546,
+        "completion_tokens": 1519,
+        "total_tokens": 8065
+      }
+    },
+    "source_packet": {
+      "objective": "По данному обсуждению установи, кто лично ищет сторонние физические товары или партнёрскую программу для продажи за комиссию либо дополнительное товарное направление для собственных клиентов. Отличай поставщика, ищущего продавцов, чужую рекламу, цитату и вакансию от такого намерения. Учитывай отмену и неопределённость. Не придумывай коммерческое соответствие, FitLine fit, условия, согласие на контакт или страну. Только внутренний анализ для владельца, без контактов и сообщений людям.",
+      "exchanges": [
+        {
+          "id": "bbcc772b-848b-4a85-94f8-f65d5d0f6038",
+          "source_ref": "public:repolab:chat:810005",
+          "anchor_id": "1000",
+          "fingerprint": "1ab26a20bb31f491676e0dfad788b11821fc9175baf0c69413a0a8460826fabb",
+          "current": true,
+          "reasons": [],
+          "evidence": [
+            {
+              "source_event_id": "3",
+              "source_ref": "public:repolab:chat:810005",
+              "author_id": "repolab-author:5:50",
+              "message_id": "1000",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:47:05.330Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:05:00.000Z",
+              "source_updated_at": "2026-10-09T00:05:00.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Что нового у местных производителей?",
+              "truncated": false
+            },
+            {
+              "source_event_id": "5",
+              "source_ref": "public:repolab:chat:810005",
+              "author_id": "repolab-author:5:51",
+              "message_id": "1001",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:47:05.330Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:05:01.000Z",
+              "source_updated_at": "2026-10-09T00:05:01.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Я владелец производства керамики. Ищу продавцов наших товаров и региональных дистрибьюторов, плачу комиссию с продаж.",
+              "truncated": false
+            },
+            {
+              "source_event_id": "7",
+              "source_ref": "public:repolab:chat:810005",
+              "author_id": "repolab-author:5:52",
+              "message_id": "1002",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:47:05.331Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:05:02.000Z",
+              "source_updated_at": "2026-10-09T00:05:02.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Ты сам хочешь продавать чужие товары за комиссию?",
+              "truncated": false
+            },
+            {
+              "source_event_id": "9",
+              "source_ref": "public:repolab:chat:810005",
+              "author_id": "repolab-author:5:51",
+              "message_id": "1003",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:47:05.332Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:05:03.000Z",
+              "source_updated_at": "2026-10-09T00:05:03.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Нет, товары наши. Мне нужны люди, которые будут продавать нашу керамику, а не программа для меня.",
+              "truncated": false
+            },
+            {
+              "source_event_id": "11",
+              "source_ref": "public:repolab:chat:810005",
+              "author_id": "repolab-author:5:50",
+              "message_id": "1004",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:47:05.333Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:05:04.000Z",
+              "source_updated_at": "2026-10-09T00:05:04.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "То есть ты поставщик и расширяешь сеть сбыта?",
+              "truncated": false
+            },
+            {
+              "source_event_id": "13",
+              "source_ref": "public:repolab:chat:810005",
+              "author_id": "repolab-author:5:51",
+              "message_id": "1005",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:47:05.334Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:05:05.000Z",
+              "source_updated_at": "2026-10-09T00:05:05.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Да, именно так. Региональные условия обсудим отдельно.",
+              "truncated": false
+            }
+          ],
+          "unsupported_count": 0,
+          "coverage": "bounded_explicit_reply_exchange_not_complete_history",
+          "considered": false
+        }
+      ],
+      "coverage": {
+        "batch_exchanges": 8,
+        "max_messages_per_exchange": 32,
+        "source_capacity": 100,
+        "selection": "bounded_reply_scopes_not_all_audience",
+        "source_completeness": "unknown",
+        "identity_independence": "unproven"
+      },
+      "source_summary": {
+        "enrolled_sources": 1,
+        "current_sources": 1,
+        "selected_sources": 1,
+        "selected_exchanges": 1,
+        "source_completeness": "unknown"
+      },
+      "contact_permission": false,
+      "executable": false,
+      "allowed_effects": []
+    },
+    "actual_capture_at": "2026-10-11T19:47:05.355Z",
+    "declared_fixture_observed_at": "2026-10-11T19:00:00.000Z",
+    "disposition": "no_need_proposed",
+    "output": {
+      "decision_review": {
+        "version": 1,
+        "scope": "supplied_packet_only",
+        "disposition": "no_need_proposed",
+        "summary": "В предоставленной ветке нет участников, которые лично ищут сторонние товары или партнёрскую программу для продажи за комиссию. Автор repolab-author:5:51 прямо заявляет, что является производителем керамики и сам ищет дистрибьюторов и продавцов для собственной продукции.",
+        "unknowns": [
+          "Планы и потребности остальных участников обсуждения (repolab-author:5:50 и repolab-author:5:52) относительно дистрибуции сторонних товаров",
+          "Актуальность поиска дистрибьюторов производителем на текущий момент"
+        ],
+        "exchange_reviews": [
+          {
+            "exchange_id": "bbcc772b-848b-4a85-94f8-f65d5d0f6038",
+            "judgment": "no_proposal",
+            "reason": "Участник выступает в роли поставщика/производителя, расширяющего сеть сбыта своей керамики, и прямо отвергает поиск чужих товаров или партнёрских программ для себя.",
+            "evidence_event_ids": [
+              "5",
+              "9",
+              "13"
+            ],
+            "support_quotes": [
+              {
+                "source_event_id": "5",
+                "quote": "Я владелец производства керамики. Ищу продавцов наших товаров и региональных дистрибьюторов, плачу комиссию с продаж."
+              },
+              {
+                "source_event_id": "9",
+                "quote": "Нет, товары наши. Мне нужны люди, которые будут продавать нашу керамику, а не программа для меня."
+              },
+              {
+                "source_event_id": "13",
+                "quote": "Да, именно так. Региональные условия обсудим отдельно."
+              }
+            ]
+          }
+        ]
+      },
+      "needs": []
+    },
+    "receipt": {
+      "disposition": "no_need_proposed",
+      "goal_id": "f955f852-1464-4e84-bcc3-f9933cf80db5",
+      "assessment_id": "11b9c567-014f-4201-8052-c32b49cabbca",
+      "decision_contract_version": 1,
+      "model_projection_version": 1,
+      "model_input_fingerprint": "0dccbabba09b8f590918dec2e0d8c25a3982039e211a1521eeb9b8705558c473",
+      "output_fingerprint": "101b97b81f13a69eb969425e35cc1b97295188d0081242809446f51f628761e4",
+      "run_id": "fadd3c5c-69c8-4664-bfe2-d505f94b0f7e",
+      "model_identity": {
+        "model_id": "gemini-3.8-flash-n",
+        "model_version": "gemini-3.8-flash-n"
+      },
+      "model_identity_reason": null,
+      "model_api_calls": 1,
+      "failure_cause": null
+    },
+    "usage": {
+      "input_tokens": 6546,
+      "output_tokens": 1519,
+      "estimated_cost_usd": null,
+      "cost_status": "unknown"
+    },
+    "checks": {
+      "output_applied_with_current_receipt": true,
+      "tools_empty": true,
+      "receipt_matches_actual_prompt": true,
+      "all_fixture_messages_preserved": true,
+      "no_contact_artifacts": true,
+      "production_runtime_disabled": true,
+      "telegram_disabled": true,
+      "scheduler_disabled": true
+    },
+    "side_effect_counts": {
+      "persons": 0,
+      "contact_permissions": 0,
+      "conversations": 0,
+      "drafts": 0,
+      "delivery_attempts": 0,
+      "audience_work_links": 0,
+      "action_proposals": 0
+    },
+    "test_authority_closed": true,
+    "original_semantic_verdict": "NOT_REVIEWED"
+  },
+  {
+    "dataset": "repolab_audience",
+    "cell_id": "6A",
+    "case_id": "A006",
+    "original_report_sha256": "b88c7f04a384d311e1c300af2837156ee12d6191faaac90583fff85df01169ac",
+    "original_gateway_sha256": "ffe5a49ded9f77b1b1badc54b3833e833babbfcf2a8f976b313a9870b011d8fa",
+    "manifest_hash": "d3f960ba2f90d75f24d9db88dfa6123060dfe3d32b2edd1ffe33f43d22987565",
+    "model_input_hash": "6881588f4795ed70b0e3571c8d35eaa6331439b96e480b39df2b11ad1eab2418",
+    "output_hash": "8fb7ffec8e8ba6f55299e73823fbbc090a9c73340802c77d55a37da9961a3e24",
+    "gold_case_hash": "389805df25327f3e81cf454e545df70f1d2107eea631f0bada71b8b5f49d025c",
+    "requested_model": "gemini-3.7-flash-high",
+    "provider_reported_model": "gemini-3.8-flash-n",
+    "provider_origin": "UNKNOWN",
+    "billing": "UNKNOWN",
+    "upstream_wire_requests": null,
+    "child_exit": 0,
+    "child_exit_proven": true,
+    "gateway_forwards": 1,
+    "gateway_receipt": {
+      "state": "completed",
+      "http_status": 200,
+      "content_type": "application/json",
+      "error_code": null,
+      "error_code_number": null,
+      "error_status": null,
+      "error_reason": null,
+      "error_type": null,
+      "request_id_hash": "8b1ba6ccb030a392d441ce854dc8977df0cd26253c499123fb0b95c7b2845697",
+      "requested_model": "gemini-3.7-flash-high",
+      "returned_model": "gemini-3.8-flash-n",
+      "identity_attested": false,
+      "usage": {
+        "prompt_tokens": 6380,
+        "completion_tokens": 1603,
+        "total_tokens": 7983
+      }
+    },
+    "source_packet": {
+      "objective": "По данному обсуждению установи, кто лично ищет сторонние физические товары или партнёрскую программу для продажи за комиссию либо дополнительное товарное направление для собственных клиентов. Отличай поставщика, ищущего продавцов, чужую рекламу, цитату и вакансию от такого намерения. Учитывай отмену и неопределённость. Не придумывай коммерческое соответствие, FitLine fit, условия, согласие на контакт или страну. Только внутренний анализ для владельца, без контактов и сообщений людям.",
+      "exchanges": [
+        {
+          "id": "e343b704-1157-4fb0-8ff3-abbccb2f1687",
+          "source_ref": "public:repolab:chat:810006",
+          "anchor_id": "1000",
+          "fingerprint": "f76922c7cc59f06864f70d9b49592ffddc5ba3fcf88ba574cb3a5b78a55d75bb",
+          "current": true,
+          "reasons": [],
+          "evidence": [
+            {
+              "source_event_id": "3",
+              "source_ref": "public:repolab:chat:810006",
+              "author_id": "repolab-author:6:60",
+              "message_id": "1000",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:47:21.747Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:06:00.000Z",
+              "source_updated_at": "2026-10-09T00:06:00.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Ми виробляємо власні лампи. Я керую продажами й шукаю дистрибʼюторів наших ламп у нових регіонах.",
+              "truncated": false
+            },
+            {
+              "source_event_id": "5",
+              "source_ref": "public:repolab:chat:810006",
+              "author_id": "repolab-author:6:61",
+              "message_id": "1001",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:47:21.748Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:06:01.000Z",
+              "source_updated_at": "2026-10-09T00:06:01.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Шукаєш чужу партнерську програму, щоб заробляти комісію?",
+              "truncated": false
+            },
+            {
+              "source_event_id": "7",
+              "source_ref": "public:repolab:chat:810006",
+              "author_id": "repolab-author:6:60",
+              "message_id": "1002",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:47:21.749Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:06:02.000Z",
+              "source_updated_at": "2026-10-09T00:06:02.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Ні. Пропоную наші товари іншим продавцям. Я на стороні постачальника, власний асортимент уже є.",
+              "truncated": false
+            },
+            {
+              "source_event_id": "9",
+              "source_ref": "public:repolab:chat:810006",
+              "author_id": "repolab-author:6:62",
+              "message_id": "1003",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:47:21.750Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:06:03.000Z",
+              "source_updated_at": "2026-10-09T00:06:03.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Які регіони?",
+              "truncated": false
+            },
+            {
+              "source_event_id": "11",
+              "source_ref": "public:repolab:chat:810006",
+              "author_id": "repolab-author:6:60",
+              "message_id": "1004",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:47:21.751Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:06:04.000Z",
+              "source_updated_at": "2026-10-09T00:06:04.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Конкретні регіони ще обговорюємо. Це пошук збутових партнерів для виробництва.",
+              "truncated": false
+            }
+          ],
+          "unsupported_count": 0,
+          "coverage": "bounded_explicit_reply_exchange_not_complete_history",
+          "considered": false
+        }
+      ],
+      "coverage": {
+        "batch_exchanges": 8,
+        "max_messages_per_exchange": 32,
+        "source_capacity": 100,
+        "selection": "bounded_reply_scopes_not_all_audience",
+        "source_completeness": "unknown",
+        "identity_independence": "unproven"
+      },
+      "source_summary": {
+        "enrolled_sources": 1,
+        "current_sources": 1,
+        "selected_sources": 1,
+        "selected_exchanges": 1,
+        "source_completeness": "unknown"
+      },
+      "contact_permission": false,
+      "executable": false,
+      "allowed_effects": []
+    },
+    "actual_capture_at": "2026-10-11T19:47:21.772Z",
+    "declared_fixture_observed_at": "2026-10-11T19:00:00.000Z",
+    "disposition": "no_need_proposed",
+    "output": {
+      "decision_review": {
+        "version": 1,
+        "scope": "supplied_packet_only",
+        "disposition": "no_need_proposed",
+        "summary": "В предоставленной ветке нет участников, которые искали бы сторонние физические товары, партнёрскую программу или дополнительный ассортимент для перепродажи. Автор repolab-author:6:60 прямо заявляет, что выступает производителем и поставщиком собственных ламп и ищет дистрибьюторов, а также опровергает поиск сторонней партнёрской программы.",
+        "unknowns": [
+          "Планы других участников ветки (repolab-author:6:61, repolab-author:6:62) относительно продажи сторонних товаров",
+          "Дальнейшие критерии отбора партнёров со стороны производителя"
+        ],
+        "exchange_reviews": [
+          {
+            "exchange_id": "e343b704-1157-4fb0-8ff3-abbccb2f1687",
+            "judgment": "no_proposal",
+            "reason": "Участник repolab-author:6:60 является поставщиком/производителем ламп, ищущим дистрибьюторов для своей продукции, и прямо опроверг интерес к работе по сторонней партнёрской программе за комиссию.",
+            "evidence_event_ids": [
+              "3",
+              "5",
+              "7",
+              "11"
+            ],
+            "support_quotes": [
+              {
+                "source_event_id": "3",
+                "quote": "Ми виробляємо власні лампи. Я керую продажами й шукаю дистрибʼюторів наших ламп у нових регіонах."
+              },
+              {
+                "source_event_id": "5",
+                "quote": "Шукаєш чужу партнерську програму, щоб заробляти комісію?"
+              },
+              {
+                "source_event_id": "7",
+                "quote": "Ні. Пропоную наші товари іншим продавцям. Я на стороні постачальника, власний асортимент уже є."
+              },
+              {
+                "source_event_id": "11",
+                "quote": "Конкретні регіони ще обговорюємо. Це пошук збутових партнерів для виробництва."
+              }
+            ]
+          }
+        ]
+      },
+      "needs": []
+    },
+    "receipt": {
+      "disposition": "no_need_proposed",
+      "goal_id": "27e1f196-42f7-447e-bc45-5fb6e33b0106",
+      "assessment_id": "18eb6853-3a40-4308-b109-550156a21348",
+      "decision_contract_version": 1,
+      "model_projection_version": 1,
+      "model_input_fingerprint": "6881588f4795ed70b0e3571c8d35eaa6331439b96e480b39df2b11ad1eab2418",
+      "output_fingerprint": "8fb7ffec8e8ba6f55299e73823fbbc090a9c73340802c77d55a37da9961a3e24",
+      "run_id": "5005b69d-a11e-4cb3-8c6a-78c67576ad9d",
+      "model_identity": {
+        "model_id": "gemini-3.8-flash-n",
+        "model_version": "gemini-3.8-flash-n"
+      },
+      "model_identity_reason": null,
+      "model_api_calls": 1,
+      "failure_cause": null
+    },
+    "usage": {
+      "input_tokens": 6380,
+      "output_tokens": 1603,
+      "estimated_cost_usd": null,
+      "cost_status": "unknown"
+    },
+    "checks": {
+      "output_applied_with_current_receipt": true,
+      "tools_empty": true,
+      "receipt_matches_actual_prompt": true,
+      "all_fixture_messages_preserved": true,
+      "no_contact_artifacts": true,
+      "production_runtime_disabled": true,
+      "telegram_disabled": true,
+      "scheduler_disabled": true
+    },
+    "side_effect_counts": {
+      "persons": 0,
+      "contact_permissions": 0,
+      "conversations": 0,
+      "drafts": 0,
+      "delivery_attempts": 0,
+      "audience_work_links": 0,
+      "action_proposals": 0
+    },
+    "test_authority_closed": true,
+    "original_semantic_verdict": "NOT_REVIEWED"
+  },
+  {
+    "dataset": "repolab_audience",
+    "cell_id": "7A",
+    "case_id": "A007",
+    "original_report_sha256": "8b072538c6bca776ab7c9253d6d8d35326fdbfe9d0465c4ab68c0dbd40950c0c",
+    "original_gateway_sha256": "592fef883b7f4aab3367ace99bdd506044740d13bf6fc2d92420c8b15d35f740",
+    "manifest_hash": "d3f960ba2f90d75f24d9db88dfa6123060dfe3d32b2edd1ffe33f43d22987565",
+    "model_input_hash": "7f185cd371b323af7428bb352449c0361b06dc17277119976ffffe66677c021b",
+    "output_hash": "1c74f2802ff2df5a78ce9ebe9164490df6268cf8c5e08227934cc12ff5b17a32",
+    "gold_case_hash": "f8e5ef3db6eece7ca63dae22bb9e02870677bdbd9a83074704ce2028b3c0eccb",
+    "requested_model": "gemini-3.7-flash-high",
+    "provider_reported_model": "gemini-3.8-flash-n",
+    "provider_origin": "UNKNOWN",
+    "billing": "UNKNOWN",
+    "upstream_wire_requests": null,
+    "child_exit": 0,
+    "child_exit_proven": true,
+    "gateway_forwards": 1,
+    "gateway_receipt": {
+      "state": "completed",
+      "http_status": 200,
+      "content_type": "application/json",
+      "error_code": null,
+      "error_code_number": null,
+      "error_status": null,
+      "error_reason": null,
+      "error_type": null,
+      "request_id_hash": "a04be539584cf261c5d32a45b67c8ed4e316ddf6f4fcc1b41f7d22e3c20f6cac",
+      "requested_model": "gemini-3.7-flash-high",
+      "returned_model": "gemini-3.8-flash-n",
+      "identity_attested": false,
+      "usage": {
+        "prompt_tokens": 6364,
+        "completion_tokens": 1612,
+        "total_tokens": 7976
+      }
+    },
+    "source_packet": {
+      "objective": "По данному обсуждению установи, кто лично ищет сторонние физические товары или партнёрскую программу для продажи за комиссию либо дополнительное товарное направление для собственных клиентов. Отличай поставщика, ищущего продавцов, чужую рекламу, цитату и вакансию от такого намерения. Учитывай отмену и неопределённость. Не придумывай коммерческое соответствие, FitLine fit, условия, согласие на контакт или страну. Только внутренний анализ для владельца, без контактов и сообщений людям.",
+      "exchanges": [
+        {
+          "id": "712c710d-e163-4de9-8e74-fb02e8e7e4dd",
+          "source_ref": "public:repolab:chat:810007",
+          "anchor_id": "1000",
+          "fingerprint": "f76922c7cc59f06864f70d9b49592ffddc5ba3fcf88ba574cb3a5b78a55d75bb",
+          "current": true,
+          "reasons": [],
+          "evidence": [
+            {
+              "source_event_id": "3",
+              "source_ref": "public:repolab:chat:810007",
+              "author_id": "repolab-author:7:70",
+              "message_id": "1000",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:47:39.621Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:07:00.000Z",
+              "source_updated_at": "2026-10-09T00:07:00.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Как вы отличаете рекламу от настоящего вопроса в чате?",
+              "truncated": false
+            },
+            {
+              "source_event_id": "5",
+              "source_ref": "public:repolab:chat:810007",
+              "author_id": "repolab-author:7:71",
+              "message_id": "1001",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:47:39.622Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:07:01.000Z",
+              "source_updated_at": "2026-10-09T00:07:01.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Пример объявления: «Ищу партнёров для продажи товаров за комиссию! Пишите мне». Это чужая реклама, цитирую для обсуждения модерации.",
+              "truncated": false
+            },
+            {
+              "source_event_id": "7",
+              "source_ref": "public:repolab:chat:810007",
+              "author_id": "repolab-author:7:71",
+              "message_id": "1002",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:47:39.623Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:07:02.000Z",
+              "source_updated_at": "2026-10-09T00:07:02.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Сам ничего продавать и партнёрскую программу искать не собираюсь.",
+              "truncated": false
+            },
+            {
+              "source_event_id": "9",
+              "source_ref": "public:repolab:chat:810007",
+              "author_id": "repolab-author:7:72",
+              "message_id": "1003",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:47:39.624Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:07:03.000Z",
+              "source_updated_at": "2026-10-09T00:07:03.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "То есть это твоё предложение?",
+              "truncated": false
+            },
+            {
+              "source_event_id": "11",
+              "source_ref": "public:repolab:chat:810007",
+              "author_id": "repolab-author:7:71",
+              "message_id": "1004",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:47:39.624Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:07:04.000Z",
+              "source_updated_at": "2026-10-09T00:07:04.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Нет, чужая цитата. Не приписывайте её мне; обсуждаем только правила чата.",
+              "truncated": false
+            }
+          ],
+          "unsupported_count": 0,
+          "coverage": "bounded_explicit_reply_exchange_not_complete_history",
+          "considered": false
+        }
+      ],
+      "coverage": {
+        "batch_exchanges": 8,
+        "max_messages_per_exchange": 32,
+        "source_capacity": 100,
+        "selection": "bounded_reply_scopes_not_all_audience",
+        "source_completeness": "unknown",
+        "identity_independence": "unproven"
+      },
+      "source_summary": {
+        "enrolled_sources": 1,
+        "current_sources": 1,
+        "selected_sources": 1,
+        "selected_exchanges": 1,
+        "source_completeness": "unknown"
+      },
+      "contact_permission": false,
+      "executable": false,
+      "allowed_effects": []
+    },
+    "actual_capture_at": "2026-10-11T19:47:39.645Z",
+    "declared_fixture_observed_at": "2026-10-11T19:00:00.000Z",
+    "disposition": "no_need_proposed",
+    "output": {
+      "decision_review": {
+        "version": 1,
+        "scope": "supplied_packet_only",
+        "disposition": "no_need_proposed",
+        "summary": "В предоставленном обмене участники обсуждают правила модерации чата и распознавание рекламы. Цитата о поиске партнёров для продажи товаров за комиссию является примером чужого объявления, и автор явно отрицает личный поиск партнёрских программ или товаров для продажи.",
+        "unknowns": [
+          "Существуют ли реальные коммерческие намерения или запросы участников за рамками данного обсуждения правил модерации",
+          "Интересы и потребности других участников сообщества вне предоставленного фрагмента чата"
+        ],
+        "exchange_reviews": [
+          {
+            "exchange_id": "712c710d-e163-4de9-8e74-fb02e8e7e4dd",
+            "judgment": "no_proposal",
+            "reason": "Участники обсуждают модерацию сообщений. Текст с поиском партнёров приведён исключительно как пример чужой рекламы, а автор сообщения прямо заявляет об отсутствии намерения что-либо продавать или искать партнёрскую программу.",
+            "evidence_event_ids": [
+              "3",
+              "5",
+              "7",
+              "9",
+              "11"
+            ],
+            "support_quotes": [
+              {
+                "source_event_id": "3",
+                "quote": "Как вы отличаете рекламу от настоящего вопроса в чате?"
+              },
+              {
+                "source_event_id": "5",
+                "quote": "Пример объявления: «Ищу партнёров для продажи товаров за комиссию! Пишите мне». Это чужая реклама, цитирую для обсуждения модерации."
+              },
+              {
+                "source_event_id": "7",
+                "quote": "Сам ничего продавать и партнёрскую программу искать не собираюсь."
+              },
+              {
+                "source_event_id": "9",
+                "quote": "То есть это твоё предложение?"
+              },
+              {
+                "source_event_id": "11",
+                "quote": "Нет, чужая цитата. Не приписывайте её мне; обсуждаем только правила чата."
+              }
+            ]
+          }
+        ]
+      },
+      "needs": []
+    },
+    "receipt": {
+      "disposition": "no_need_proposed",
+      "goal_id": "47dd320d-a348-47b2-9596-bf5f5feae81b",
+      "assessment_id": "497e38ea-0030-4763-883b-516c5677f392",
+      "decision_contract_version": 1,
+      "model_projection_version": 1,
+      "model_input_fingerprint": "7f185cd371b323af7428bb352449c0361b06dc17277119976ffffe66677c021b",
+      "output_fingerprint": "1c74f2802ff2df5a78ce9ebe9164490df6268cf8c5e08227934cc12ff5b17a32",
+      "run_id": "300034a0-8781-481f-a77c-0f6b95257c05",
+      "model_identity": {
+        "model_id": "gemini-3.8-flash-n",
+        "model_version": "gemini-3.8-flash-n"
+      },
+      "model_identity_reason": null,
+      "model_api_calls": 1,
+      "failure_cause": null
+    },
+    "usage": {
+      "input_tokens": 6364,
+      "output_tokens": 1612,
+      "estimated_cost_usd": null,
+      "cost_status": "unknown"
+    },
+    "checks": {
+      "output_applied_with_current_receipt": true,
+      "tools_empty": true,
+      "receipt_matches_actual_prompt": true,
+      "all_fixture_messages_preserved": true,
+      "no_contact_artifacts": true,
+      "production_runtime_disabled": true,
+      "telegram_disabled": true,
+      "scheduler_disabled": true
+    },
+    "side_effect_counts": {
+      "persons": 0,
+      "contact_permissions": 0,
+      "conversations": 0,
+      "drafts": 0,
+      "delivery_attempts": 0,
+      "audience_work_links": 0,
+      "action_proposals": 0
+    },
+    "test_authority_closed": true,
+    "original_semantic_verdict": "NOT_REVIEWED"
+  },
+  {
+    "dataset": "repolab_audience",
+    "cell_id": "8A",
+    "case_id": "A008",
+    "original_report_sha256": "5f3480741df2fc52328da2bd12e5cf69389b4ad2c6f9cdc9a131ef6951bbd10e",
+    "original_gateway_sha256": "95177c4bfceef56c2d1b7cbc855a7a18e93621f84f9547a84244e5a1400b07fd",
+    "manifest_hash": "d3f960ba2f90d75f24d9db88dfa6123060dfe3d32b2edd1ffe33f43d22987565",
+    "model_input_hash": "9e0cb217c02b9874e2a5b94c95b0c11dce8134a67ad7a5d12f7e28a2a5138a40",
+    "output_hash": "9f1606ae16e189c08fdbbb5a734b46757e72d994d02c946af4b87842fbcc002f",
+    "gold_case_hash": "c8e906dffd5bc2683bb7eb6cec08838f7a562291ce7d7cce819d290a6404ee51",
+    "requested_model": "gemini-3.7-flash-high",
+    "provider_reported_model": "gemini-3.8-flash-n",
+    "provider_origin": "UNKNOWN",
+    "billing": "UNKNOWN",
+    "upstream_wire_requests": null,
+    "child_exit": 0,
+    "child_exit_proven": true,
+    "gateway_forwards": 1,
+    "gateway_receipt": {
+      "state": "completed",
+      "http_status": 200,
+      "content_type": "application/json",
+      "error_code": null,
+      "error_code_number": null,
+      "error_status": null,
+      "error_reason": null,
+      "error_type": null,
+      "request_id_hash": "9b06557a0a0483b5fbc3daa3133c7dca0eb915c089e7708ba943e9f651b49b8c",
+      "requested_model": "gemini-3.7-flash-high",
+      "returned_model": "gemini-3.8-flash-n",
+      "identity_attested": false,
+      "usage": {
+        "prompt_tokens": 6360,
+        "completion_tokens": 1578,
+        "total_tokens": 7938
+      }
+    },
+    "source_packet": {
+      "objective": "По данному обсуждению установи, кто лично ищет сторонние физические товары или партнёрскую программу для продажи за комиссию либо дополнительное товарное направление для собственных клиентов. Отличай поставщика, ищущего продавцов, чужую рекламу, цитату и вакансию от такого намерения. Учитывай отмену и неопределённость. Не придумывай коммерческое соответствие, FitLine fit, условия, согласие на контакт или страну. Только внутренний анализ для владельца, без контактов и сообщений людям.",
+      "exchanges": [
+        {
+          "id": "566d1076-44a5-4708-9c84-a2052e0814dd",
+          "source_ref": "public:repolab:chat:810008",
+          "anchor_id": "1000",
+          "fingerprint": "f76922c7cc59f06864f70d9b49592ffddc5ba3fcf88ba574cb3a5b78a55d75bb",
+          "current": true,
+          "reasons": [],
+          "evidence": [
+            {
+              "source_event_id": "3",
+              "source_ref": "public:repolab:chat:810008",
+              "author_id": "repolab-author:8:80",
+              "message_id": "1000",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:47:57.410Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:08:00.000Z",
+              "source_updated_at": "2026-10-09T00:08:00.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Тут можна розмістити оголошення про роботу?",
+              "truncated": false
+            },
+            {
+              "source_event_id": "5",
+              "source_ref": "public:repolab:chat:810008",
+              "author_id": "repolab-author:8:81",
+              "message_id": "1001",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:47:57.411Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:08:01.000Z",
+              "source_updated_at": "2026-10-09T00:08:01.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Реклама вакансії: наймаємо менеджера з продажу на зарплату, повна зайнятість. Я HR компанії.",
+              "truncated": false
+            },
+            {
+              "source_event_id": "7",
+              "source_ref": "public:repolab:chat:810008",
+              "author_id": "repolab-author:8:82",
+              "message_id": "1002",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:47:57.411Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:08:02.000Z",
+              "source_updated_at": "2026-10-09T00:08:02.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "А ти особисто шукаєш товарний бізнес чи партнерську програму?",
+              "truncated": false
+            },
+            {
+              "source_event_id": "9",
+              "source_ref": "public:repolab:chat:810008",
+              "author_id": "repolab-author:8:81",
+              "message_id": "1003",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:47:57.412Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:08:03.000Z",
+              "source_updated_at": "2026-10-09T00:08:03.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Ні, тільки публікую вакансію роботодавця. Власного запиту на сторонні товари або додатковий напрям немає.",
+              "truncated": false
+            },
+            {
+              "source_event_id": "11",
+              "source_ref": "public:repolab:chat:810008",
+              "author_id": "repolab-author:8:80",
+              "message_id": "1004",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:47:57.413Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:08:04.000Z",
+              "source_updated_at": "2026-10-09T00:08:04.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Питання модерації вакансій обговоримо окремо.",
+              "truncated": false
+            }
+          ],
+          "unsupported_count": 0,
+          "coverage": "bounded_explicit_reply_exchange_not_complete_history",
+          "considered": false
+        }
+      ],
+      "coverage": {
+        "batch_exchanges": 8,
+        "max_messages_per_exchange": 32,
+        "source_capacity": 100,
+        "selection": "bounded_reply_scopes_not_all_audience",
+        "source_completeness": "unknown",
+        "identity_independence": "unproven"
+      },
+      "source_summary": {
+        "enrolled_sources": 1,
+        "current_sources": 1,
+        "selected_sources": 1,
+        "selected_exchanges": 1,
+        "source_completeness": "unknown"
+      },
+      "contact_permission": false,
+      "executable": false,
+      "allowed_effects": []
+    },
+    "actual_capture_at": "2026-10-11T19:47:57.433Z",
+    "declared_fixture_observed_at": "2026-10-11T19:00:00.000Z",
+    "disposition": "no_need_proposed",
+    "output": {
+      "decision_review": {
+        "version": 1,
+        "scope": "supplied_packet_only",
+        "disposition": "no_need_proposed",
+        "summary": "В предоставленном фрагменте отсутствует личный интерес к поиску сторонних физических товаров или партнёрских программ. Сообщение является публикацией вакансии наёмного менеджера по продажам, а автор явно подтвердил отсутствие личного запроса на товары или дополнительное направление.",
+        "unknowns": [
+          "Личные потребности и намерения других участников чата за пределами предоставленной выборки",
+          "Профиль компании работодателя и специфика продаваемого продукта"
+        ],
+        "exchange_reviews": [
+          {
+            "exchange_id": "566d1076-44a5-4708-9c84-a2052e0814dd",
+            "judgment": "no_proposal",
+            "reason": "Участник размещает объявление о найме сотрудника в штат от лица HR и прямо отрицает наличие собственного коммерческого запроса на партнёрство или сторонние товары.",
+            "evidence_event_ids": [
+              "5",
+              "9"
+            ],
+            "support_quotes": [
+              {
+                "source_event_id": "5",
+                "quote": "Реклама вакансії: наймаємо менеджера з продажу на зарплату, повна зайнятість. Я HR компанії."
+              },
+              {
+                "source_event_id": "9",
+                "quote": "Ні, тільки публікую вакансію роботодавця. Власного запиту на сторонні товари або додатковий напрям немає."
+              }
+            ]
+          }
+        ]
+      },
+      "needs": []
+    },
+    "receipt": {
+      "disposition": "no_need_proposed",
+      "goal_id": "f579c3cd-3a00-4d5b-b548-94a21718bd21",
+      "assessment_id": "a4092ec0-83af-4063-97bf-ec904dbfe6ae",
+      "decision_contract_version": 1,
+      "model_projection_version": 1,
+      "model_input_fingerprint": "9e0cb217c02b9874e2a5b94c95b0c11dce8134a67ad7a5d12f7e28a2a5138a40",
+      "output_fingerprint": "9f1606ae16e189c08fdbbb5a734b46757e72d994d02c946af4b87842fbcc002f",
+      "run_id": "d4f0edd9-e86b-4a00-b3d0-7d4550eaa33a",
+      "model_identity": {
+        "model_id": "gemini-3.8-flash-n",
+        "model_version": "gemini-3.8-flash-n"
+      },
+      "model_identity_reason": null,
+      "model_api_calls": 1,
+      "failure_cause": null
+    },
+    "usage": {
+      "input_tokens": 6360,
+      "output_tokens": 1578,
+      "estimated_cost_usd": null,
+      "cost_status": "unknown"
+    },
+    "checks": {
+      "output_applied_with_current_receipt": true,
+      "tools_empty": true,
+      "receipt_matches_actual_prompt": true,
+      "all_fixture_messages_preserved": true,
+      "no_contact_artifacts": true,
+      "production_runtime_disabled": true,
+      "telegram_disabled": true,
+      "scheduler_disabled": true
+    },
+    "side_effect_counts": {
+      "persons": 0,
+      "contact_permissions": 0,
+      "conversations": 0,
+      "drafts": 0,
+      "delivery_attempts": 0,
+      "audience_work_links": 0,
+      "action_proposals": 0
+    },
+    "test_authority_closed": true,
+    "original_semantic_verdict": "NOT_REVIEWED"
+  },
+  {
+    "dataset": "repolab_audience",
+    "cell_id": "9A",
+    "case_id": "A009",
+    "original_report_sha256": "df5517957674b3041dca23a1f1eff04cf42b7aec75553e358c665ed79068d691",
+    "original_gateway_sha256": "234569748629eda3b9b0e37eee57270254562e831746accceba6031d740aeafc",
+    "manifest_hash": "d3f960ba2f90d75f24d9db88dfa6123060dfe3d32b2edd1ffe33f43d22987565",
+    "model_input_hash": "31f67605817a5ecc028c0b1bed06efdca97d02cd0a2b5a64de9b61d6fec46354",
+    "output_hash": "530c0c3f7f600c0ba7d3299eafa03617783b4a593e23751efb4d7691f0482594",
+    "gold_case_hash": "6f7f5b2326aef928d1889dd7f732000dde9edc4bfa297187ce3db04cfc8f3470",
+    "requested_model": "gemini-3.7-flash-high",
+    "provider_reported_model": "gemini-3.8-flash-n",
+    "provider_origin": "UNKNOWN",
+    "billing": "UNKNOWN",
+    "upstream_wire_requests": null,
+    "child_exit": 0,
+    "child_exit_proven": true,
+    "gateway_forwards": 1,
+    "gateway_receipt": {
+      "state": "completed",
+      "http_status": 200,
+      "content_type": "application/json",
+      "error_code": null,
+      "error_code_number": null,
+      "error_status": null,
+      "error_reason": null,
+      "error_type": null,
+      "request_id_hash": "5618752557ba2a94f71271fa56a4032351066df614472a28d92701039af19d15",
+      "requested_model": "gemini-3.7-flash-high",
+      "returned_model": "gemini-3.8-flash-n",
+      "identity_attested": false,
+      "usage": {
+        "prompt_tokens": 6352,
+        "completion_tokens": 1739,
+        "total_tokens": 8091
+      }
+    },
+    "source_packet": {
+      "objective": "По данному обсуждению установи, кто лично ищет сторонние физические товары или партнёрскую программу для продажи за комиссию либо дополнительное товарное направление для собственных клиентов. Отличай поставщика, ищущего продавцов, чужую рекламу, цитату и вакансию от такого намерения. Учитывай отмену и неопределённость. Не придумывай коммерческое соответствие, FitLine fit, условия, согласие на контакт или страну. Только внутренний анализ для владельца, без контактов и сообщений людям.",
+      "exchanges": [
+        {
+          "id": "6c2c174b-c149-4b85-b04b-bbe259cf4585",
+          "source_ref": "public:repolab:chat:810009",
+          "anchor_id": "1000",
+          "fingerprint": "f76922c7cc59f06864f70d9b49592ffddc5ba3fcf88ba574cb3a5b78a55d75bb",
+          "current": true,
+          "reasons": [],
+          "evidence": [
+            {
+              "source_event_id": "3",
+              "source_ref": "public:repolab:chat:810009",
+              "author_id": "repolab-author:9:90",
+              "message_id": "1000",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:48:15.233Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:09:00.000Z",
+              "source_updated_at": "2026-10-09T00:09:00.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Кто-то вроде хотел заняться продажей товаров по партнёрке. Есть такие варианты вообще?",
+              "truncated": false
+            },
+            {
+              "source_event_id": "5",
+              "source_ref": "public:repolab:chat:810009",
+              "author_id": "repolab-author:9:91",
+              "message_id": "1001",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:48:15.234Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:09:01.000Z",
+              "source_updated_at": "2026-10-09T00:09:01.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Это ты для себя ищешь или пересказываешь разговор?",
+              "truncated": false
+            },
+            {
+              "source_event_id": "7",
+              "source_ref": "public:repolab:chat:810009",
+              "author_id": "repolab-author:9:90",
+              "message_id": "1002",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:48:15.235Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:09:02.000Z",
+              "source_updated_at": "2026-10-09T00:09:02.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Не помню, чей это был разговор. Я пока просто спрашиваю, своего решения нет.",
+              "truncated": false
+            },
+            {
+              "source_event_id": "9",
+              "source_ref": "public:repolab:chat:810009",
+              "author_id": "repolab-author:9:92",
+              "message_id": "1003",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:48:15.235Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:09:03.000Z",
+              "source_updated_at": "2026-10-09T00:09:03.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Значит, нельзя считать это твоим намерением начать продажи?",
+              "truncated": false
+            },
+            {
+              "source_event_id": "11",
+              "source_ref": "public:repolab:chat:810009",
+              "author_id": "repolab-author:9:90",
+              "message_id": "1004",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:48:15.236Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:09:04.000Z",
+              "source_updated_at": "2026-10-09T00:09:04.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Да, собственное намерение я не подтверждал. Ни товары, ни условия не известны.",
+              "truncated": false
+            }
+          ],
+          "unsupported_count": 0,
+          "coverage": "bounded_explicit_reply_exchange_not_complete_history",
+          "considered": false
+        }
+      ],
+      "coverage": {
+        "batch_exchanges": 8,
+        "max_messages_per_exchange": 32,
+        "source_capacity": 100,
+        "selection": "bounded_reply_scopes_not_all_audience",
+        "source_completeness": "unknown",
+        "identity_independence": "unproven"
+      },
+      "source_summary": {
+        "enrolled_sources": 1,
+        "current_sources": 1,
+        "selected_sources": 1,
+        "selected_exchanges": 1,
+        "source_completeness": "unknown"
+      },
+      "contact_permission": false,
+      "executable": false,
+      "allowed_effects": []
+    },
+    "actual_capture_at": "2026-10-11T19:48:15.258Z",
+    "declared_fixture_observed_at": "2026-10-11T19:00:00.000Z",
+    "disposition": "no_need_proposed",
+    "output": {
+      "decision_review": {
+        "version": 1,
+        "scope": "supplied_packet_only",
+        "disposition": "no_need_proposed",
+        "summary": "В предоставленной ветке никто лично не выразил намерения продавать физические товары по партнёрской программе или подключать товарное направление. Участник repolab-author:9:90 прямо подтвердил, что пересказывает чужой разговор из памяти и собственного намерения или решения о продажах не имеет.",
+        "unknowns": [
+          "Личность и актуальные намерения третьего лица, чей разговор упомянул участник repolab-author:9:90",
+          "Существуют ли в сообществе другие участники с личным интересом к партнёрским товарам вне рамок предоставленной выборки"
+        ],
+        "exchange_reviews": [
+          {
+            "exchange_id": "6c2c174b-c149-4b85-b04b-bbe259cf4585",
+            "judgment": "no_proposal",
+            "reason": "Участник задал абстрактный вопрос о чужих словах и прямо опроверг наличие личного намерения заниматься продажами или выбором товаров.",
+            "evidence_event_ids": [
+              "3",
+              "7",
+              "11"
+            ],
+            "support_quotes": [
+              {
+                "source_event_id": "3",
+                "quote": "Кто-то вроде хотел заняться продажей товаров по партнёрке. Есть такие варианты вообще?"
+              },
+              {
+                "source_event_id": "7",
+                "quote": "Не помню, чей это был разговор. Я пока просто спрашиваю, своего решения нет."
+              },
+              {
+                "source_event_id": "11",
+                "quote": "Да, собственное намерение я не подтверждал. Ни товары, ни условия не известны."
+              }
+            ]
+          }
+        ]
+      },
+      "needs": []
+    },
+    "receipt": {
+      "disposition": "no_need_proposed",
+      "goal_id": "8f8c314f-d4bf-4cb1-9d95-42c2501832cd",
+      "assessment_id": "82aa5a0e-df6f-49ef-b9e0-7df13e247cc8",
+      "decision_contract_version": 1,
+      "model_projection_version": 1,
+      "model_input_fingerprint": "31f67605817a5ecc028c0b1bed06efdca97d02cd0a2b5a64de9b61d6fec46354",
+      "output_fingerprint": "530c0c3f7f600c0ba7d3299eafa03617783b4a593e23751efb4d7691f0482594",
+      "run_id": "b6f12d2e-8eed-48f1-ab33-b65d547b16a1",
+      "model_identity": {
+        "model_id": "gemini-3.8-flash-n",
+        "model_version": "gemini-3.8-flash-n"
+      },
+      "model_identity_reason": null,
+      "model_api_calls": 1,
+      "failure_cause": null
+    },
+    "usage": {
+      "input_tokens": 6352,
+      "output_tokens": 1739,
+      "estimated_cost_usd": null,
+      "cost_status": "unknown"
+    },
+    "checks": {
+      "output_applied_with_current_receipt": true,
+      "tools_empty": true,
+      "receipt_matches_actual_prompt": true,
+      "all_fixture_messages_preserved": true,
+      "no_contact_artifacts": true,
+      "production_runtime_disabled": true,
+      "telegram_disabled": true,
+      "scheduler_disabled": true
+    },
+    "side_effect_counts": {
+      "persons": 0,
+      "contact_permissions": 0,
+      "conversations": 0,
+      "drafts": 0,
+      "delivery_attempts": 0,
+      "audience_work_links": 0,
+      "action_proposals": 0
+    },
+    "test_authority_closed": true,
+    "original_semantic_verdict": "NOT_REVIEWED"
+  },
+  {
+    "dataset": "repolab_audience",
+    "cell_id": "10A",
+    "case_id": "A010",
+    "original_report_sha256": "0f684d34fe7e875c0eac6df9bd5689595c1e3abedbf05595fb4862ae021c9c51",
+    "original_gateway_sha256": "741c0385793a31a16ac6b6fc3b525859deaa5ce825e7d10e68ec50f372bea9f3",
+    "manifest_hash": "d3f960ba2f90d75f24d9db88dfa6123060dfe3d32b2edd1ffe33f43d22987565",
+    "model_input_hash": "96683443383ad9518a1c68f9d6513e287b53b84756adecd69d6878eb6fb54e82",
+    "output_hash": "55783072e8e5666feccabc94f5673ee8d8428de6d31ad24615778faac7cdcdc5",
+    "gold_case_hash": "d2de776161f4c9b6b4275f9e3bdab1f6805ea1e18c564cf964eb40c1ab4c8ccb",
+    "requested_model": "gemini-3.7-flash-high",
+    "provider_reported_model": "gemini-3.8-flash-n",
+    "provider_origin": "UNKNOWN",
+    "billing": "UNKNOWN",
+    "upstream_wire_requests": null,
+    "child_exit": 0,
+    "child_exit_proven": true,
+    "gateway_forwards": 1,
+    "gateway_receipt": {
+      "state": "completed",
+      "http_status": 200,
+      "content_type": "application/json",
+      "error_code": null,
+      "error_code_number": null,
+      "error_status": null,
+      "error_reason": null,
+      "error_type": null,
+      "request_id_hash": "4de9d4b8d0cf33e57c5721add19ef0a804b91cdbd3d5372713eb66ab8c48506a",
+      "requested_model": "gemini-3.7-flash-high",
+      "returned_model": "gemini-3.8-flash-n",
+      "identity_attested": false,
+      "usage": {
+        "prompt_tokens": 6388,
+        "completion_tokens": 1999,
+        "total_tokens": 8387
+      }
+    },
+    "source_packet": {
+      "objective": "По данному обсуждению установи, кто лично ищет сторонние физические товары или партнёрскую программу для продажи за комиссию либо дополнительное товарное направление для собственных клиентов. Отличай поставщика, ищущего продавцов, чужую рекламу, цитату и вакансию от такого намерения. Учитывай отмену и неопределённость. Не придумывай коммерческое соответствие, FitLine fit, условия, согласие на контакт или страну. Только внутренний анализ для владельца, без контактов и сообщений людям.",
+      "exchanges": [
+        {
+          "id": "025b9eba-30c6-40b0-b20c-6f141a987035",
+          "source_ref": "public:repolab:chat:810010",
+          "anchor_id": "1000",
+          "fingerprint": "f76922c7cc59f06864f70d9b49592ffddc5ba3fcf88ba574cb3a5b78a55d75bb",
+          "current": true,
+          "reasons": [],
+          "evidence": [
+            {
+              "source_event_id": "3",
+              "source_ref": "public:repolab:chat:810010",
+              "author_id": "repolab-author:10:100",
+              "message_id": "1000",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:48:33.096Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:10:00.000Z",
+              "source_updated_at": "2026-10-09T00:10:00.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Які нові напрями плануєте для клієнтів?",
+              "truncated": false
+            },
+            {
+              "source_event_id": "5",
+              "source_ref": "public:repolab:chat:810010",
+              "author_id": "repolab-author:10:101",
+              "message_id": "1001",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:48:33.097Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:10:01.000Z",
+              "source_updated_at": "2026-10-09T00:10:01.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Я косметологиня. Хотіла додати фізичні товари для домашнього догляду моїх клієнтів і знайти партнерський асортимент.",
+              "truncated": false
+            },
+            {
+              "source_event_id": "7",
+              "source_ref": "public:repolab:chat:810010",
+              "author_id": "repolab-author:10:102",
+              "message_id": "1002",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:48:33.098Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:10:02.000Z",
+              "source_updated_at": "2026-10-09T00:10:02.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Цей пошук ще актуальний?",
+              "truncated": false
+            },
+            {
+              "source_event_id": "9",
+              "source_ref": "public:repolab:chat:810010",
+              "author_id": "repolab-author:10:101",
+              "message_id": "1003",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:48:33.099Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:10:03.000Z",
+              "source_updated_at": "2026-10-09T00:10:03.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Ні, відкликаю попередній запит. Вирішила працювати тільки з послугами й не додавати товари.",
+              "truncated": false
+            },
+            {
+              "source_event_id": "11",
+              "source_ref": "public:repolab:chat:810010",
+              "author_id": "repolab-author:10:101",
+              "message_id": "1004",
+              "message_version": 1,
+              "observed_at": "2026-10-11T19:48:33.100Z",
+              "confirmed_at": null,
+              "published_at": "2026-10-09T00:10:04.000Z",
+              "source_updated_at": "2026-10-09T00:10:04.000Z",
+              "current": true,
+              "reasons": [],
+              "text": "Будь ласка, не вважайте старе повідомлення поточним пошуком. Зараз товарний напрям не розглядаю.",
+              "truncated": false
+            }
+          ],
+          "unsupported_count": 0,
+          "coverage": "bounded_explicit_reply_exchange_not_complete_history",
+          "considered": false
+        }
+      ],
+      "coverage": {
+        "batch_exchanges": 8,
+        "max_messages_per_exchange": 32,
+        "source_capacity": 100,
+        "selection": "bounded_reply_scopes_not_all_audience",
+        "source_completeness": "unknown",
+        "identity_independence": "unproven"
+      },
+      "source_summary": {
+        "enrolled_sources": 1,
+        "current_sources": 1,
+        "selected_sources": 1,
+        "selected_exchanges": 1,
+        "source_completeness": "unknown"
+      },
+      "contact_permission": false,
+      "executable": false,
+      "allowed_effects": []
+    },
+    "actual_capture_at": "2026-10-11T19:48:33.120Z",
+    "declared_fixture_observed_at": "2026-10-11T19:00:00.000Z",
+    "disposition": "no_need_proposed",
+    "output": {
+      "decision_review": {
+        "version": 1,
+        "scope": "supplied_packet_only",
+        "disposition": "no_need_proposed",
+        "summary": "Участница первоначально выразила интерес к добавлению физических товаров для домашнего ухода и партнерского ассортимента, однако в последующих репликах прямо и однозначно отозвала запрос, подтвердив отказ от товарного направления в пользу исключительно услуг.",
+        "unknowns": [
+          "Вернется ли участница к вопросу товарного ассортимента в будущем.",
+          "Планы и потребности других участников обсуждения, не озвучивших личный запрос."
+        ],
+        "exchange_reviews": [
+          {
+            "exchange_id": "025b9eba-30c6-40b0-b20c-6f141a987035",
+            "judgment": "no_proposal",
+            "reason": "Автор запроса явно аннулировала свой первоначальный интерес к партнерским физическим товарам, прямо заявив об отзыве запроса и решении работать только с услугами.",
+            "evidence_event_ids": [
+              "5",
+              "9",
+              "11"
+            ],
+            "support_quotes": [
+              {
+                "source_event_id": "5",
+                "quote": "Я косметологиня. Хотіла додати фізичні товари для домашнього догляду моїх клієнтів і знайти партнерський асортимент."
+              },
+              {
+                "source_event_id": "9",
+                "quote": "Ні, відкликаю попередній запит. Вирішила працювати тільки з послугами й не додавати товари."
+              },
+              {
+                "source_event_id": "11",
+                "quote": "Будь ласка, не вважайте старе повідомлення поточним пошуком. Зараз товарний напрям не розглядаю."
+              }
+            ]
+          }
+        ]
+      },
+      "needs": []
+    },
+    "receipt": {
+      "disposition": "no_need_proposed",
+      "goal_id": "3d7b3be0-c4aa-4b44-ba14-14e368d0a17a",
+      "assessment_id": "f814b4cf-5a6c-485b-bfee-1d92c5ad27fe",
+      "decision_contract_version": 1,
+      "model_projection_version": 1,
+      "model_input_fingerprint": "96683443383ad9518a1c68f9d6513e287b53b84756adecd69d6878eb6fb54e82",
+      "output_fingerprint": "55783072e8e5666feccabc94f5673ee8d8428de6d31ad24615778faac7cdcdc5",
+      "run_id": "06358c0f-d563-4633-994d-7378c0471d69",
+      "model_identity": {
+        "model_id": "gemini-3.8-flash-n",
+        "model_version": "gemini-3.8-flash-n"
+      },
+      "model_identity_reason": null,
+      "model_api_calls": 1,
+      "failure_cause": null
+    },
+    "usage": {
+      "input_tokens": 6388,
+      "output_tokens": 1999,
+      "estimated_cost_usd": null,
+      "cost_status": "unknown"
+    },
+    "checks": {
+      "output_applied_with_current_receipt": true,
+      "tools_empty": true,
+      "receipt_matches_actual_prompt": true,
+      "all_fixture_messages_preserved": true,
+      "no_contact_artifacts": true,
+      "production_runtime_disabled": true,
+      "telegram_disabled": true,
+      "scheduler_disabled": true
+    },
+    "side_effect_counts": {
+      "persons": 0,
+      "contact_permissions": 0,
+      "conversations": 0,
+      "drafts": 0,
+      "delivery_attempts": 0,
+      "audience_work_links": 0,
+      "action_proposals": 0
+    },
+    "test_authority_closed": true,
+    "original_semantic_verdict": "NOT_REVIEWED"
+  }
+]

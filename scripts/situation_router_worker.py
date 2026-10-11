@@ -166,6 +166,7 @@ def main():
     os.environ["HERMES_CWD"] = str(hermes_home)
     os.chdir(hermes_home)
     (hermes_home / "config.yaml").write_text(
+        "model:\n  streaming: false\n"
         "memory:\n  memory_enabled: false\n  user_profile_enabled: false\n  write_approval: true\n"
         "skills:\n  write_approval: true\n"
         "agent:\n  skip_memory: true\n  tool_use_enforcement: false\n  execution_guidance: false\n"

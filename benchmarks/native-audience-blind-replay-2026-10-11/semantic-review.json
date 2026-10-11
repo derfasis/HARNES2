@@ -1,0 +1,117 @@
+{
+  "version": 1,
+  "review_basis": "Frozen synthetic gold, exact source packets and immutable actual model outputs; root review with independent Luna criticism",
+  "review_authority": "Engineering evaluation only; no owner acceptance, current-person verification or contact authority",
+  "results_file_sha256": "9163538e1bebdf42a3290349ce2d791643809638ef2f9366358b492276ebb84e",
+  "original_outputs_and_ledgers_modified": false,
+  "classification_scope": "Stated intent in supplied historical discussion, not confirmed active intent today or offer suitability",
+  "reviews": [
+    {
+      "dataset": "commercial_tasks",
+      "cell_id": "1A",
+      "case_id": "ru_paid_product_recommendations_conditional_mode",
+      "own_task_detection": "PASS",
+      "strict_fidelity": "FAIL",
+      "findings": [
+        {"kind": "TEMPORAL_OVERCLAIM", "output_quote": "В настоящий момент товаров в наличии нет", "explanation": "Inventory is a statement from October 5, not independently confirmed on October 11. Material and why_now carry the old delivery phase forward as current."},
+        {"kind": "CONDITION_OVERSTATEMENT", "output_quote": "Исключительно текстовый формат", "explanation": "Source describes text as suitable now, video impossible this week, and later video as undecided. The later material clause partially retains this nuance, but the exclusive wording overstates it."}
+      ]
+    },
+    {
+      "dataset": "commercial_tasks",
+      "cell_id": "2A",
+      "case_id": "ua_comparing_independent_monetization_models",
+      "own_task_detection": "PASS",
+      "strict_fidelity": "FAIL",
+      "findings": [
+        {"kind": "OPTION_LINEAGE_COLLAPSED", "output_quote": "Рассматриваемые альтернативы", "explanation": "Material flattens initial meeting/support-package options and later session/own-material alternatives into one three-item list. Frozen gold explicitly requires preserving their different sequence and wording."},
+        {"kind": "UNSUPPORTED_CONDITION", "output_quote": "Пакет долгосрочного сопровождения.", "explanation": "Source mentions a support package without establishing a long-term duration."}
+      ],
+      "preserved": ["Own comparison task", "Model not selected", "Explicit exclusion of MLM/team-building", "No income promise"]
+    },
+    {
+      "dataset": "commercial_tasks",
+      "cell_id": "3A",
+      "case_id": "ru_quoted_customer_request_adjacent_capacity_complaint",
+      "own_task_detection": "PASS",
+      "strict_fidelity": "PASS",
+      "findings": [],
+      "preserved": ["Vendor's customer quote not attributed to vendor", "Separate studio provider's capacity problem", "Undecided solutions", "Current status after October 7 unverified"]
+    },
+    {
+      "dataset": "commercial_tasks",
+      "cell_id": "4A",
+      "case_id": "ua_old_task_later_other_thread_cancellation",
+      "own_task_detection": "HISTORICAL_CLOSED_TASK_PRESERVED",
+      "strict_fidelity": "PASS",
+      "findings": [],
+      "preserved": ["October 1 historical task", "Same-author October 10 cross-thread cancellation", "Explicit closed status", "No active launch, applications or contact"],
+      "operator_warning": "needs_proposed/proposal_created and prepare_material mean an inert internal history brief here. They must not be counted as a current opportunity. A count of all needs alone is an invalid HOT metric; current need lifecycle status is not a verified real-world intent status."
+    },
+    {
+      "dataset": "repolab_audience", "cell_id": "1A", "case_id": "A001",
+      "expected_role": "H1", "stated_intent_classification": "PASS", "strict_fidelity": "PASS", "findings": [],
+      "preserved": ["Correct commercial author 1:11", "Supplier ships, no stock purchase", "No selected niche/country", "Current status after two days unknown"]
+    },
+    {
+      "dataset": "repolab_audience", "cell_id": "2A", "case_id": "A002",
+      "expected_role": "H1", "stated_intent_classification": "PASS", "strict_fidelity": "FAIL",
+      "findings": [
+        {"kind": "FRESHNESS_AS_INTENT", "output_quote": "Актуальность сохраняется в рамках свежей дискуссии", "explanation": "Recent publication and current ingestion basis do not confirm the author's continued intent. The following unknown-final-status caveat does not support the preceding assertion."},
+        {"kind": "UNSUPPORTED_RISK_CLAIM", "output_quote": "безрискового дропшиппинга", "explanation": "No initial stock purchase is not proof a business model is risk-free."}
+      ],
+      "preserved": ["Own physical-goods commission intent", "Explicit lack of DM consent", "No chosen category"]
+    },
+    {
+      "dataset": "repolab_audience", "cell_id": "3A", "case_id": "A003",
+      "expected_role": "H2", "stated_intent_classification": "PASS", "strict_fidelity": "PASS", "findings": [],
+      "preserved": ["Correct commercial author 3:31", "Own client assortment request", "No chosen brand", "Country, suitability and FitLine fit unknown", "Current search requires verification"]
+    },
+    {
+      "dataset": "repolab_audience", "cell_id": "4A", "case_id": "A004",
+      "expected_role": "H2", "stated_intent_classification": "PASS", "strict_fidelity": "FAIL",
+      "findings": [
+        {"kind": "UNKNOWN_TO_NEGATIVE_FIT", "output_quote": "Коммерческое соответствие продуктам FitLine или пищевым добавкам отсутствует.", "explanation": "Gold requires UNKNOWN. Current discussion about equipment and not having decided about supplements does not establish FitLine incompatibility."},
+        {"kind": "TEMPORAL_OVERCLAIM", "output_quote": "автор активно уточняет рамки запроса и находится на стадии сравнения условий", "explanation": "This was the last stated position on October 9, not verified present intent on October 11."}
+      ],
+      "preserved": ["Correct author 4:40", "Own equipment request", "Brand and delivery not selected"]
+    },
+    {
+      "dataset": "repolab_audience", "cell_id": "5A", "case_id": "A005",
+      "expected_role": "SUPPLIER", "stated_intent_classification": "PASS", "strict_fidelity": "PASS", "findings": [],
+      "preserved": ["Supplier seeking ceramic distributors, not own third-party assortment", "No target-need proposal"]
+    },
+    {
+      "dataset": "repolab_audience", "cell_id": "6A", "case_id": "A006",
+      "expected_role": "SUPPLIER", "stated_intent_classification": "PASS", "strict_fidelity": "PASS", "findings": [],
+      "preserved": ["Lamp manufacturer seeking distributors, not another affiliate program", "No target-need proposal"]
+    },
+    {
+      "dataset": "repolab_audience", "cell_id": "7A", "case_id": "A007",
+      "expected_role": "NEGATIVE", "stated_intent_classification": "PASS", "strict_fidelity": "PASS", "findings": [],
+      "preserved": ["Quoted third-party ad used in moderation discussion", "Not attributed as author's own request"]
+    },
+    {
+      "dataset": "repolab_audience", "cell_id": "8A", "case_id": "A008",
+      "expected_role": "NEGATIVE", "stated_intent_classification": "PASS", "strict_fidelity": "PASS", "findings": [],
+      "preserved": ["HR job advertisement, not personally seeking third-party products"]
+    },
+    {
+      "dataset": "repolab_audience", "cell_id": "9A", "case_id": "A009",
+      "expected_role": "AMBIGUOUS", "stated_intent_classification": "PASS", "strict_fidelity": "PASS", "findings": [],
+      "preserved": ["Unattributed remembered conversation", "No own intent confirmed", "No target-need proposal"]
+    },
+    {
+      "dataset": "repolab_audience", "cell_id": "10A", "case_id": "A010",
+      "expected_role": "AMBIGUOUS_REVOKED", "stated_intent_classification": "PASS", "strict_fidelity": "PASS", "findings": [],
+      "preserved": ["Correct same-author explicit withdrawal", "Old request not presented as active", "No target-need proposal"]
+    }
+  ],
+  "repolab_stated_intent_metrics": {"true_positive": 4, "true_negative": 6, "false_positive": 0, "false_negative": 0, "precision": 1, "recall": 1, "sample_size": 10, "representative_market_estimate": false, "confirmed_active_person_metrics": "NOT_ESTABLISHED"},
+  "strict_fidelity_metrics": {"pass": 10, "fail": 4, "sample_size": 14, "overall_fidelity_gate": "FAIL"},
+  "review_corrections": [
+    "support_quotes includes selected evidence, context and counterevidence by contract. Quoting an interlocutor in context_event_ids is not automatically attributing that person's question as the subject's own intent.",
+    "An explicitly closed historical internal briefing under the commercial-task understanding objective is not automatically an active HOT false positive. The target-partner objective is different and A010 correctly returns no need."
+  ],
+  "unproven": ["Current active intent today", "FitLine suitability", "Contact consent or contact authority", "Real-world retrieval precision", "Conversion", "Model weights behind reported identity", "Provider origin", "Actual upstream retry count", "Billing or subscription percentage"]
+}

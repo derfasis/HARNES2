@@ -4,3 +4,5 @@ tests/fixtures/deployed-011-source-scout.sql -text -diff -merge
 business/migrations/013-audience-attention.sql text eol=lf
 business/migrations/016-audience-source-epochs.sql text eol=lf
 business/migrations/017-source-observation-epochs.sql text eol=lf
+# Captured synthetic model/source records retain their exact SHA256-bound bytes.
+benchmarks/native-audience-blind-replay-2026-10-11/*.json -text

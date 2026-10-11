@@ -151,9 +151,11 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
 // which the pinned runtime only exposes through its post_api_request lifecycle hook. The
 // configured model is still never used, and a run that reached two models is refused outright.
     // Follow-up's frozen generation-request cap wraps the existing SDK with HTTPX
-    // hooks. Real loopback-only Hermes/SSE controls prove count, rejection and usage
+    // hooks. Real loopback-only Hermes controls prove count, rejection and usage
     // independently of its outer iteration counter (test_request_budget.py).
-    "scripts/situation_router_worker.py": "6aa5e1bd9195f46f021b4ac7ee4f0760f5304457",
+    // Explicit non-stream transport for a bounded no-tool decision; the actual
+    // worker/SDK controls reject streaming and preserve responses, usage and cap.
+    "scripts/situation_router_worker.py": "4a27a148f6a4bff7fbfeb20d0e12cffa16dcce59",
     // Reviewed extension: invalidate read-only source checkpoints on process recovery.
     // textBlobHash normalizes CRLF, so this is the LF-normalized R7 blob hash.
     // Continuity adds export tables and recovers its running turns as interrupted.

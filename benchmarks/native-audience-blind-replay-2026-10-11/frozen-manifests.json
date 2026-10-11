@@ -1,0 +1,436 @@
+[
+  {
+    "dataset": "commercial_tasks",
+    "manifest": {
+      "version": 1,
+      "baseline_sha": "d74329d7c027c2cf1a924788ff57fcd3370ac6a9",
+      "max_logical_attempts": 4,
+      "files": {
+        "benchmarks/commercial-task-fidelity-v1/cases.json": "9eaa9bf5b2a3e0feadbee9bd8060762ccfd67c3ecb11905765d583bad2d34966",
+        "benchmarks/commercial-task-fidelity-v1/gold.json": "57ea038df47ed9a5ce92430c0db9ca9860b6cb725807581b52bda4750f3b67f7",
+        ".cache/commercial-task-blind-replay-v1/prompts/A.md": "4edf1a5ddf4058bf3f9c713990edb0b913efa214f90cba0d628487e5a77e99fe",
+        ".cache/commercial-task-blind-replay-v1/prompts/B.md": "e6aa06842f7a2b69883f47b325d0ac2149a56ce60f59e878e9587f636ca8a90b",
+        "partner/audience-reasoning.md": "4edf1a5ddf4058bf3f9c713990edb0b913efa214f90cba0d628487e5a77e99fe",
+        "contracts/audience-assessment.schema.json": "18a9e73f39b3aaefe9529983f5e50586123c6e7ee0c0a4eaf302ca1cb12dae0c",
+        "business/audience-reasoning.mjs": "f3d78ac1a77f26bae55689efcca9113f813b610f743a647c71aec279c696e2a8",
+        "business/runtime.mjs": "1dbb6f7634155ddd527b1c835acf92c7ef44daca43ee99d276c813006a3d3acd",
+        "scripts/situation_router_worker.py": "4805070825446b22735c5b498a34adf8839f4decde9949bbae4f663e65174ad4"
+      }
+    },
+    "manifest_file_sha256": "994494aa1515960eb103c1fc3ba69d9c5576f379a449ffa75b47c0b09ecd0f37",
+    "gold_file_sha256": "3f7020830dfcb4f199630b956a58e7c961796c4b436b3dabe35f8359aca1c421",
+    "gold": {
+      "version": 1,
+      "basis": "RESEARCHER_AUTHORED_SYNTHETIC_ORACLE",
+      "cases": [
+        {
+          "case_id": "ru_paid_product_recommendations_conditional_mode",
+          "positive_control_required": true,
+          "source_facts": [
+            {
+              "message_id": "ru1-01",
+              "author_ref": "author-ru1-main",
+              "exact_quote": "Я хочу получать оплату за рекомендации товаров клиентам, а не только за проведённые консультации. Подскажите, как начать с платной подборки для тех, кто уже спрашивает о товарах?",
+              "fact": "The author explicitly wants to be paid for recommending products to clients and asks how to begin offering paid product selections to people already asking about products."
+            },
+            {
+              "message_id": "ru1-03",
+              "author_ref": "author-ru1-main",
+              "exact_quote": "Пока товаров в наличии нет. До следующей поставки я могу собрать вопросы; когда товары приедут, смогу сделать текстовую подборку с описаниями и ценами.",
+              "fact": "The author currently has no stock; until the next delivery they can collect questions, and after products arrive they can make a text selection with descriptions and prices. The stock and timing conditions are temporary and conditional."
+            },
+            {
+              "message_id": "ru1-04",
+              "author_ref": "author-ru1-main",
+              "exact_quote": "Видео на этой неделе снимать не смогу из-за расписания. Сейчас мне подходит текстовый формат; позже смогу отдельно решить, стоит ли пробовать видео.",
+              "fact": "The author cannot film video this week because of their schedule, currently prefers a text format, and will decide separately later whether to try video."
+            }
+          ],
+          "required_distinctions": [
+            "The paid product-recommendation task is the author's own explicit commercial task and must be represented as a nonempty finding.",
+            "The author seeks payment for recommendations in addition to consultations; do not reduce the task to consultation sales alone.",
+            "No products are in stock at the time of the October 5 message; this is a temporary present condition until the next delivery, not a permanent inability to offer products.",
+            "Question collection is possible before delivery, while the described text selection with descriptions and prices is conditional on products arriving.",
+            "The video limitation applies this week because of schedule; text suits the author now, and video remains a later decision rather than a permanent refusal.",
+            "The paid selection is directed to people who already ask about products; do not invent a wider target market or established customer demand beyond that statement."
+          ],
+          "forbidden_claims": [
+            "The author has permanently stopped or is unable to sell or recommend products.",
+            "The author can prepare the described product selection with actual descriptions and prices before the next delivery despite having no stock.",
+            "The author refuses video permanently or has already committed to making video later.",
+            "The author has already launched the paid selection, received payment, or validated demand.",
+            "The FitLine offer is known to fit or not fit this task."
+          ],
+          "currentness_expectation": "The first-person paid-recommendation task and text preference are stated on October 5, six days before observation. Preserve the inventory and video constraints as time-bound statements from that date; the fixture contains no later confirmation that stock arrived or that the author's plans changed.",
+          "offer_fit": "UNKNOWN",
+          "contact_permission": false,
+          "critical_failures": [
+            "Omitting the author's explicit paid-recommendation task or returning no task finding.",
+            "Attributing the task to someone else.",
+            "Turning the no-stock-until-delivery condition into a permanent ban or omitting its dependency on delivery.",
+            "Turning the this-week video constraint into a permanent refusal, or treating possible later video as a commitment.",
+            "Claiming FitLine compatibility or incompatibility without evidence."
+          ]
+        },
+        {
+          "case_id": "ua_comparing_independent_monetization_models",
+          "positive_control_required": true,
+          "source_facts": [
+            {
+              "message_id": "ua2-01",
+              "author_ref": "author-ua2-main",
+              "exact_quote": "Хочу порівняти незалежні способи монетизації моїх онлайн-консультацій: разову оплату за зустріч і пакет супроводу. Потрібні перші практичні кроки для кожного варіанта.",
+              "fact": "The author explicitly wants to compare independent ways to monetize their online consultations: one-time payment per meeting and a support package, and wants initial practical steps for each."
+            },
+            {
+              "message_id": "ua2-03",
+              "author_ref": "author-ua2-main",
+              "exact_quote": "Модель відкрита: розгляну оплату за сесію або власний навчальний матеріал. Мережевий маркетинг, MLM і побудову команди не шукаю. Порівняння хочу без обіцянок доходу.",
+              "fact": "The author says the model is open and will consider session payment or their own educational material; explicitly excludes network marketing, MLM, and team-building, and wants comparison without income promises."
+            }
+          ],
+          "required_distinctions": [
+            "The request to compare monetization options is an explicit first-person task and must be represented as a nonempty finding.",
+            "Preserve both options in the initial request (one-time meeting payment and support package) and the later open alternatives (session payment and own educational material); do not silently collapse these different phrasings into one definitive option set.",
+            "The author has not selected a single model; the choice remains open.",
+            "The stated scope is independent monetization of the author's online consultations, with practical first steps requested.",
+            "Network marketing, MLM, and building a team are explicitly unwanted and must not be recommended as the requested path.",
+            "The requested comparison should not promise or imply a particular income."
+          ],
+          "forbidden_claims": [
+            "The author has chosen MLM, network marketing, or team-building.",
+            "The author has already chosen between a session, support package, or educational material.",
+            "A particular option is guaranteed to produce income or a specific financial result.",
+            "The author is asking for recruiting, downline building, or a team-sales plan.",
+            "The FitLine offer is known to fit or not fit this task."
+          ],
+          "currentness_expectation": "The task and open-model clarification are from October 6, five days before observation. Treat them as the author's latest stated position in this fixture; no subsequent choice or status update is supplied.",
+          "offer_fit": "UNKNOWN",
+          "contact_permission": false,
+          "critical_failures": [
+            "Omitting the explicit comparison task or returning no task finding.",
+            "Recommending MLM, network marketing, or team-building despite the explicit exclusion.",
+            "Inventing a chosen model or flattening the initial and follow-up option lists as though they were identical.",
+            "Adding income promises to a comparison the author explicitly wants without them.",
+            "Claiming FitLine compatibility or incompatibility without evidence."
+          ]
+        },
+        {
+          "case_id": "ru_quoted_customer_request_adjacent_capacity_complaint",
+          "positive_control_required": false,
+          "source_facts": [
+            {
+              "message_id": "ru3-01",
+              "author_ref": "author-ru3-vendor",
+              "exact_quote": "Клиент прислал мне вопрос: «Ищу товары, которые можно предложить посетителям моей студии после процедуры; с чего начать?» Это слова клиента, не мой запрос. Я могу показать каталог и объяснить оформление заказа.",
+              "fact": "The vendor explicitly attributes the quoted search for products to a client and says it is not the vendor's own request. The vendor's own stated offer is to show a catalog and explain ordering."
+            },
+            {
+              "message_id": "ru3-02",
+              "author_ref": "author-ru3-provider",
+              "exact_quote": "У меня другая ситуация: я одна веду студию и не могу брать больше записей. Между клиентами не успеваю отвечать на сообщения и вести расписание.",
+              "fact": "A different author runs a studio alone, cannot take more appointments, and lacks time between clients to answer messages and manage scheduling."
+            },
+            {
+              "message_id": "ru3-03",
+              "author_ref": "author-ru3-vendor",
+              "exact_quote": "Уточню: фраза про товары в кавычках принадлежит клиенту из моего чата; я переслал её как пример вопроса, который мне задали.",
+              "fact": "The vendor reiterates that the quoted product request belongs to a client from the vendor's chat and was forwarded as an example of a question received."
+            },
+            {
+              "message_id": "ru3-04",
+              "author_ref": "author-ru3-provider",
+              "exact_quote": "Я хочу сократить ручную переписку и освободить время, но пока не решила, нужны ли шаблоны, другой порядок записи или помощник.",
+              "fact": "The studio provider wants to reduce manual correspondence and free up time, but has not decided whether templates, a different booking process, or an assistant would help."
+            }
+          ],
+          "required_distinctions": [
+            "The request inside the Russian quotation marks is the customer's attributed request, not the vendor author's own business need.",
+            "The vendor's own statement about showing a catalog and explaining ordering is an offer of help; it does not establish that the vendor personally has the quoted product-finding task.",
+            "The studio capacity and workflow problem belongs to author-ru3-provider, a different person from the vendor.",
+            "The provider's own goal is to reduce manual correspondence and free time; templates, a different booking flow, and an assistant remain undecided possibilities, not selected solutions.",
+            "Do not merge the customer's post-procedure product search with the studio provider's appointment, messaging, or scheduling problem.",
+            "No explicit invitation or permission to contact either person is present."
+          ],
+          "forbidden_claims": [
+            "The vendor personally seeks products to sell to studio visitors after procedures.",
+            "The quoted customer's request is the vendor's own task or need.",
+            "The provider has chosen templates, a new booking process, or an assistant.",
+            "The provider can take more appointments or has requested help with recruiting or product sales.",
+            "The customer or provider gave permission to be contacted."
+          ],
+          "currentness_expectation": "The provider's latest first-person goal and unresolved solution choices are stated October 7. They are the latest status in the fixture, but there is no later message confirming persistence through the October 11 observation date; retain that uncertainty. The vendor's customer's quoted request is also from October 7 and is evidence about that customer only, not the vendor's own need.",
+          "offer_fit": "UNKNOWN",
+          "contact_permission": false,
+          "critical_failures": [
+            "Attributing the customer's quoted product search to the vendor as the vendor's own task.",
+            "Combining the vendor and studio provider into one author or one business situation.",
+            "Treating an undecided possible solution as the provider's selected plan.",
+            "Treating the vendor's catalog/order explanation offer as permission to contact the vendor or customer.",
+            "Claiming FitLine compatibility or incompatibility without evidence."
+          ]
+        },
+        {
+          "case_id": "ua_old_task_later_other_thread_cancellation",
+          "positive_control_required": false,
+          "source_facts": [
+            {
+              "message_id": "ua4-01",
+              "author_ref": "author-ua4-main",
+              "exact_quote": "Хочу підготувати платний пакет коротких онлайн-уроків української мови для дорослих початківців і визначити, що включити до першої версії. Ціну ще не вирішила.",
+              "fact": "On October 1, the author wanted to prepare a paid package of short online Ukrainian lessons for adult beginners and determine the first-version contents; the price had not been decided."
+            },
+            {
+              "message_id": "ua4-03",
+              "author_ref": "author-ua4-main",
+              "exact_quote": "Спершу думала про три заняття з базової граматики й побутової лексики, щоб перевірити інтерес. Це був лише план, заявки я ще не приймала.",
+              "fact": "The author's initial idea was three lessons covering basic grammar and everyday vocabulary to test interest; it was only a plan, and applications had not been accepted."
+            },
+            {
+              "message_id": "ua4-05",
+              "author_ref": "author-ua4-main",
+              "exact_quote": "Ні, я закрила це питання й вирішила не запускати пакет та не приймати заявки. Попередній план від 1 жовтня більше не актуальний.",
+              "fact": "On October 10, in a separate thread, the same author explicitly closed the matter, decided not to launch the package or accept applications, and said the October 1 plan was no longer current."
+            }
+          ],
+          "required_distinctions": [
+            "Retain the October 1 paid-lesson package as a historical first-person task with its intended audience and initial-version planning scope.",
+            "The October 1 plan was exploratory: the three-lesson contents were an initial idea to test interest, and applications had not been accepted.",
+            "The October 10 cancellation is from the same author in a separate thread and is newer explicit current-status evidence about the same package.",
+            "Represent the historical task and its later closed status together; do not erase the old evidence or present the task as active now.",
+            "The fixture gives no current reason to act, deadline, renewed interest, or active why-now signal after the cancellation.",
+            "The undecided price on October 1 does not establish a current pricing question after the author closed the package."
+          ],
+          "forbidden_claims": [
+            "The author currently plans to launch the package or accept applications.",
+            "The package is already launched, priced, or accepting applicants.",
+            "The October 10 cancellation belongs to a different person or unrelated package.",
+            "The historical task never existed because it was later cancelled.",
+            "The cancellation itself is an invitation to contact the author or pitch an alternative."
+          ],
+          "currentness_expectation": "The October 1 task is historical. The same author explicitly cancelled it on October 10, one day before observation, in a separate thread; current status is closed and there is no active why-now signal in the fixture. Preserve the historical task with this newer status rather than treating either message in isolation.",
+          "offer_fit": "UNKNOWN",
+          "contact_permission": false,
+          "critical_failures": [
+            "Reporting the cancelled package as an active current opportunity.",
+            "Dropping the historical task and its evidence instead of retaining it as closed historical interest.",
+            "Failing to link the newer cancellation to the same author and package across threads.",
+            "Inventing a current urgency, launch date, application window, or reason to contact.",
+            "Claiming FitLine compatibility or incompatibility without evidence."
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "dataset": "repolab_audience",
+    "manifest": {
+      "version": 1,
+      "baseline_sha": "d74329d7c027c2cf1a924788ff57fcd3370ac6a9",
+      "max_logical_attempts": 10,
+      "files": {
+        ".cache/repolab-commercial-blind-replay-v1/run.mjs": "c8989dc1e15065eeabdbffd5d31d9a0dea80655e90b95244fa47dd3f70b73dfd",
+        ".cache/repolab-commercial-blind-replay-v1/cases.json": "a0f4bca35d1ae088f5d7728ac990876f979221a42244658df31c9d0ce04957cd",
+        ".cache/repolab-commercial-blind-replay-v1/gold.json": "ddc60c947eeb39130245feb2992fb1968ccaa9a1b818a72667b45453875991e7",
+        ".cache/repolab-commercial-blind-replay-v1/original-inputs.json": "8b91487da693ba5ea518e46c94c9257357cd3a18edb034b2c874089dcc329498",
+        ".cache/repolab-commercial-blind-replay-v1/prompts/A.md": "4edf1a5ddf4058bf3f9c713990edb0b913efa214f90cba0d628487e5a77e99fe",
+        ".cache/repolab-commercial-blind-replay-v1/prompts/B.md": "e6aa06842f7a2b69883f47b325d0ac2149a56ce60f59e878e9587f636ca8a90b",
+        "partner/audience-reasoning.md": "47317adf1a0bf87a389fa4b0d174c8ca1d43dd5ec12852e61c58b39c7c84a3e5",
+        "contracts/audience-assessment.schema.json": "397811d651764a643b392f708f7850d52ef0a54282415aa185093c2efbf4a613",
+        "business/audience-reasoning.mjs": "ffaa9eac8dcf92ab0c23165ac1d21a552e4601d3bcb183635e729e444651bad8",
+        "business/runtime.mjs": "133b8c3bd6a334606943255f28da1c991162f3152fcd489b21dbf9e983d732f3",
+        "scripts/situation_router_worker.py": "4d76f6f6ace66b877e003da17274f5651c3890fcb4b1d517dd0177895c1a1aa4"
+      },
+      "original_input_sha256": "8b91487da693ba5ea518e46c94c9257357cd3a18edb034b2c874089dcc329498",
+      "original_gold_sha256": "ddc60c947eeb39130245feb2992fb1968ccaa9a1b818a72667b45453875991e7"
+    },
+    "manifest_file_sha256": "d3f960ba2f90d75f24d9db88dfa6123060dfe3d32b2edd1ffe33f43d22987565",
+    "gold_file_sha256": "ddc60c947eeb39130245feb2992fb1968ccaa9a1b818a72667b45453875991e7",
+    "gold": {
+      "version": 1,
+      "scope": "external laboratory evaluation only; never supplied to Audience or builder",
+      "cases": [
+        {
+          "case_id": "A001",
+          "lab_role": "H1",
+          "description": "Продавец ищет чужую партнёрскую программу",
+          "source_id": "public:repolab:chat:810001",
+          "root_author_id": "repolab-author:1:10",
+          "commercial_author_id": "repolab-author:1:11",
+          "support_message_ids": [
+            "1001",
+            "1003"
+          ],
+          "counterevidence_message_ids": [],
+          "current_H1_H2": "H1",
+          "commercial_fit": "UNKNOWN",
+          "FitLine_fit": "UNKNOWN",
+          "contact_consent": "UNKNOWN",
+          "evaluation": "Assess own intent of exact author and exact evidence/quotes; a supplier or moderation need may be legitimate but is not H1/H2. Ambiguous and revoked intent must not become confirmed current H1/H2."
+        },
+        {
+          "case_id": "A002",
+          "lab_role": "H1",
+          "description": "UA: автор лично ищет продажу сторонних товаров",
+          "source_id": "public:repolab:chat:810002",
+          "root_author_id": "repolab-author:2:20",
+          "commercial_author_id": "repolab-author:2:20",
+          "support_message_ids": [
+            "1000",
+            "1002"
+          ],
+          "counterevidence_message_ids": [],
+          "current_H1_H2": "H1",
+          "commercial_fit": "UNKNOWN",
+          "FitLine_fit": "UNKNOWN",
+          "contact_consent": "UNKNOWN",
+          "evaluation": "Assess own intent of exact author and exact evidence/quotes; a supplier or moderation need may be legitimate but is not H1/H2. Ambiguous and revoked intent must not become confirmed current H1/H2."
+        },
+        {
+          "case_id": "A003",
+          "lab_role": "H2",
+          "description": "Специалист ищет товарное дополнение клиентам",
+          "source_id": "public:repolab:chat:810003",
+          "root_author_id": "repolab-author:3:30",
+          "commercial_author_id": "repolab-author:3:31",
+          "support_message_ids": [
+            "1001",
+            "1003"
+          ],
+          "counterevidence_message_ids": [],
+          "current_H1_H2": "H2",
+          "commercial_fit": "UNKNOWN",
+          "FitLine_fit": "UNKNOWN",
+          "contact_consent": "UNKNOWN",
+          "evaluation": "Assess own intent of exact author and exact evidence/quotes; a supplier or moderation need may be legitimate but is not H1/H2. Ambiguous and revoked intent must not become confirmed current H1/H2."
+        },
+        {
+          "case_id": "A004",
+          "lab_role": "H2",
+          "description": "UA: тренер хочет дополнительный товарный ассортимент",
+          "source_id": "public:repolab:chat:810004",
+          "root_author_id": "repolab-author:4:40",
+          "commercial_author_id": "repolab-author:4:40",
+          "support_message_ids": [
+            "1000",
+            "1002"
+          ],
+          "counterevidence_message_ids": [],
+          "current_H1_H2": "H2",
+          "commercial_fit": "UNKNOWN",
+          "FitLine_fit": "UNKNOWN",
+          "contact_consent": "UNKNOWN",
+          "evaluation": "Assess own intent of exact author and exact evidence/quotes; a supplier or moderation need may be legitimate but is not H1/H2. Ambiguous and revoked intent must not become confirmed current H1/H2."
+        },
+        {
+          "case_id": "A005",
+          "lab_role": "SUPPLIER",
+          "description": "Производитель набирает продавцов",
+          "source_id": "public:repolab:chat:810005",
+          "root_author_id": "repolab-author:5:50",
+          "commercial_author_id": "repolab-author:5:51",
+          "support_message_ids": [
+            "1001",
+            "1003"
+          ],
+          "counterevidence_message_ids": [],
+          "current_H1_H2": "NOT_ESTABLISHED",
+          "commercial_fit": "UNKNOWN",
+          "FitLine_fit": "UNKNOWN",
+          "contact_consent": "UNKNOWN",
+          "evaluation": "Assess own intent of exact author and exact evidence/quotes; a supplier or moderation need may be legitimate but is not H1/H2. Ambiguous and revoked intent must not become confirmed current H1/H2."
+        },
+        {
+          "case_id": "A006",
+          "lab_role": "SUPPLIER",
+          "description": "UA: поставщик ищет дистрибьюторов",
+          "source_id": "public:repolab:chat:810006",
+          "root_author_id": "repolab-author:6:60",
+          "commercial_author_id": "repolab-author:6:60",
+          "support_message_ids": [
+            "1000",
+            "1002"
+          ],
+          "counterevidence_message_ids": [],
+          "current_H1_H2": "NOT_ESTABLISHED",
+          "commercial_fit": "UNKNOWN",
+          "FitLine_fit": "UNKNOWN",
+          "contact_consent": "UNKNOWN",
+          "evaluation": "Assess own intent of exact author and exact evidence/quotes; a supplier or moderation need may be legitimate but is not H1/H2. Ambiguous and revoked intent must not become confirmed current H1/H2."
+        },
+        {
+          "case_id": "A007",
+          "lab_role": "NEGATIVE",
+          "description": "Чужая реклама процитирована без собственного намерения",
+          "source_id": "public:repolab:chat:810007",
+          "root_author_id": "repolab-author:7:70",
+          "commercial_author_id": null,
+          "support_message_ids": [],
+          "counterevidence_message_ids": [
+            "1002",
+            "1004"
+          ],
+          "current_H1_H2": "NOT_ESTABLISHED",
+          "commercial_fit": "UNKNOWN",
+          "FitLine_fit": "UNKNOWN",
+          "contact_consent": "UNKNOWN",
+          "evaluation": "Assess own intent of exact author and exact evidence/quotes; a supplier or moderation need may be legitimate but is not H1/H2. Ambiguous and revoked intent must not become confirmed current H1/H2."
+        },
+        {
+          "case_id": "A008",
+          "lab_role": "NEGATIVE",
+          "description": "UA: вакансия рекламодателя",
+          "source_id": "public:repolab:chat:810008",
+          "root_author_id": "repolab-author:8:80",
+          "commercial_author_id": null,
+          "support_message_ids": [],
+          "counterevidence_message_ids": [
+            "1001",
+            "1003"
+          ],
+          "current_H1_H2": "NOT_ESTABLISHED",
+          "commercial_fit": "UNKNOWN",
+          "FitLine_fit": "UNKNOWN",
+          "contact_consent": "UNKNOWN",
+          "evaluation": "Assess own intent of exact author and exact evidence/quotes; a supplier or moderation need may be legitimate but is not H1/H2. Ambiguous and revoked intent must not become confirmed current H1/H2."
+        },
+        {
+          "case_id": "A009",
+          "lab_role": "AMBIGUOUS",
+          "description": "Неизвестен носитель намерения, оснований недостаточно",
+          "source_id": "public:repolab:chat:810009",
+          "root_author_id": "repolab-author:9:90",
+          "commercial_author_id": null,
+          "support_message_ids": [],
+          "counterevidence_message_ids": [
+            "1002",
+            "1004"
+          ],
+          "current_H1_H2": "NOT_ESTABLISHED",
+          "commercial_fit": "UNKNOWN",
+          "FitLine_fit": "UNKNOWN",
+          "contact_consent": "UNKNOWN",
+          "evaluation": "Assess own intent of exact author and exact evidence/quotes; a supplier or moderation need may be legitimate but is not H1/H2. Ambiguous and revoked intent must not become confirmed current H1/H2."
+        },
+        {
+          "case_id": "A010",
+          "lab_role": "AMBIGUOUS_REVOKED",
+          "description": "UA: ранее выраженное намерение явно отменено",
+          "source_id": "public:repolab:chat:810010",
+          "root_author_id": "repolab-author:10:100",
+          "commercial_author_id": "repolab-author:10:101",
+          "support_message_ids": [],
+          "counterevidence_message_ids": [
+            "1003",
+            "1004"
+          ],
+          "current_H1_H2": "NOT_ESTABLISHED",
+          "commercial_fit": "UNKNOWN",
+          "FitLine_fit": "UNKNOWN",
+          "contact_consent": "UNKNOWN",
+          "evaluation": "Assess own intent of exact author and exact evidence/quotes; a supplier or moderation need may be legitimate but is not H1/H2. Ambiguous and revoked intent must not become confirmed current H1/H2."
+        }
+      ]
+    }
+  }
+]
