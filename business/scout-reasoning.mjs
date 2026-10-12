@@ -10,6 +10,14 @@ import { normalizeFailureCause } from './failure-cause.mjs';
 import { SCOUT_ASSESSMENT_CONTRACT as contract, scoutAssessmentOutput } from './scout-assessment-output.mjs';
 const instructions=fs.readFileSync(path.join(ROOT,'partner/scout-assessment.md'),'utf8').replace(/\r\n/g,'\n');
 const check=(ok,code)=>ensure(ok,code,409,code);
+function scopedReceipt(result) {
+ const identity=result?.model_identity;
+ const token=x=>typeof x==='string'&&/^[A-Za-z0-9._:+/\-]{1,160}$/.test(x);
+ return {api_calls:Number.isInteger(result?.api_calls)&&result.api_calls>=0&&result.api_calls<=1?result.api_calls:null,
+   api_call_scope:'worker_httpx_generation_requests',proxy_internal_retries:'unknown',
+   model_identity:token(identity?.model_id)&&(identity.model_version===null||token(identity.model_version))
+     ?{model_id:identity.model_id,model_version:identity.model_version}:null};
+}
 export async function processScoutAssessment(service,runtime){
  const scout=service.scout,db=service.store;
  if(!scout.enabled||scout.cfg.modelEnabled!==true&&!scout.modelRequests.hasPending())return {disposition:'disabled'};
@@ -59,7 +67,7 @@ export async function processScoutAssessment(service,runtime){
        assessmentId=id();db.run("INSERT INTO scout_assessments(id,campaign_id,campaign_revision,candidate_id,sample_id,sample_digest,topic_hash,evaluator_version,output_json,run_id,status,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,'proposed',?)",assessmentId,campaign.id,campaign.revision,current.candidate_id,sample.id,sample.digest,campaign.topic_hash,SCOUT_EVALUATOR_VERSION,JSON.stringify(output),prepared.run.id,now());reason='SCOUT_ASSESSMENT_PROPOSED';
      }catch(e){if(!(e instanceof AppError)&&!(e instanceof SyntaxError))throw e;reason=e.code??'SCOUT_OUTPUT_INVALID';}
      db.run('UPDATE scout_jobs SET status=?,reason=?,updated_at=? WHERE id=? AND status=\'running\' AND owner_id=?',assessmentId?'completed':'failed',reason,now(),prepared.job.id,service.control.ownerId);
-     db.run('UPDATE runs SET status=?,result_json=?,error=?,input_tokens=?,output_tokens=?,estimated_cost_usd=?,cost_status=?,finished_at=? WHERE id=?',assessmentId?'completed':'failed',JSON.stringify({assessment_id:assessmentId,reason,diagnostic}),assessmentId?null:reason,spent.input,spent.output,spent.cost,spent.costStatus,now(),prepared.run.id);
+     db.run('UPDATE runs SET status=?,result_json=?,error=?,input_tokens=?,output_tokens=?,estimated_cost_usd=?,cost_status=?,finished_at=? WHERE id=?',assessmentId?'completed':'failed',JSON.stringify({assessment_id:assessmentId,reason,diagnostic,...(JSON.parse(prepared.run.context_json).scout_assessment_request?{runtime_receipt:scopedReceipt(result)}:{})}),assessmentId?null:reason,spent.input,spent.output,spent.cost,spent.costStatus,now(),prepared.run.id);
      return {disposition:assessmentId?'assessment_proposed':'withheld',assessment_id:assessmentId,reason,diagnostic};
    }));}catch(error){
      // A model result without a durable receipt is not a successful assessment.

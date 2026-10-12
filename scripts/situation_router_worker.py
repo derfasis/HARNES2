@@ -181,28 +181,32 @@ def main():
     run_id = str(envelope["run_id"])
     if envelope.get("tools"):
         raise RuntimeError("Situation Router must not receive effect tools")
+    budget_policy = request_budget_policy(envelope)
 
     hermes_home = ROOT / "data" / "runtime" / "benchmarks" / "situation-router" / run_id
     hermes_home.mkdir(parents=True, exist_ok=True)
     os.environ["HERMES_HOME"] = str(hermes_home)
     os.environ["HERMES_CWD"] = str(hermes_home)
     os.chdir(hermes_home)
-    (hermes_home / "config.yaml").write_text(
+    hermes_config = (
         "memory:\n  memory_enabled: false\n  user_profile_enabled: false\n  write_approval: true\n"
         "skills:\n  write_approval: true\n"
         "agent:\n  skip_memory: true\n  tool_use_enforcement: false\n  execution_guidance: false\n"
         "  task_completion_guidance: false\n  parallel_tool_call_guidance: false\n"
         "  environment_probe: false\n  bot_mode_protocol: false\n  coding_context: off\n"
         "tools:\n  tool_search:\n    enabled: off\n"
-        "checkpoints:\n  enabled: false\n",
-        encoding="utf-8",
+        "checkpoints:\n  enabled: false\n"
     )
+    if budget_policy and budget_policy[0] == "scout_assessment":
+        # A scoped Scout attempt must return one complete response inside its one
+        # HTTP request allowance. Keep Hermes' native request mode configuration.
+        hermes_config += "model:\n  streaming: false\n"
+    (hermes_home / "config.yaml").write_text(hermes_config, encoding="utf-8")
     (hermes_home / ".no-bundled-skills").touch()
     sys.path.insert(0, str(ROOT / "runtime" / "hermes-agent"))
     sys.path.insert(0, str(ROOT / "adapters" / "hermes"))
 
     cfg = envelope["model"]
-    budget_policy = request_budget_policy(envelope)
     budget = None
     if budget_policy:
         from request_budget import RequestBudget

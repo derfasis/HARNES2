@@ -120,7 +120,8 @@ test('source edits and tombstones invalidate a scoped sample before model execut
 test('revocation while model work is delayed withholds the result and retains usage',async t=>{
   const x=await prepared(t);const created=await request(x);let startedResolve,finishResolve;
   const started=new Promise(resolve=>startedResolve=resolve),finish=new Promise(resolve=>finishResolve=resolve);
-  const pending=processScoutAssessment(x.h.service,runtime({onCall:()=>startedResolve(),delay:finish,result:{completed:true,final_response:JSON.stringify(successful),usage:{input_tokens:12,output_tokens:5}}}));
+  const pending=processScoutAssessment(x.h.service,runtime({onCall:()=>startedResolve(),delay:finish,result:{completed:true,final_response:JSON.stringify(successful),
+    api_calls:1,model_identity:{model_id:'served-after-revocation',model_version:'provider-v2'},usage:{input_tokens:12,output_tokens:5}}}));
   await started;
   await x.h.command('scout.revoke_assessment',{request_id:created.request_id,expected_fingerprint:created.fingerprint,reason:'Revoke during offline test'});
   finishResolve();const outcome=await pending;
@@ -128,6 +129,9 @@ test('revocation while model work is delayed withholds the result and retains us
   assert.equal(x.h.store.get('SELECT COUNT(*) n FROM scout_assessments').n,0);
   assert.equal(x.h.store.get("SELECT status FROM runs WHERE runtime='hermes-scout-v1'").status,'failed');
   assert.equal(x.h.store.get("SELECT input_tokens FROM runs WHERE runtime='hermes-scout-v1'").input_tokens,12);
+  const receipt=JSON.parse(x.h.store.get("SELECT result_json FROM runs WHERE runtime='hermes-scout-v1'").result_json).runtime_receipt;
+  assert.equal(receipt.api_calls,1);assert.equal(receipt.model_identity.model_id,'served-after-revocation');
+  assert.equal(x.h.store.get('SELECT COUNT(*) n FROM scout_assessments').n,0);
 });
 
 for(const mutation of ['audit grant','model profile','campaign revision']) test(`late result is withheld after ${mutation} changes`,async t=>{
@@ -212,4 +216,45 @@ test('evidence references must be members of the sealed sample and never create 
   assert.equal(outcome.disposition,'withheld');assert.equal(x.h.store.get('SELECT COUNT(*) n FROM scout_assessments').n,0);
   assert.equal(x.h.store.get('SELECT COUNT(*) n FROM drafts').n,0);
   assert.equal(x.h.store.get('SELECT COUNT(*) n FROM delivery_attempts').n,0);
+});
+
+test('scoped runtime receipt preserves the provider-served identity, not the configured model alias',async t=>{
+  const x=await prepared(t);await request(x);
+  const secret='sk-provider-raw-secret-must-never-persist';
+  const outcome=await processScoutAssessment(x.h.service,runtime({result:{completed:true,final_response:JSON.stringify(successful),
+    api_calls:1,model_identity:{model_id:'served-model-2026-10',model_version:'provider-build-17'},
+    provider_raw:secret,debug_dump:secret,api_key:secret,usage:{input_tokens:18,output_tokens:9}}}));
+  assert.equal(outcome.disposition,'assessment_proposed');
+  const {run,result}=(()=>{const row=x.h.store.get("SELECT * FROM runs WHERE runtime='hermes-scout-v1'");return {run:row,result:JSON.parse(row.result_json)};})();
+  assert.equal(run.model,'offline-scoped-model','configured profile alias remains separate from served identity');
+  assert.deepEqual(result.runtime_receipt,{api_calls:1,api_call_scope:'worker_httpx_generation_requests',
+    proxy_internal_retries:'unknown',model_identity:{model_id:'served-model-2026-10',model_version:'provider-build-17'}});
+  assert.equal(JSON.stringify(result).includes(secret),false);
+});
+
+for(const [label,override] of [
+  ['missing call count',{api_calls:undefined}],
+  ['invalid call count',{api_calls:true}],
+  ['excess call count',{api_calls:2}],
+  ['missing identity',{model_identity:undefined}],
+  ['malformed identity',{model_identity:{model_id:'configured-or-hostile identity',model_version:'v1'}}],
+  ['projects valid identity despite extra fields',{model_identity:{model_id:'served-model',model_version:'v1',provider_raw:'provider secret must not persist'}}],
+]) test(`scoped runtime receipt leaves ${label} unknown and drops provider raw fields`,async t=>{
+  const x=await prepared(t);await request(x);const secret='provider raw secret must not persist';
+  const result={completed:true,final_response:JSON.stringify(successful),api_calls:1,
+    model_identity:{model_id:'served-model',model_version:'v1'},provider_raw:secret,debug_dump:secret,
+    usage:{input_tokens:5,output_tokens:3},...override};
+  const outcome=await processScoutAssessment(x.h.service,runtime({result}));
+  assert.equal(outcome.disposition,'assessment_proposed');
+  const receipt=JSON.parse(x.h.store.get("SELECT result_json FROM runs WHERE runtime='hermes-scout-v1'").result_json).runtime_receipt;
+  if(Object.hasOwn(override,'api_calls')) assert.equal(receipt.api_calls,null);
+  if(Object.hasOwn(override,'model_identity')) {
+    const identity=override.model_identity;
+    const expected=identity&&/^[A-Za-z0-9._:+/\\-]{1,160}$/.test(identity.model_id??'')
+      &&identity.model_version!==undefined&& (identity.model_version===null||/^[A-Za-z0-9._:+/\\-]{1,160}$/.test(identity.model_version))
+      ?{model_id:identity.model_id,model_version:identity.model_version}:null;
+    assert.deepEqual(receipt.model_identity,expected);
+  }
+  assert.equal(JSON.stringify(receipt).includes(secret),false);
+  assert.equal(JSON.stringify(receipt).includes('provider_raw'),false);
 });

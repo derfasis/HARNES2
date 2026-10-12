@@ -155,7 +155,7 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // independently of its outer iteration counter (test_request_budget.py).
     // Scoped Scout reuses the HTTPX request cap for a single historical-sample request.
     // The real worker plus loopback provider proves one generation POST (test_scout_request_budget.py).
-    "scripts/situation_router_worker.py": "724cf28e0491b7fb0df00bb0aecac9f9bde5f3c3",
+    "scripts/situation_router_worker.py": "f4b01730e600d5d13bf28c66119f952e75371fd4",
     // Reviewed extension: invalidate read-only source checkpoints on process recovery.
     // textBlobHash normalizes CRLF, so this is the LF-normalized R7 blob hash.
     // Continuity adds export tables and recovers its running turns as interrupted.
