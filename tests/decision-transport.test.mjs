@@ -148,7 +148,9 @@ test('4D the worker reports a served model identity and never one taken from con
   assert.match(worker, /def served_identity/);
   assert.match(worker, /"model_identity": identity/);
   // The identity must be read from the result or the agent, never from the configured model name.
-  const body = worker.slice(worker.indexOf('def served_identity'), worker.indexOf('def main'));
+  const start = worker.indexOf('def served_identity');
+  // Inspect the identity function itself, excluding independent worker-budget helpers.
+  const body = worker.slice(start, worker.indexOf('\ndef ', start + 1));
   assert.ok(!body.includes('envelope'), 'the identity may not come from the envelope configuration');
   assert.ok(!body.includes('cfg'), 'the identity may not come from cfg');
   // The pinned Hermes build copies the configured name into result["model"], so that key is

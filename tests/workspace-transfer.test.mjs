@@ -38,6 +38,7 @@ function addPrivateHistory(h) {
 
 function importBundle(t, h, destinationName, { migrationCount = 12 } = {}) {
   const bundle = exportPartner(h.store);
+  if (migrationCount < 19) delete bundle.tables.scout_model_requests;
   if (migrationCount < 18) delete bundle.tables.audience_first_contact_heads;
   if (migrationCount < 17) delete bundle.tables.source_observation_epochs;
   if (migrationCount < 15) {
@@ -110,7 +111,7 @@ test('schema-11 transfer keeps work/material history but removes live authority 
   const { destination,bundle } = importBundle(t, h, 'workspace-transfer-v11', { migrationCount: 11 });
   assert.equal(bundle.migrations.length, 11, 'the fixture remains an actual schema-11 export');
   assert.equal(AUDIENCE_TABLES.some(table => Object.hasOwn(bundle.tables, table)), false);
-  assert.equal(SCOUT_TABLES.every(table=>Object.hasOwn(bundle.tables,table)),true);
+  assert.equal(SCOUT_TABLES.filter(table=>table!=='scout_model_requests').every(table=>Object.hasOwn(bundle.tables,table)),true);
   const store = new Store(path.join(destination, 'data'));
   try {
     const restoredMaterial = store.get('SELECT * FROM work_materials WHERE id=?', materialId);
@@ -159,7 +160,7 @@ test('schema-9 bundle remains a supported positive control with Outcome transfer
   assert.equal(Object.keys(bundle.tables).some(table => [...WORK_TABLES, ...CONTROL_TABLES].includes(table)), false);
   const store = new Store(path.join(destination, 'data'));
   try {
-    assert.equal(store.all('SELECT * FROM schema_migrations').length, 18);
+    assert.equal(store.all('SELECT * FROM schema_migrations').length, 19);
     assert.equal(store.get('SELECT COUNT(*) n FROM work_cases').n, 0);
     assert.equal(store.get('SELECT COUNT(*) n FROM control_tickets').n, 0);
     assert.deepEqual(store.all('PRAGMA foreign_key_check'), []);
@@ -173,7 +174,7 @@ test('schema-10 historical bundle has work/control state but excludes later Scou
   assert.equal(Object.hasOwn(bundle.tables,'work_cases'),true);
   const store=new Store(path.join(destination,'data'));
   try{
-    assert.equal(store.all('SELECT * FROM schema_migrations').length,18);
+    assert.equal(store.all('SELECT * FROM schema_migrations').length,19);
     assert.equal(store.get('SELECT COUNT(*) n FROM work_cases WHERE id=?',caseId).n,1);
     assert.equal(store.get('SELECT COUNT(*) n FROM scout_campaigns').n,0);
     assert.deepEqual(store.all('PRAGMA foreign_key_check'),[]);

@@ -64,9 +64,9 @@ function importBundle(t, h, bundle, label) {
 
 const updateTableChecksum = bundle => { bundle.tables_sha256 = hash(JSON.stringify(bundle.tables)); };
 
-test('schema-18 export/import retains a committed cutover chain and does not restore active checkpoint authority', async t => {
+test('schema-19 export/import retains a committed cutover chain and does not restore active checkpoint authority', async t => {
   const h = await harness(t), { authorization, epoch } = await committedEpoch(h), bundle = exportPartner(h.store);
-  assert.equal(bundle.migrations.length, 18);
+  assert.equal(bundle.migrations.length, 19);
   assert.ok(bundle.excluded.includes('transferable Telegram observation-rebaseline authority'));
   assert.deepEqual(bundle.tables.source_observation_epochs, h.store.all('SELECT * FROM source_observation_epochs ORDER BY source_ref,generation'));
   assert.equal(bundle.tables.source_observation_epochs.length, 2);
@@ -93,10 +93,11 @@ test('schema-18 export/import retains a committed cutover chain and does not res
   } finally { restored.close(); }
 });
 
-test('schema-16 catalogue remains exact and upgrades to schema 18 without synthesizing a Telegram epoch', async t => {
+test('schema-16 catalogue remains exact and upgrades to schema 19 without synthesizing a Telegram epoch', async t => {
   const h = await harness(t);
   const bundle = exportPartner(h.store);
   bundle.migrations = bundle.migrations.slice(0, 16);
+  delete bundle.tables.scout_model_requests;
   delete bundle.tables.source_observation_epochs;
   delete bundle.tables.audience_first_contact_heads;
   updateTableChecksum(bundle);
@@ -104,7 +105,7 @@ test('schema-16 catalogue remains exact and upgrades to schema 18 without synthe
   assert.equal(result.status, 0, result.stderr);
   const restored = new Store(path.join(destination, 'data'));
   try {
-    assert.equal(restored.get('SELECT COUNT(*) n FROM schema_migrations').n, 18);
+    assert.equal(restored.get('SELECT COUNT(*) n FROM schema_migrations').n, 19);
     assert.equal(restored.get('SELECT COUNT(*) n FROM source_observation_epochs').n, 0);
     assert.deepEqual(restored.all('PRAGMA foreign_key_check'), []);
   } finally { restored.close(); }
@@ -115,6 +116,7 @@ test('schema-16 downgrade cannot strip committed schema-17 epoch markers and che
   await committedEpoch(h);
   const forged = exportPartner(h.store);
   forged.migrations = forged.migrations.slice(0, 16);
+  delete forged.tables.scout_model_requests;
   delete forged.tables.source_observation_epochs;
   delete forged.tables.audience_first_contact_heads;
   updateTableChecksum(forged);
@@ -146,6 +148,7 @@ test('pending rebaseline authority is durably revoked on import and cannot be re
 test('schema-16 downgrade cannot preserve an unresolved schema-17 request as active authority', async t => {
   const h = await harness(t), authorization = await pendingAuthorization(h), forged = exportPartner(h.store);
   forged.migrations = forged.migrations.slice(0, 16);
+  delete forged.tables.scout_model_requests;
   delete forged.tables.source_observation_epochs;
   delete forged.tables.audience_first_contact_heads;
   updateTableChecksum(forged);
@@ -164,7 +167,7 @@ test('schema-16 downgrade cannot preserve an unresolved schema-17 request as act
   } finally { restored.close(); }
 });
 
-test('schema-18 import rejects tampered epoch floor, hash, parent, event, checkpoint and bundle checksum', async t => {
+test('schema-19 import rejects tampered epoch floor, hash, parent, event, checkpoint and bundle checksum', async t => {
   const h = await harness(t); await committedEpoch(h); const base = exportPartner(h.store);
   assert.equal(base.tables.source_observation_epochs.length, 2);
   const invalid = [
