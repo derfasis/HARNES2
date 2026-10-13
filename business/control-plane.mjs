@@ -88,8 +88,19 @@ export class ControlPlane {
     if (this.service.deployment && (this.service.deployment.summary().phase !== 'active' || this.service.deployment.mode !== 'scoped_reasoning')) return false;
     if (!this.enabled) return !this.ticket(runId); // Turning CP off cannot turn its retired ticket into permission.
     const t = this.ticket(runId);
+    let domainEnabled = t?.plane === 'private' ? this.service.config.runtime.enabled === true : this.service.config.opportunity.automatic === true;
+    if (t?.plane === 'public' && t.operation === 'source_assessment') {
+      const run = this.db.get('SELECT * FROM runs WHERE id=? AND partner_id=?', runId, this.service.config.partnerId);
+      try {
+        if (run?.runtime === 'hermes-scout-v1' && (JSON.parse(run.context_json).scout_assessment_request !== undefined
+          || this.db.get('SELECT id FROM scout_model_requests WHERE run_id=? AND partner_id=?', runId, this.service.config.partnerId))) {
+          this.service.scout.modelRequests.assertForRun(run);
+          domainEnabled = true;
+        }
+      } catch { domainEnabled = false; }
+    }
     return !this.stopped && this.processCurrent() && t?.owner_id === this.ownerId && ['running','completed'].includes(t.status)
-      && Date.parse(t.expires_at) > Date.now() && (t.plane === 'private' ? this.service.config.runtime.enabled === true : this.service.config.opportunity.automatic === true)
+      && Date.parse(t.expires_at) > Date.now() && domainEnabled
       && this.service.config.telegram.liveSending === false;
   }
   require(runId, { plane } = {}) {

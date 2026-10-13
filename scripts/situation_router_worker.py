@@ -154,39 +154,63 @@ def served_identity(result, response_models=()):
     return None, "runtime_did_not_expose_a_served_model_identity"
 
 
+def request_budget_policy(envelope):
+    """Select the frozen HTTP model-request budget for a focused worker packet."""
+    packet = envelope.get("context", {}).get("packet", {})
+    followup = packet.get("followup") is not None
+    scout_assessment = packet.get("scout_assessment_request") is not None
+    if followup and scout_assessment:
+        raise RuntimeError("Ambiguous focused request budget")
+
+    cfg = envelope.get("model", {})
+    if followup:
+        if type(cfg.get("maxApiCalls")) is not int or cfg["maxApiCalls"] != 2:
+            raise RuntimeError("Invalid frozen follow-up request budget")
+        return "followup", 2
+    if scout_assessment:
+        if type(cfg.get("maxIterations")) is not int or cfg["maxIterations"] != 2:
+            raise RuntimeError("Invalid frozen Scout iteration budget")
+        if type(cfg.get("maxApiCalls")) is not int or cfg["maxApiCalls"] != 1:
+            raise RuntimeError("Invalid frozen Scout request budget")
+        return "scout_assessment", 1
+    return None
+
+
 def main():
     envelope = json.load(sys.stdin)
     run_id = str(envelope["run_id"])
     if envelope.get("tools"):
         raise RuntimeError("Situation Router must not receive effect tools")
+    budget_policy = request_budget_policy(envelope)
 
     hermes_home = ROOT / "data" / "runtime" / "benchmarks" / "situation-router" / run_id
     hermes_home.mkdir(parents=True, exist_ok=True)
     os.environ["HERMES_HOME"] = str(hermes_home)
     os.environ["HERMES_CWD"] = str(hermes_home)
     os.chdir(hermes_home)
-    (hermes_home / "config.yaml").write_text(
+    hermes_config = (
         "memory:\n  memory_enabled: false\n  user_profile_enabled: false\n  write_approval: true\n"
         "skills:\n  write_approval: true\n"
         "agent:\n  skip_memory: true\n  tool_use_enforcement: false\n  execution_guidance: false\n"
         "  task_completion_guidance: false\n  parallel_tool_call_guidance: false\n"
         "  environment_probe: false\n  bot_mode_protocol: false\n  coding_context: off\n"
         "tools:\n  tool_search:\n    enabled: off\n"
-        "checkpoints:\n  enabled: false\n",
-        encoding="utf-8",
+        "checkpoints:\n  enabled: false\n"
     )
+    if budget_policy and budget_policy[0] == "scout_assessment":
+        # A scoped Scout attempt must return one complete response inside its one
+        # HTTP request allowance. Keep Hermes' native request mode configuration.
+        hermes_config += "model:\n  streaming: false\n"
+    (hermes_home / "config.yaml").write_text(hermes_config, encoding="utf-8")
     (hermes_home / ".no-bundled-skills").touch()
     sys.path.insert(0, str(ROOT / "runtime" / "hermes-agent"))
     sys.path.insert(0, str(ROOT / "adapters" / "hermes"))
 
     cfg = envelope["model"]
-    focused = envelope.get("context", {}).get("packet", {}).get("followup") is not None
     budget = None
-    if focused:
-        if type(cfg.get("maxApiCalls")) is not int or cfg["maxApiCalls"] != 2:
-            raise RuntimeError("Invalid frozen follow-up request budget")
+    if budget_policy:
         from request_budget import RequestBudget
-        budget = RequestBudget(cfg["maxApiCalls"], model_requests_only=True)
+        budget = RequestBudget(budget_policy[1], model_requests_only=True)
     with contextlib.redirect_stdout(sys.stderr), (budget.install() if budget else contextlib.nullcontext()):
         from run_agent import AIAgent
         from credentials import runtime_credentials

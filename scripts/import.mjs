@@ -27,10 +27,11 @@ if (fs.existsSync(destination)) throw new Error('Destination already exists. Cho
 if (bundle.format !== 'digital-ai-partner' || bundle.schema_version !== 1 || !bundle.tables) throw new Error('Unsupported bundle');
 const migrationCount = Array.isArray(bundle.migrations) ? bundle.migrations.length : -1;
 const TELEGRAM_SOURCE_EPOCH_TABLES = ['source_observation_epochs'];
-const priorTables = TABLES.filter(table => !AUDIENCE_FIRST_CONTACT_TABLES.includes(table));
+const preScopedScoutTables = TABLES.filter(table => table !== 'scout_model_requests');
+const priorTables = preScopedScoutTables.filter(table => !AUDIENCE_FIRST_CONTACT_TABLES.includes(table));
 const without = (...groups) => {
   const excluded = new Set([...groups.flat(),...SCOUT_TABLES,...AUDIENCE_TABLES,...MODEL_PROFILE_TABLES,...AUDIENCE_FOLLOWUP_TABLES,...TELEGRAM_SOURCE_EPOCH_TABLES]);
-  return TABLES.filter(table => !excluded.has(table));
+  return preScopedScoutTables.filter(table => !excluded.has(table));
 };
 // These are historical export catalogues. Deriving them from the current list alone silently
 // injected tables added by later migrations into older bundles (outcomes into v2-v7).
@@ -44,7 +45,7 @@ const inputCatalogues = new Map([
   [8, without(WORK_TABLES, CONTROL_TABLES)],
   [9, without(WORK_TABLES, CONTROL_TABLES)],
   [10, without()],
-  [11, TABLES.filter(table => !AUDIENCE_TABLES.includes(table) && !MODEL_PROFILE_TABLES.includes(table) && !AUDIENCE_FOLLOWUP_TABLES.includes(table) && !TELEGRAM_SOURCE_EPOCH_TABLES.includes(table))],
+  [11, preScopedScoutTables.filter(table => !AUDIENCE_TABLES.includes(table) && !MODEL_PROFILE_TABLES.includes(table) && !AUDIENCE_FOLLOWUP_TABLES.includes(table) && !TELEGRAM_SOURCE_EPOCH_TABLES.includes(table))],
   // These releases predate immutable source-watch epochs. Keep their catalogues
   // fixed even though Store.TABLES now includes later epoch tables.
   [12, priorTables.filter(table => !AUDIENCE_ATTENTION_TABLES.includes(table) && !MODEL_PROFILE_TABLES.includes(table) && !AUDIENCE_FOLLOWUP_TABLES.includes(table) && !AUDIENCE_SOURCE_EPOCH_TABLES.includes(table) && !TELEGRAM_SOURCE_EPOCH_TABLES.includes(table))],
@@ -53,7 +54,8 @@ const inputCatalogues = new Map([
   [15, priorTables.filter(table => !AUDIENCE_SOURCE_EPOCH_TABLES.includes(table) && !TELEGRAM_SOURCE_EPOCH_TABLES.includes(table))],
   [16, priorTables.filter(table => !TELEGRAM_SOURCE_EPOCH_TABLES.includes(table))],
   [17, priorTables],
-  [18, TABLES],
+  [18, preScopedScoutTables],
+  [19, TABLES],
 ]);
 const inputTables = inputCatalogues.get(migrationCount);
 if (!inputTables) throw new Error('Migration version differs');
@@ -318,6 +320,7 @@ try {
       sanitizeTransferredWorkspace(store, partnerId);
     }
     if (migrationCount >= 11) {
+      store.run("UPDATE scout_model_requests SET status='revoked',revoked_at=?,revocation_reason='TRANSFER_AUTHORITY_REQUIRES_REVIEW' WHERE status='active'", new Date().toISOString());
       store.run("UPDATE scout_grants SET status='revoked',reason='TRANSFER_AUTHORITY_REQUIRES_REVIEW' WHERE status='active'");
       store.run("UPDATE scout_jobs SET status='stale',owner_id=NULL,reason='TRANSFER_AUTHORITY_REQUIRES_REVIEW' WHERE status IN ('queued','running','interrupted')");
       store.run("UPDATE scout_assessments SET status='stale' WHERE status IN ('proposed','approved')");

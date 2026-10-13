@@ -5,6 +5,7 @@ import { observationRecoveryPresentation, sourceObservationFloor } from './sourc
 import { scoutSignals } from './scout-signals.mjs';
 import { telegramReadState } from './telegram-read-gate.mjs';
 import { scoutAssessmentDiagnostic } from './scout-assessment-output.mjs';
+import { ScoutModelRequests } from './scout-model-requests.mjs';
 export { SCOUT_TABLES, SCOUT_COMMANDS } from './scout-tables.mjs';
 const check=(ok,code)=>ensure(ok,code,409,code);
 export const SCOUT_EVALUATOR_VERSION='scout-assessment-v3';
@@ -23,9 +24,10 @@ function reference(raw) {
  check(match,'SCOUT_PUBLIC_REFERENCE_REQUIRED');return {username:match[1]};
 }
 export class SourceScout {
- constructor(service){this.service=service;this.db=service.store;}
+ constructor(service){this.service=service;this.db=service.store;this.modelRequests=new ScoutModelRequests(service);}
  get cfg(){return this.service.config.scout;}
  get partnerId(){return this.service.config.partnerId;}
+ get evaluatorVersion(){return SCOUT_EVALUATOR_VERSION;}
  get enabled(){return this.cfg?.enabled===true&&this.service.config.controlPlane?.enabled===true&&this.service.config.telegram?.liveSending===false;}
  ready(){check(this.enabled&&this.service.control.processOwned&&this.service.control.processCurrent()&&!this.service.control.stopped,'SCOUT_DISABLED');}
  campaign(campaignId){const c=this.db.get('SELECT * FROM scout_campaigns WHERE id=? AND partner_id=?',campaignId,this.partnerId);check(c,'SCOUT_CAMPAIGN_NOT_FOUND');return c;}
@@ -59,6 +61,7 @@ export class SourceScout {
  }
  command(action,p,actor){
    check(actor?.kind==='operator','SCOUT_OPERATOR_REQUIRED');this.ready();
+   if(action==='scout.revoke_assessment')return this.modelRequests.revoke(p);
    if(action==='scout.create'){
      fields(p,['title','topic','audience','language','geography','queries']);
      check(this.db.get('SELECT COUNT(*) n FROM scout_campaigns WHERE partner_id=?',this.partnerId).n<50,'SCOUT_CAMPAIGN_CAPACITY');
@@ -134,9 +137,13 @@ export class SourceScout {
      return this.enqueue(c,grant,'history',{before_id:0,from,until,messages:0},candidate.id,sampleId);
    }
    if(action==='scout.request_assessment'){
-     fields(p,['campaign_id','revision','candidate_id','sample_id']);check(this.cfg.modelEnabled===true,'SCOUT_MODEL_DISABLED');
+     fields(p,['campaign_id','revision','candidate_id','sample_id','model_profile_id','expected_model_profile_hash','expires_at','purpose']);
      const candidate=this.candidate(p.candidate_id,c.id),sample=this.sample(p.sample_id,candidate);this.sampleFresh(sample);
      check(candidate.account_id===grant.account_id,'SCOUT_ACCOUNT_MISMATCH');
+     const scoped=['model_profile_id','expected_model_profile_hash','expires_at','purpose'].some(k=>p[k]!==undefined);
+     if(scoped){check(['model_profile_id','expected_model_profile_hash','expires_at','purpose'].every(k=>p[k]!==undefined),'SCOUT_MODEL_REQUEST_FIELDS_REQUIRED');
+       return this.modelRequests.create(p,c,grant,candidate,sample);}
+     check(this.cfg.modelEnabled===true,'SCOUT_MODEL_DISABLED');
      return this.enqueue(c,grant,'assessment',{sample_digest:sample.digest,topic_hash:c.topic_hash,evaluator_version:SCOUT_EVALUATOR_VERSION},candidate.id,sample.id);
    }
    if(action==='scout.review'){
@@ -168,7 +175,13 @@ export class SourceScout {
  assessment(assessmentId,c){
    const row=this.db.get('SELECT * FROM scout_assessments WHERE id=? AND campaign_id=?',assessmentId,c.id);check(row,'SCOUT_ASSESSMENT_NOT_FOUND');
    const sample=this.sample(row.sample_id);this.sampleFresh(sample);
-   check(row.campaign_revision===c.revision&&row.topic_hash===c.topic_hash&&row.sample_digest===sample.digest&&row.evaluator_version===SCOUT_EVALUATOR_VERSION,'SCOUT_ASSESSMENT_STALE');return row;
+   check(row.campaign_revision===c.revision&&row.topic_hash===c.topic_hash&&row.sample_digest===sample.digest&&row.evaluator_version===SCOUT_EVALUATOR_VERSION,'SCOUT_ASSESSMENT_STALE');
+   if(row.run_id){
+     const linked=this.db.get(`SELECT r.* FROM scout_model_requests r LEFT JOIN scout_jobs j ON j.id=r.job_id
+       WHERE r.partner_id=? AND (r.run_id=? OR j.run_id=?) LIMIT 1`,this.partnerId,row.run_id,row.run_id);
+     if(linked){check(linked.run_id===row.run_id,'SCOUT_MODEL_REQUEST_ASSESSMENT_INVALID');this.modelRequests.assertCurrentForAssessment(row);}
+   }
+   return row;
  }
  upsertCandidate(c,g,native,origin){
    check(native&&/^[1-9][0-9]{0,18}$/.test(native.channel_id)&&['group','channel'].includes(native.kind),'SCOUT_CANDIDATE_INVALID');
@@ -240,6 +253,8 @@ export class SourceScout {
    for(const job of jobs){
      try{
        const {grant}=this.jobAuthority(job,{runtime:false});
+       if(this.db.get('SELECT id FROM scout_model_requests WHERE job_id=? AND partner_id=?',job.id,this.partnerId))
+         this.modelRequests.forJob(job,{runtime:false,allowSpent:job.attempts>0||!!job.run_id});
        if(job.kind==='assessment')check(JSON.parse(job.cursor_json)?.evaluator_version===SCOUT_EVALUATOR_VERSION,'SCOUT_ASSESSMENT_STALE');
        // Startup runs before getMe. Waiting for the right account must not retire
        // valid work or resurrect an interrupted billable assessment.
@@ -263,12 +278,13 @@ export class SourceScout {
    return {...c,config:JSON.parse(c.config_json),authority:{scout:grant?{...grant,current:this.grantCurrent(grant,c,'audit')}:null},candidates,
      jobs:this.db.all('SELECT j.id,j.kind,j.status,j.reason,j.next_at,j.attempts,r.result_json FROM scout_jobs j LEFT JOIN runs r ON r.id=j.run_id AND r.partner_id=? AND r.runtime=\'hermes-scout-v1\' WHERE j.campaign_id=? ORDER BY j.updated_at DESC,j.rowid DESC LIMIT 30',this.partnerId,c.id).map(({result_json,...job})=>{
        let diagnostic=null;try{diagnostic=scoutAssessmentDiagnostic(JSON.parse(result_json)?.diagnostic);}catch{/* Corrupt receipts are not diagnostics. */}
-       return {...job,diagnostic};
+       return {...job,diagnostic,model_request:this.modelRequests.presentation(job.id)};
      }),
      unknown:['Search is incomplete.','History is a bounded sample, not continuous observation.','No contact, join or sending permission is created.']};
  }
  snapshot(){
    let readGate=null;try{if(this.enabled&&this.service.telegramAccountId)readGate=telegramReadState(this.service,this.service.telegramAccountId);}catch(e){readGate={ready:false,reason:e.code??'SCOUT_READ_GATE_INVALID'};}
-   return {enabled:this.enabled,model_enabled:this.cfg?.modelEnabled===true,account_id:this.service.telegramAccountId,read_gate:readGate,limits:this.cfg??null,campaigns:this.db.all('SELECT c.id,c.title,c.topic,c.revision,c.status,c.updated_at,(SELECT COUNT(*) FROM scout_candidates s WHERE s.campaign_id=c.id) candidate_count FROM scout_campaigns c WHERE c.partner_id=? ORDER BY c.updated_at DESC LIMIT 50',this.partnerId)};
+   const scoped=this.modelRequests.scopedAvailability();
+   return {enabled:this.enabled,model_enabled:this.cfg?.modelEnabled===true,model_scoped_available:scoped.model_scoped_available,model_profiles:scoped.model_profiles,scoped_model_requests:scoped,account_id:this.service.telegramAccountId,read_gate:readGate,limits:this.cfg??null,campaigns:this.db.all('SELECT c.id,c.title,c.topic,c.revision,c.status,c.updated_at,(SELECT COUNT(*) FROM scout_candidates s WHERE s.campaign_id=c.id) candidate_count FROM scout_campaigns c WHERE c.partner_id=? ORDER BY c.updated_at DESC LIMIT 50',this.partnerId)};
  }
 }

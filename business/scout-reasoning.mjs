@@ -10,25 +10,42 @@ import { normalizeFailureCause } from './failure-cause.mjs';
 import { SCOUT_ASSESSMENT_CONTRACT as contract, scoutAssessmentOutput } from './scout-assessment-output.mjs';
 const instructions=fs.readFileSync(path.join(ROOT,'partner/scout-assessment.md'),'utf8').replace(/\r\n/g,'\n');
 const check=(ok,code)=>ensure(ok,code,409,code);
+function scopedReceipt(result) {
+ const identity=result?.model_identity;
+ const token=x=>typeof x==='string'&&/^[A-Za-z0-9._:+/\-]{1,160}$/.test(x);
+ return {api_calls:Number.isInteger(result?.api_calls)&&result.api_calls>=0&&result.api_calls<=1?result.api_calls:null,
+   api_call_scope:'worker_httpx_generation_requests',proxy_internal_retries:'unknown',
+   model_identity:token(identity?.model_id)&&(identity.model_version===null||token(identity.model_version))
+     ?{model_id:identity.model_id,model_version:identity.model_version}:null};
+}
 export async function processScoutAssessment(service,runtime){
  const scout=service.scout,db=service.store;
- if(!scout.enabled||scout.cfg.modelEnabled!==true)return {disposition:'disabled'};
+ if(!scout.enabled||scout.cfg.modelEnabled!==true&&!scout.modelRequests.hasPending())return {disposition:'disabled'};
  if(service.scoutReasoningFault)return {disposition:'receipt_persistence_unproven'};
- if(!runtimeReadiness(service.config,{decision:true}).ready)return {disposition:'waiting_model'};
+ const legacyReady=scout.cfg.modelEnabled===true&&runtimeReadiness(service.config,{decision:true}).ready;
+ if(!legacyReady&&!scout.modelRequests.hasPending())return {disposition:'waiting_model'};
  return service.control.run('public','source_assessment',async()=>{
    const prepared=await service.exclusive(()=>db.transaction(()=>{
      const count=db.get("SELECT COUNT(*) n FROM runs WHERE partner_id=? AND runtime='hermes-scout-v1' AND created_at>=?",scout.partnerId,now().slice(0,10)).n;
      if(count>=scout.cfg.maxModelRunsPerDay)return null;
-     for(const job of db.all("SELECT j.* FROM scout_jobs j JOIN scout_campaigns c ON c.id=j.campaign_id JOIN scout_grants g ON g.id=j.grant_id WHERE c.partner_id=? AND g.account_id=? AND j.kind='assessment' AND j.status='queued' AND j.next_at<=? ORDER BY j.updated_at,j.id LIMIT 20",scout.partnerId,service.telegramAccountId,now())){
+     for(const job of db.all("SELECT j.* FROM scout_jobs j JOIN scout_campaigns c ON c.id=j.campaign_id JOIN scout_grants g ON g.id=j.grant_id WHERE c.partner_id=? AND g.account_id=? AND j.kind='assessment' AND j.status='queued' AND j.next_at<=? AND (?=1 OR EXISTS(SELECT 1 FROM scout_model_requests r WHERE r.job_id=j.id AND r.partner_id=c.partner_id)) ORDER BY j.updated_at,j.id LIMIT 20",scout.partnerId,service.telegramAccountId,now(),legacyReady?1:0)){
        try{
+         const scoped=!!db.get('SELECT id FROM scout_model_requests WHERE job_id=?',job.id);
+         if(!scoped&&!legacyReady)continue;
+         const authority=scoped?scout.modelRequests.forJob(job):null;
+         const modelConfig=authority?.model_config??service.config.runtime;
+         // Readiness is evaluated for the exact frozen profile; this does not enable the pipeline.
+         if(authority&&!runtimeReadiness({...service.config,opportunity:{...service.config.opportunity,automatic:true},runtime:modelConfig},{decision:true}).ready)continue;
          const {grant}=scout.jobAuthority(job,{runtime:false});
          if(grant.account_id!==service.telegramAccountId)continue;
          const {campaign}=scout.jobAuthority(job),candidate=scout.candidate(job.candidate_id,campaign.id),sample=scout.sample(job.sample_id,candidate),cursor=JSON.parse(job.cursor_json);scout.sampleFresh(sample);
          check(cursor.sample_digest===sample.digest&&cursor.topic_hash===campaign.topic_hash&&cursor.evaluator_version===SCOUT_EVALUATOR_VERSION,'SCOUT_ASSESSMENT_STALE');
          const signals=scoutSignals(JSON.parse(sample.messages_json));check(signals.groups.length>0,'SCOUT_SEMANTIC_SAMPLE_EMPTY');
-         const runId=id();db.run("INSERT INTO runs(id,partner_id,status,runtime,model,context_json,created_at) VALUES(?,?,'running','hermes-scout-v1',?,?,?)",runId,scout.partnerId,service.config.runtime.model,JSON.stringify({job_id:job.id,campaign_id:campaign.id,campaign_revision:campaign.revision,campaign_config:JSON.parse(campaign.config_json),sample_id:sample.id,sample_digest:sample.digest,evaluator_version:SCOUT_EVALUATOR_VERSION,instructions_digest:digest(instructions),output_contract_digest:digest(contract),model_config:service.config.runtime}),now());
+         const scopedMetadata=authority?{scout_assessment_request:{id:authority.request.id,fingerprint:authority.fingerprint},model_profile:authority.model_profile}:{};
+         const runId=id();db.run("INSERT INTO runs(id,partner_id,status,runtime,model,context_json,created_at) VALUES(?,?,'running','hermes-scout-v1',?,?,?)",runId,scout.partnerId,modelConfig.model,JSON.stringify({job_id:job.id,campaign_id:campaign.id,campaign_revision:campaign.revision,campaign_config:JSON.parse(campaign.config_json),sample_id:sample.id,sample_digest:sample.digest,evaluator_version:SCOUT_EVALUATOR_VERSION,instructions_digest:digest(instructions),output_contract_digest:digest(contract),...scopedMetadata,model_config:modelConfig}),now());
          service.control.bindRun(runId);db.run("UPDATE scout_jobs SET status='running',run_id=?,owner_id=?,attempts=attempts+1,updated_at=? WHERE id=?",runId,service.control.ownerId,now(),job.id);
-         return {job,campaign,sample,signals,run:db.get('SELECT * FROM runs WHERE id=?',runId),context:{packet:{campaign:JSON.parse(campaign.config_json),sample:{id:sample.id,digest:sample.digest,coverage:sample.coverage,from:sample.requested_from,until:sample.requested_until},...signals,contact_permission:false},input:{situation_id:job.id},output_contract:contract,router_instructions:instructions}};
+         if(authority)scout.modelRequests.bindRun(job.id,runId);
+         return {job,campaign,sample,signals,run:db.get('SELECT * FROM runs WHERE id=?',runId),context:{packet:{campaign:JSON.parse(campaign.config_json),sample:{id:sample.id,digest:sample.digest,coverage:sample.coverage,from:sample.requested_from,until:sample.requested_until,...(authority?{acquisition_kind:'bounded_non_atomic_history_sample',continuous_coverage:false,current_intent:'unknown',offer_fit:'unknown'}:{})},...signals,...(authority?{scout_assessment_request:scopedMetadata.scout_assessment_request}:{}),contact_permission:false},input:{situation_id:job.id},output_contract:contract,router_instructions:instructions}};
        }catch(e){if(!(e instanceof AppError)&&!(e instanceof SyntaxError))throw e;db.run("UPDATE scout_jobs SET status='stale',reason=?,updated_at=? WHERE id=?",e.code??'SCOUT_RECORD_INVALID',now(),job.id);}
      }return null;
    }));
@@ -40,7 +57,9 @@ export async function processScoutAssessment(service,runtime){
      const current=db.get('SELECT * FROM scout_jobs WHERE id=?',prepared.job.id),spent=usageAccounting(JSON.parse(prepared.run.context_json).model_config,result?.usage);
      let assessmentId=null,reason='SCOUT_MODEL_FAILED',diagnostic=null;
      try{
-       check(current?.status==='running'&&current.owner_id===service.control.ownerId&&scout.enabled&&scout.cfg.modelEnabled===true&&service.control.canApply(prepared.run.id),'SCOUT_RESULT_RETIRED');
+       const frozen=JSON.parse(prepared.run.context_json);
+       if(frozen.scout_assessment_request)scout.modelRequests.assertForRun(prepared.run);
+       check(current?.status==='running'&&current.run_id===prepared.run.id&&current.owner_id===service.control.ownerId&&scout.enabled&&(frozen.scout_assessment_request||scout.cfg.modelEnabled===true)&&service.control.canApply(prepared.run.id),'SCOUT_RESULT_RETIRED');
        const {campaign}=scout.jobAuthority(current),sample=scout.sample(current.sample_id);scout.sampleFresh(sample);
        check(campaign.topic_hash===prepared.campaign.topic_hash&&sample.digest===prepared.sample.digest,'SCOUT_ASSESSMENT_STALE');
        const checked=scoutAssessmentOutput(result,prepared.signals.groups);diagnostic=checked.diagnostic;
@@ -48,7 +67,7 @@ export async function processScoutAssessment(service,runtime){
        assessmentId=id();db.run("INSERT INTO scout_assessments(id,campaign_id,campaign_revision,candidate_id,sample_id,sample_digest,topic_hash,evaluator_version,output_json,run_id,status,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,'proposed',?)",assessmentId,campaign.id,campaign.revision,current.candidate_id,sample.id,sample.digest,campaign.topic_hash,SCOUT_EVALUATOR_VERSION,JSON.stringify(output),prepared.run.id,now());reason='SCOUT_ASSESSMENT_PROPOSED';
      }catch(e){if(!(e instanceof AppError)&&!(e instanceof SyntaxError))throw e;reason=e.code??'SCOUT_OUTPUT_INVALID';}
      db.run('UPDATE scout_jobs SET status=?,reason=?,updated_at=? WHERE id=? AND status=\'running\' AND owner_id=?',assessmentId?'completed':'failed',reason,now(),prepared.job.id,service.control.ownerId);
-     db.run('UPDATE runs SET status=?,result_json=?,error=?,input_tokens=?,output_tokens=?,estimated_cost_usd=?,cost_status=?,finished_at=? WHERE id=?',assessmentId?'completed':'failed',JSON.stringify({assessment_id:assessmentId,reason,diagnostic}),assessmentId?null:reason,spent.input,spent.output,spent.cost,spent.costStatus,now(),prepared.run.id);
+     db.run('UPDATE runs SET status=?,result_json=?,error=?,input_tokens=?,output_tokens=?,estimated_cost_usd=?,cost_status=?,finished_at=? WHERE id=?',assessmentId?'completed':'failed',JSON.stringify({assessment_id:assessmentId,reason,diagnostic,...(JSON.parse(prepared.run.context_json).scout_assessment_request?{runtime_receipt:scopedReceipt(result)}:{})}),assessmentId?null:reason,spent.input,spent.output,spent.cost,spent.costStatus,now(),prepared.run.id);
      return {disposition:assessmentId?'assessment_proposed':'withheld',assessment_id:assessmentId,reason,diagnostic};
    }));}catch(error){
      // A model result without a durable receipt is not a successful assessment.

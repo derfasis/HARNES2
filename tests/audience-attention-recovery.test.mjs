@@ -532,6 +532,7 @@ test('transfer retires grants and pending retry requests without losing historic
   // the current database also has later attention and follow-up tables.
   const legacy = structuredClone(bundle);
   legacy.migrations = legacy.migrations.slice(0, 12);
+  delete legacy.tables.scout_model_requests;
   delete legacy.tables.source_observation_epochs;
   delete legacy.tables.audience_first_contact_heads;
   delete legacy.tables.audience_followup_requests;
@@ -553,7 +554,7 @@ test('transfer retires grants and pending retry requests without losing historic
   try {
     assert.equal(restoredLegacy.get('SELECT COUNT(*) n FROM audience_attention_grants').n, 0);
     assert.equal(restoredLegacy.get('SELECT COUNT(*) n FROM audience_attention_attempts').n, 0);
-    assert.equal(restoredLegacy.get('SELECT COUNT(*) n FROM schema_migrations').n, 18,
+    assert.equal(restoredLegacy.get('SELECT COUNT(*) n FROM schema_migrations').n, 19,
       'a pre-013 bundle is restored into the current schema without inventing authority');
   } finally { restoredLegacy.close(); }
 });

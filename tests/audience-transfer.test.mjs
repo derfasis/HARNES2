@@ -9,7 +9,7 @@ import { exportPartner } from '../business/export.mjs';
 import { Store, hash, id } from '../business/store.mjs';
 import { audienceHarness, SOURCE, proposalFrom } from './audience-test-helpers.mjs';
 
-test('schema-18 transfer preserves audience work scope while revoking its authority', async t => {
+test('schema-19 transfer preserves audience work scope while revoking its authority', async t => {
   const h = audienceHarness(t);
   const goal = await h.open({ source_ids: [SOURCE] });
   await h.ingest({ message_id: 'transfer-question', text: 'How do I get started with the programme?' });
@@ -35,7 +35,7 @@ test('schema-18 transfer preserves audience work scope while revoking its author
   assert.ok(opened.case_id);
 
   const bundle = exportPartner(h.store), file = path.join(h.directory, 'audience-transfer.json');
-  assert.equal(bundle.migrations.length, 18);
+  assert.equal(bundle.migrations.length, 19);
   assert.equal(bundle.tables.audience_needs.find(row => row.id === need.id).status, 'accepted');
   assert.equal(bundle.tables.audience_work_links.find(row => row.thread_id === work.thread_id).need_id, need.id);
   fs.writeFileSync(file, JSON.stringify(bundle), { flag: 'wx' });
@@ -78,6 +78,7 @@ test('schema-17 first-contact proposal imports with an empty review-head table a
   const proposed=await h.command('audience.propose',{assessment_id:assessment.id,output});
   const bundle=exportPartner(h.store);
   bundle.migrations=bundle.migrations.slice(0,17);
+  delete bundle.tables.scout_model_requests;
   delete bundle.tables.audience_first_contact_heads;
   bundle.tables_sha256=hash(JSON.stringify(bundle.tables));
   assert.equal(bundle.migrations.length,17);
@@ -91,7 +92,7 @@ test('schema-17 first-contact proposal imports with an empty review-head table a
   const restored=new Store(path.join(destination,'data'));
   let imported;
   try {
-    assert.equal(restored.get('SELECT COUNT(*) n FROM schema_migrations').n,18);
+    assert.equal(restored.get('SELECT COUNT(*) n FROM schema_migrations').n,19);
     assert.equal(restored.get('SELECT COUNT(*) n FROM audience_first_contact_heads').n,0);
     assert.equal(restored.get("SELECT COUNT(*) n FROM events WHERE kind='audience.review_first_contact'").n,0);
     imported=new (await import('../business/service.mjs')).BusinessService(restored,h.config);

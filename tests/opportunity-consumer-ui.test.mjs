@@ -153,7 +153,9 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // Follow-up's frozen generation-request cap wraps the existing SDK with HTTPX
     // hooks. Real loopback-only Hermes/SSE controls prove count, rejection and usage
     // independently of its outer iteration counter (test_request_budget.py).
-    "scripts/situation_router_worker.py": "6aa5e1bd9195f46f021b4ac7ee4f0760f5304457",
+    // Scoped Scout reuses the HTTPX request cap for a single historical-sample request.
+    // The real worker plus loopback provider proves one generation POST (test_scout_request_budget.py).
+    "scripts/situation_router_worker.py": "f4b01730e600d5d13bf28c66119f952e75371fd4",
     // Reviewed extension: invalidate read-only source checkpoints on process recovery.
     // textBlobHash normalizes CRLF, so this is the LF-normalized R7 blob hash.
     // Continuity adds export tables and recovers its running turns as interrupted.
@@ -188,7 +190,9 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // Separately bound follow-through validates its request, lineage, profile
     // and frozen operational bounds before the same no-tool adapter dispatch.
     // The real adapter and scheduler seam is exercised in need-followthrough-runtime.
-    "business/runtime.mjs": "056a20598d3b6a39d244b5c2f946a0ae8f528d41",
+    // Exact Scout authority is selected from the durable run binding, never a mutable marker.
+    // Scoped assessment kills include missing-marker legacy fallback and completed-run replay.
+    "business/runtime.mjs": "af58871230a47a8813a782df36a3c6c41b6ceae4",
     // Outcome completion projects provider time and versions message-record
     // identities by partner. Delivery gates remain unchanged; real stub adapter
     // races and crash/receipt replay are in outcome-timing/redteam-kill tests.

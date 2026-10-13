@@ -19,16 +19,31 @@ function childEnvironment(token) {
 }
 export class HermesAdapter {
   constructor(service, tokens) { this.service = service; this.tokens = tokens; this.children = new Map(); }
-  decide(run, context) { automaticBoundary(this.service); return this.run(run, context, true); }
+  scopedScoutRun(run, frozen) {
+    return run.runtime === 'hermes-scout-v1' && (frozen.scout_assessment_request !== undefined
+      || !!this.service.store.get('SELECT id FROM scout_model_requests WHERE run_id=? AND partner_id=?', run.id, this.service.config.partnerId));
+  }
+  assertDecision(run) {
+    const frozen = run.runtime === 'hermes-scout-v1' ? JSON.parse(run.context_json) : {};
+    if (this.scopedScoutRun(run, frozen)) {
+      // This exact sample request is model authority; the public pipeline switch is not.
+      this.service.scout.modelRequests.assertForRun(run);
+      this.service.control.require(run.id, { plane: 'public' });
+    } else automaticBoundary(this.service);
+  }
+  decide(run, context) { this.assertDecision(run); return this.run(run, context, true); }
   async run(run, context, decision = false) {
     const globalConfig = this.service.config;
-    const config = decision && run.runtime === 'hermes-audience-v1' && JSON.parse(run.context_json).model_profile
-      ? { ...globalConfig, runtime: JSON.parse(run.context_json).followup_request
-        ? this.service.followup.runtimeForRun(run) : this.service.attention.runtimeForRun(run) } : globalConfig;
+    const frozen = ['hermes-scout-v1','hermes-audience-v1'].includes(run.runtime) ? JSON.parse(run.context_json) : {};
+    const config = decision && this.scopedScoutRun(run, frozen)
+      ? { ...globalConfig, runtime: this.service.scout.modelRequests.runtimeForRun(run) }
+      : decision && run.runtime === 'hermes-audience-v1' && frozen.model_profile
+        ? { ...globalConfig, runtime: frozen.followup_request
+          ? this.service.followup.runtimeForRun(run) : this.service.attention.runtimeForRun(run) } : globalConfig;
     const controlEnabled = config.controlPlane?.enabled === true || !!this.service.control?.ticket(run.id);
     let ticket = null;
     if (decision) {
-      automaticBoundary(this.service);
+      this.assertDecision(run);
       if (controlEnabled) ticket = this.service.control.require(run.id, { plane: ['public', 'work'] });
     } else if (controlEnabled) {
       if (config.runtime.enabled !== true) throw new Error('Ordinary agent runtime is disabled');
