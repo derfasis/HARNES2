@@ -1,0 +1,114 @@
+{
+  "schema_version": 1,
+  "run_id": "df9aa167-2486-4f42-ab14-fcb2415e0e62",
+  "reviewed_cases": ["A001", "A002", "A004", "A007"],
+  "source_basis": {
+    "inputs_path": "D:/HARNES-RepoLab/fixtures/audience-a-control-v1/inputs.json",
+    "inputs_sha256": "8b91487da693ba5ea518e46c94c9257357cd3a18edb034b2c874089dcc329498",
+    "read_scope": "Reviewed the four specified stores/*/result.json output objects and the matching frozen input messages only. Did not read prior-run reviews, gold, or worker raw output."
+  },
+  "aggregate": {
+    "useful_positive": {
+      "verdict": "USEFUL_POSITIVE",
+      "details": "A001, A002, and A004 recognize the named author's own commercial task; A004 preserves the equipment-only scope in the need and current material; A007 correctly rejects a quoted advertisement as the author's intent. No result asserts FitLine/owner-offer fit, a country, a commission rate, a sale, or contact consent."
+    },
+    "factuality": {
+      "verdict": "REVIEW_REQUIRED",
+      "material_findings": 2,
+      "minor_findings": 1,
+      "details": "A001's why-now says the author confirmed an open/current collection of terms, while the source only states a future plan to compare and the output separately admits present status is unverified. A004 turns 'no decision yet about supplements; for now only equipment' into a stronger rejection/not-accepted status. A002 says the author is not developing an own brand, while source only says they do not currently have one."
+    },
+    "limits": "These are four synthetic examples. The verdict does not establish general model quality, real-person interest, current activity, or fit with an owner's offer."
+  },
+  "cases": [
+    {
+      "case_id": "A001",
+      "disposition": "proposal_created",
+      "useful_positive": "PASS",
+      "factuality": "REVIEW_REQUIRED",
+      "checks": {
+        "actor_ownership": "PASS: repolab-author:1:11 states the intent personally and confirms they want to be the seller.",
+        "task_modality": "PASS: wants to sell other people's physical goods for commission, seeks a program without buying stock, and needs a supplier that ships to buyers. Calling this a dropshipping-like model is a reasonable interpretation of those stated terms.",
+        "time_current_status": "REVIEW: the output elsewhere acknowledges the five-day-old source and says current status is unverified, but its why-now asserts current open collection/comparison.",
+        "economics_assets": "PASS: commission and lack of own goods/stock are explicit; no amount, income, or realized sales are invented.",
+        "negative_facts_fit_contact": "PASS: category and geography are explicitly unchosen; FitLine/owner-offer fit is unknown; contact is withheld."
+      },
+      "findings": [
+        {
+          "severity": "material_temporal_overstatement",
+          "location": "needs[0].why_now",
+          "output_span": "участник прямо подтвердил открытый сбор и сравнение коммерческих условий",
+          "source": {
+            "message_id": "1005",
+            "text": "Пока нет. Сначала сравню условия, ничего ещё не выбрал."
+          },
+          "verdict": "The source supports an intention to compare terms, not that term collection/search is currently open or ongoing. This conflicts with the same output's caveat that current status has not been verified. Phrase as a dated plan to compare; keep current status unknown."
+        }
+      ]
+    },
+    {
+      "case_id": "A002",
+      "disposition": "proposal_created",
+      "useful_positive": "PASS",
+      "factuality": "PASS_WITH_MINOR_NEGATIVE_FACT_OVERREACH",
+      "checks": {
+        "actor_ownership": "PASS: repolab-author:2:20 seeks their own seller/partner role; another author's dealer offer is not attributed to them.",
+        "task_modality": "PASS: physical goods for commission, not services or a vacancy, and no initial product purchase are supported.",
+        "time_current_status": "PASS: the output marks the five-day-old need's current status as unknown.",
+        "economics_assets": "PASS: no commission amount, income, or all-cost-free business is claimed.",
+        "negative_facts_fit_contact": "PARTIAL: absence of current own brand is supported; an ongoing decision not to develop one is not. No-DM consent is explicitly preserved, and owner-offer fit is not claimed."
+      },
+      "findings": [
+        {
+          "severity": "minor_negative_fact_overreach",
+          "location": "needs[0].material_preview.content",
+          "output_span": "не развивает собственный бренд",
+          "source": {
+            "message_id": "1002",
+            "text": "Ні, власного бренду не маю. Хочу бути партнером чужого виробника, без початкової закупівлі."
+          },
+          "verdict": "The author says they have no own brand now and want to partner with another producer. The source does not establish that they are not developing a brand. Keep the present-tense asset fact; avoid the broader negative claim."
+        }
+      ]
+    },
+    {
+      "case_id": "A004",
+      "disposition": "proposal_created",
+      "useful_positive": "PASS",
+      "factuality": "REVIEW_REQUIRED",
+      "checks": {
+        "actor_ownership": "PASS: repolab-author:4:40 calls the request personal; event 8 confirms it is the author's specialist request.",
+        "task_modality": "PASS: seeks an additional physical-goods direction for clients and wants to compare partnership terms for home exercise equipment.",
+        "time_current_status": "PASS: the output notes the five-day gap and says current status requires verification without contact.",
+        "economics_assets": "PASS: no income, sales, commission rate, or existing supplier is invented.",
+        "negative_facts_fit_contact": "PARTIAL: owner/FitLine fit and consent are correctly unestablished. The material overstates the author's position on supplements."
+      },
+      "findings": [
+        {
+          "severity": "material_negative_fact_overstatement",
+          "location": "needs[0].material_preview.content",
+          "output_span": "Пищевые добавки автором не согласованы и не приняты к рассмотрению",
+          "source": {
+            "message_id": "1004",
+            "text": "Про добавки нічого не вирішувала. Поки йдеться лише про інвентар; бренд і доставку не обрала."
+          },
+          "verdict": "The source says no decision has been made about supplements and that the current discussion is only about equipment. It does not establish rejection or that supplements were not accepted for consideration. The need and factual retelling should preserve 'undecided; current focus is equipment.'"
+        }
+      ]
+    },
+    {
+      "case_id": "A007",
+      "disposition": "no_need_proposed",
+      "useful_positive": "PASS",
+      "factuality": "PASS",
+      "checks": {
+        "actor_ownership": "PASS: the author identifies the sales text as another person's advertisement and rejects it as their own intent.",
+        "task_modality": "PASS: the source concerns chat moderation, not a personal commercial search.",
+        "time_current_status": "PASS: no ongoing personal interest is inferred.",
+        "economics_assets": "PASS: no personal economics or assets are inferred from quoted text.",
+        "negative_facts_fit_contact": "PASS: the denial is scoped to the author; no owner-offer fit or consent is claimed."
+      },
+      "findings": []
+    }
+  ]
+}

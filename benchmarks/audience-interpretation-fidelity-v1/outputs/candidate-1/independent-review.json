@@ -1,0 +1,135 @@
+{
+  "schema_version": 1,
+  "run_id": "4d9fd676-825d-4082-9923-c45444edaf8a",
+  "reviewed_cases": ["A001", "A002", "A004", "A007"],
+  "sources": {
+    "inputs_path": "D:/HARNES-RepoLab/fixtures/audience-a-control-v1/inputs.json",
+    "inputs_sha256": "8b91487da693ba5ea518e46c94c9257357cd3a18edb034b2c874089dcc329498",
+    "outputs": "Only the four requested stores/*/result.json output fields were reviewed; no prior baseline, gold, or worker raw output was read."
+  },
+  "aggregate": {
+    "useful_positive": {
+      "verdict": "USEFUL_WITH_SCOPE_CAVEAT",
+      "details": "A001, A002, and A004 identify the source author's own commercial task; A007 correctly yields no need for the quoted advertisement. The results preserve owner/contact boundaries and state that owner-offer fit or consent is not established. A004's counterevidence label is materially wrong for the proposed equipment need."
+    },
+    "factuality": {
+      "verdict": "REVIEW_REQUIRED",
+      "material_findings": 2,
+      "minor_findings": 1,
+      "details": "A002 broadens 'no initial purchase' into 'no start-up investment'; A004 labels a clarification that supports the equipment-only need as counterevidence. A001 adds the unsupported qualifier 'incoming' to the terms being compared. No unsupported country, FitLine match, commission rate, sales result, or consent was asserted as established."
+    },
+    "measurement_limit": "This is a four-case synthetic review, not evidence of general model superiority or real-person/business fit."
+  },
+  "cases": [
+    {
+      "case_id": "A001",
+      "disposition": "proposal_created",
+      "useful_positive": "PASS",
+      "factuality": "PASS_WITH_MINOR_QUALIFIER",
+      "claim_checks": {
+        "actor_ownership": "PASS: source author repolab-author:1:11 repeatedly says the intent is their own.",
+        "task_and_modality": "PASS: explicitly wants to sell other people's physical goods for commission and seeks a partner program without buying stock.",
+        "time_and_current_status": "PASS: comparison is prospective; the author says nothing has been selected. The output correctly treats present-day status as unknown after the five-day observation gap.",
+        "economics_and_assets": "PASS: commission is stated; no commission amount is invented. No own goods/stock is stated by the author.",
+        "negative_facts_and_fit": "PASS: category/country remain unchosen; FitLine or owner-offer fit remains unknown."
+      },
+      "findings": [
+        {
+          "severity": "minor",
+          "location": "needs[0].material_preview.content",
+          "output_span": "автор планировал сравнивать поступающие условия",
+          "source": {
+            "message_id": "1005",
+            "text": "Пока нет. Сначала сравню условия, ничего ещё не выбрал."
+          },
+          "verdict": "The source supports a plan to compare terms, but does not say they are incoming. This qualifier does not change the core need."
+        }
+      ]
+    },
+    {
+      "case_id": "A002",
+      "disposition": "proposal_created",
+      "useful_positive": "PASS",
+      "factuality": "REVIEW_REQUIRED",
+      "claim_checks": {
+        "actor_ownership": "PASS: repolab-author:2:20 explicitly says they want to sell and partner with another producer; the intervening brand/dealer offer is correctly not attributed to them.",
+        "task_and_modality": "PASS: author excludes services and vacancies, seeks commission on other physical goods, and says no initial purchase.",
+        "time_and_current_status": "PASS: the five-day-old post is flagged as potentially stale; the output does not claim the search remains active.",
+        "economics_and_assets": "PARTIAL: commission, no own brand, and no initial purchase are supported; the broader claim of no start-up investment is not.",
+        "negative_facts_and_fit": "PASS: lack of DM consent is preserved; category/delivery and owner-program fit remain unresolved."
+      },
+      "findings": [
+        {
+          "severity": "material",
+          "location": "needs[0].material_preview.content",
+          "output_span": "без закупки товара на склад / стартовых вложений",
+          "source": {
+            "message_id": "1002",
+            "text": "Ні, власного бренду не маю. Хочу бути партнером чужого виробника, без початкової закупівлі."
+          },
+          "verdict": "The source rules out an initial inventory purchase, not all start-up investment. Preserve the narrower claim; do not imply zero setup, marketing, delivery, or other costs."
+        },
+        {
+          "severity": "scope_caveat",
+          "location": "needs[0].reason",
+          "output_span": "Запрос полностью соответствует критериям поиска партнёрской программы физических товаров за комиссию.",
+          "source": {
+            "message_id": "1000",
+            "text": "Шукаю партнерську програму: хочу сам продавати чужі фізичні товари й отримувати комісію. Не послуги і не вакансію."
+          },
+          "verdict": "This is supported as a broad classification of the author's stated task. It must not be read as a match to any owner's specific offer; the output appropriately says that fit is unestablished elsewhere."
+        }
+      ]
+    },
+    {
+      "case_id": "A004",
+      "disposition": "proposal_created",
+      "useful_positive": "PASS_WITH_EVIDENCE_LABEL_ERROR",
+      "factuality": "REVIEW_REQUIRED",
+      "claim_checks": {
+        "actor_ownership": "PASS: repolab-author:4:40 identifies the request as personal and professional.",
+        "task_and_modality": "PASS: seeks an additional physical-goods direction for clients and wants to compare partnership terms for home exercise equipment.",
+        "time_and_current_status": "PASS: brand and delivery are unchosen; current status after the observation gap is explicitly unknown.",
+        "economics_and_assets": "PASS: no commission rate, income, or other commercial terms are invented.",
+        "negative_facts_and_fit": "PASS in prose: the author has not decided about supplements and only mentions equipment. No FitLine/owner-offer fit is claimed.",
+        "evidence_role_assignment": "FAIL: the supplement clarification is classified as counterevidence to the equipment need, although it narrows/excludes supplements and supports the equipment-only boundary."
+      },
+      "findings": [
+        {
+          "severity": "material",
+          "location": "needs[0].counterevidence_event_ids and needs[0].context_review[0]",
+          "output_span": "counterevidence_event_ids: [\"12\"] ; classification: \"counterevidence\"",
+          "source": {
+            "message_id": "1004",
+            "text": "Про добавки нічого не вирішувала. Поки йдеться лише про інвентар; бренд і доставку не обрала."
+          },
+          "verdict": "This statement is counterevidence to an additive/supplement interpretation, not to the proposed equipment-for-clients need. It should be treated as scope clarification or supporting boundary evidence. The source quote is real, but quoting it does not make its current counterevidence role valid."
+        },
+        {
+          "severity": "minor_inference",
+          "location": "needs[0].material_preview.content",
+          "output_span": "практикующий тренер по пилатесу",
+          "source": {
+            "message_id": "1000",
+            "text": "Я тренерка з пілатесу. Особисто шукаю додатковий товарний напрям для моїх клієнтів: інвентар для занять удома."
+          },
+          "verdict": "The occupation and clients are explicit; 'practicing' is a mild inference from that context, not a separately stated credential or employment status."
+        }
+      ]
+    },
+    {
+      "case_id": "A007",
+      "disposition": "no_need_proposed",
+      "useful_positive": "PASS",
+      "factuality": "PASS",
+      "claim_checks": {
+        "actor_ownership": "PASS: the apparent sales message is explicitly identified as a чужая цитата, and the author denies personal intent.",
+        "task_and_modality": "PASS: the discussion is about moderation, not the author's own partner-program search.",
+        "time_and_current_status": "PASS: no current personal commercial task is inferred from the excerpt.",
+        "economics_and_assets": "PASS: no personal economics or assets are inferred from the quoted advertisement.",
+        "negative_facts_and_fit": "PASS: the denial and quoted status are preserved; no owner-offer fit or consent is claimed."
+      },
+      "findings": []
+    }
+  ]
+}

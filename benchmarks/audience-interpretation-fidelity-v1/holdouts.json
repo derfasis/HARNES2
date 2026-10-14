@@ -1,0 +1,145 @@
+{
+  "version": 1,
+  "goal": {
+    "title": "Unresolved task scan",
+    "objective": "Find participants’ own unresolved practical or commercial tasks in the supplied public discussion. Propose a concise internal owner-facing next step only when supported by the discussion, with exact evidence and explicit unknowns. Keep direct requests, reported or quoted requests, offers, plans, conditional intentions, and completed actions distinct. Do not infer fit with any owner offer, anyone’s country, purchase or work commitment, consent, or contact authority. No external action is requested."
+  },
+  "discussions": [
+    {
+      "discussion_id": "H001",
+      "messages": [
+        {
+          "source_id": "public:repolab:fidelity:holdout:h001",
+          "source_kind": "sanitized_fixture",
+          "message_id": "h001-m01",
+          "author_id": "author:h001:buyer",
+          "display_name": null,
+          "thread_id": "h001-thread",
+          "reply_to_id": null,
+          "version": 1,
+          "operation": "upsert",
+          "text": "Our maintenance team needs 12 lockable weatherproof storage cabinets. I am collecting quotes for our organization. Please send the unit price, delivery lead time, and invoice terms so I can prepare a comparison for our budget discussion.",
+          "created_at": "2026-10-14T08:00:00.000Z",
+          "updated_at": "2026-10-14T08:00:00.000Z"
+        },
+        {
+          "source_id": "public:repolab:fidelity:holdout:h001",
+          "source_kind": "sanitized_fixture",
+          "message_id": "h001-m02",
+          "author_id": "author:h001:buyer",
+          "display_name": null,
+          "thread_id": "h001-thread",
+          "reply_to_id": "h001-m01",
+          "version": 1,
+          "operation": "upsert",
+          "text": "Our budget committee meets on 20 October. Only if it approves the funds will I recommend a supplier afterward. This is a request for information, not an order: no funds are approved, no purchase order has been issued, and please do not reserve stock.",
+          "created_at": "2026-10-14T08:07:00.000Z",
+          "updated_at": "2026-10-14T08:07:00.000Z"
+        },
+        {
+          "source_id": "public:repolab:fidelity:holdout:h001",
+          "source_kind": "sanitized_fixture",
+          "message_id": "h001-m03",
+          "author_id": "author:h001:supplier",
+          "display_name": null,
+          "thread_id": "h001-thread",
+          "reply_to_id": "h001-m01",
+          "version": 1,
+          "operation": "upsert",
+          "text": "I can send a written quote with those details. Our stock is not reserved until we receive an order confirmation.",
+          "created_at": "2026-10-14T08:15:00.000Z",
+          "updated_at": "2026-10-14T08:15:00.000Z"
+        },
+        {
+          "source_id": "public:repolab:fidelity:holdout:h001",
+          "source_kind": "sanitized_fixture",
+          "message_id": "h001-m04",
+          "author_id": "author:h001:buyer",
+          "display_name": null,
+          "thread_id": "h001-thread",
+          "reply_to_id": "h001-m03",
+          "version": 1,
+          "operation": "upsert",
+          "text": "Please send the quote. I will review it after the committee meeting. For now, do not create an order or reservation for us.",
+          "created_at": "2026-10-14T08:22:00.000Z",
+          "updated_at": "2026-10-14T08:22:00.000Z"
+        }
+      ]
+    },
+    {
+      "discussion_id": "H002",
+      "messages": [
+        {
+          "source_id": "public:repolab:fidelity:holdout:h002",
+          "source_kind": "sanitized_fixture",
+          "message_id": "h002-m01",
+          "author_id": "author:h002:service_owner",
+          "display_name": null,
+          "thread_id": "h002-thread",
+          "reply_to_id": null,
+          "version": 1,
+          "operation": "upsert",
+          "text": "I run a small equipment-maintenance service. I am considering adding a monthly stock-count and reconciliation service for my clients, and I want help deciding a flat fee per location that covers the work. How would you estimate the hours and set a fixed price? I would invoice the client directly for this service.",
+          "created_at": "2026-10-14T09:00:00.000Z",
+          "updated_at": "2026-10-14T09:00:00.000Z"
+        },
+        {
+          "source_id": "public:repolab:fidelity:holdout:h002",
+          "source_kind": "sanitized_fixture",
+          "message_id": "h002-m02",
+          "author_id": "author:h002:service_owner",
+          "display_name": null,
+          "thread_id": "h002-thread",
+          "reply_to_id": "h002-m01",
+          "version": 1,
+          "operation": "upsert",
+          "text": "To clarify my own service idea: the price would be a fixed fee for the work, not a commission or percentage of a client’s sales. I have not launched it or signed a client for it. I am asking how to price and package the service before deciding whether to offer it.",
+          "created_at": "2026-10-14T09:08:00.000Z",
+          "updated_at": "2026-10-14T09:08:00.000Z"
+        },
+        {
+          "source_id": "public:repolab:fidelity:holdout:h002",
+          "source_kind": "sanitized_fixture",
+          "message_id": "h002-m03",
+          "author_id": "author:h002:service_owner",
+          "display_name": null,
+          "thread_id": "h002-thread",
+          "reply_to_id": "h002-m02",
+          "version": 1,
+          "operation": "upsert",
+          "text": "A client separately asked me, “I want to promote a skincare brand for commission. Does anyone know a company with an affiliate program?” That is the client’s question, not my task. I am quoting it only to keep it separate from my fixed-fee service question.",
+          "created_at": "2026-10-14T09:14:00.000Z",
+          "updated_at": "2026-10-14T09:14:00.000Z"
+        },
+        {
+          "source_id": "public:repolab:fidelity:holdout:h002",
+          "source_kind": "sanitized_fixture",
+          "message_id": "h002-m04",
+          "author_id": "author:h002:program_representative",
+          "display_name": null,
+          "thread_id": "h002-thread",
+          "reply_to_id": "h002-m03",
+          "version": 1,
+          "operation": "upsert",
+          "text": "My brand has an affiliate program that pays commission. I can send you the terms if you want to join.",
+          "created_at": "2026-10-14T09:20:00.000Z",
+          "updated_at": "2026-10-14T09:20:00.000Z"
+        },
+        {
+          "source_id": "public:repolab:fidelity:holdout:h002",
+          "source_kind": "sanitized_fixture",
+          "message_id": "h002-m05",
+          "author_id": "author:h002:service_owner",
+          "display_name": null,
+          "thread_id": "h002-thread",
+          "reply_to_id": "h002-m04",
+          "version": 1,
+          "operation": "upsert",
+          "text": "That affiliate offer may be relevant to my client’s separate question, but I have not accepted it or referred anyone. I am still asking for help pricing my own fixed-fee stock-count service.",
+          "created_at": "2026-10-14T09:26:00.000Z",
+          "updated_at": "2026-10-14T09:26:00.000Z"
+        }
+      ]
+    }
+  ]
+}

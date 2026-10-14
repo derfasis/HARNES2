@@ -1,0 +1,105 @@
+{
+  "schema": "audience_fidelity_negative_experiment_v1",
+  "decision": "DO_NOT_ADOPT_PROMPT_CANDIDATES",
+  "production_behavior_unchanged": true,
+  "base": "16a43ae72d1716179c4db788781381c806ac6de0",
+  "logical_dispatches": 16,
+  "provider_http_calls_retries_cost_quota": null,
+  "runs": [
+    {
+      "label": "baseline",
+      "run_id": "6bff44f7-4622-44a5-93da-aa5250ebd386",
+      "cases": [
+        "A001",
+        "A002",
+        "A004",
+        "A007"
+      ],
+      "logical_dispatches": 4,
+      "input_tokens": 26274,
+      "output_tokens": 16360,
+      "status": "completed"
+    },
+    {
+      "label": "candidate-1",
+      "run_id": "4d9fd676-825d-4082-9923-c45444edaf8a",
+      "cases": [
+        "A001",
+        "A002",
+        "A004",
+        "A007"
+      ],
+      "logical_dispatches": 4,
+      "input_tokens": 26927,
+      "output_tokens": 14973,
+      "status": "completed"
+    },
+    {
+      "label": "candidate-1-holdouts",
+      "run_id": "89188930-4383-46dd-a534-54867eb98acc",
+      "cases": [
+        "H001",
+        "H002"
+      ],
+      "logical_dispatches": 2,
+      "input_tokens": 13389,
+      "output_tokens": 14521,
+      "status": "completed"
+    },
+    {
+      "label": "candidate-2",
+      "run_id": "df9aa167-2486-4f42-ab14-fcb2415e0e62",
+      "cases": [
+        "A001",
+        "A002",
+        "A004",
+        "A007"
+      ],
+      "logical_dispatches": 4,
+      "input_tokens": 27234,
+      "output_tokens": 15090,
+      "status": "completed"
+    },
+    {
+      "label": "candidate-2-holdouts",
+      "run_id": "d34d67ce-0707-4214-b3e1-d069b883f127",
+      "cases": [
+        "H001",
+        "H002"
+      ],
+      "logical_dispatches": 2,
+      "input_tokens": 13525,
+      "output_tokens": 14137,
+      "status": "completed"
+    }
+  ],
+  "files": {
+    "gold.json": "940c3592cf6a6a6079f97a0ac2f439c914504461193c814caca4097da1e18a52",
+    "holdouts.json": "449b2c968daa55f6eaedc0252e897657b3994641e8e3b2d4c1ede1cb35275e17",
+    "original-control-inputs.json": "8b91487da693ba5ea518e46c94c9257357cd3a18edb034b2c874089dcc329498",
+    "outputs/baseline/A001.json": "172d40c3efdeb3c0de155c9c614b7a1814bca201c7c14c592ebe93576a9c7638",
+    "outputs/baseline/A002.json": "663f9edf7915904681b923e7440dde2be98ffbc6f6e3af15238102ff29c87781",
+    "outputs/baseline/A004.json": "3a7f4fd3fe89c1120be7cf1659d15e178da24bd02c09d17e5c7580cf20af4d8f",
+    "outputs/baseline/A007.json": "d22c36f642f54b7200aae98413584766c74314218ee123f7d2370db4b497a05b",
+    "outputs/baseline/independent-review.json": "a0e45e298f05753874bbf46df4a5f1e1d8d371dd53d58c82ace1f465368a5297",
+    "outputs/candidate-1/A001.json": "1a984b12be5d5e43e2b85b4e096dffd04ec41d94a3a073fb5ff92fc6585e9712",
+    "outputs/candidate-1/A002.json": "22389604eef684c37b8133ad0bf41de994651e1c02e63c9ff9c521a4de97216d",
+    "outputs/candidate-1/A004.json": "c84eed90198aeef4e007af6b429e01f10d364037b7a3c007cda027b8f09abda7",
+    "outputs/candidate-1/A007.json": "2843f1d264d2b243d80328237172ea0b7ab23659238a8958cb91262a70d0e76c",
+    "outputs/candidate-1/independent-review.json": "8bc91e868f954f4bc61c421dec8e5f7fde7981bdf7ee1922904f72bc6a80eabf",
+    "outputs/candidate-1-holdouts/H001.json": "466e0368847a5eed08a1d842c39bffe59e4969a0c6011cd7ad14da18b771d314",
+    "outputs/candidate-1-holdouts/H002.json": "f5a01e6a4badb9e888b97d558939a0d92215790aeffcdd4135f49db82017d53d",
+    "outputs/candidate-1-holdouts/independent-review.json": "0a3ed35acc3f4bdb5326d554c0ad64720dad9a06b2efabfa31d10a5edcbdad71",
+    "outputs/candidate-2/A001.json": "a9a4548247d3ab3f933d97b432753b4e6580d92f91d4039301bdae18e0f26de6",
+    "outputs/candidate-2/A002.json": "e50a86b13ed6305268e0f1c701e851e1dcc84bdd2bbff2cce7d774889187cf79",
+    "outputs/candidate-2/A004.json": "f22524467bfacb4fb65c7a3d5f695b796a971f973813ab31f74e70fe3bb89b8f",
+    "outputs/candidate-2/A007.json": "d870800ac7a7beed4be15eeaf540606743e21dd96e996aa26e4231b7afea4820",
+    "outputs/candidate-2/independent-review.json": "a917f073c5c5c9f0044d4905972eae295a0458c5612f2e56d5ac96e19b955031",
+    "outputs/candidate-2-holdouts/H001.json": "74b9db6ec619ca3013fcca9dce6e36f87cab827b4d33e266bfee5250f5fea7a7",
+    "outputs/candidate-2-holdouts/H002.json": "23560f82a96319459f66227eabf8bc5717b762f3a0931030940aceb513bb5696",
+    "outputs/candidate-2-holdouts/independent-review.json": "e8d0b24a602eefb5ac07284e03ec23bca967dc2f4cb446b5d881a9e0885d1492",
+    "prompts/baseline.md": "47317adf1a0bf87a389fa4b0d174c8ca1d43dd5ec12852e61c58b39c7c84a3e5",
+    "prompts/candidate-1.md": "e660ef9339e5ce3a88d611a90908790a68ebc70d6513de360f0acd9a213f80e5",
+    "prompts/candidate-2.md": "76423077eef7b1f6cd2b18d23d2c1a1dcd05f8f78d7302683ffdcfbe68305f97"
+  }
+}

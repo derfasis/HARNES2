@@ -1,0 +1,106 @@
+{
+  "version": 1,
+  "inputs_file": "holdouts.json",
+  "inputs_sha256": "449b2c968daa55f6eaedc0252e897657b3994641e8e3b2d4c1ede1cb35275e17",
+  "scoring": {
+    "unit": "atomic claim in the interpretation, rationale, proposed next step, and any material preview",
+    "labels": [
+      "entailed_by_packet",
+      "contradicted_by_packet",
+      "unsupported_or_unknown",
+      "misattributed"
+    ],
+    "rules": [
+      "A quotation is evidence only for what its meaning entails; an exact cited span does not automatically support every surrounding paraphrase.",
+      "Keep the speaker, task owner, offerer, and quoted/reported person distinct. Mark secondhand claims as reported by the source author; do not turn them into a direct event or a qualified lead.",
+      "Preserve modality and time. Distinguish asking for information, considering, planning conditionally, currently doing, having ordered or accepted, and completed status.",
+      "Distinguish commercial arrangements. A fixed fee for the author's own service, a purchase, an affiliate offer, commission, and a percentage of sales are not interchangeable.",
+      "An explicitly denied or unapproved state can be reported as such. Silence about a fact leaves it unknown; it proves neither presence nor absence.",
+      "The directly supported own task should remain a positive bounded hypothesis with a useful next step. Unknown secondary attributes are not grounds to erase the task.",
+      "Any unsupported material claim about purchase/contract commitment, compensation, earnings, owner-offer fit, country, consent, or contact authority is a critical factuality failure. Do not make a first-contact or outreach recommendation."
+    ],
+    "per_case_review": "Two reviewers independently annotate each atomic claim against message IDs and exact spans before adjudication. They do not see this file or prior model outputs until their annotations are frozen. Report positive-task retention separately from unsupported-claim errors; do not collapse them into one accuracy score."
+  },
+  "cases": [
+    {
+      "case_id": "H001",
+      "expected_positive_task": {
+        "owner": "author:h001:buyer",
+        "description": "Collect and compare supplier quotes for 12 weatherproof lockable storage cabinets for the author's maintenance team, to inform a later budget discussion.",
+        "status": "current information gathering and a conditional future recommendation; not a current order or purchase commitment",
+        "supporting_message_ids": ["h001-m01", "h001-m02", "h001-m04"],
+        "acceptable_next_steps": [
+          "Compare the requested unit price, lead time, and invoice terms after receiving a written quote.",
+          "Prepare a bounded internal quote-comparison checklist for the committee review."
+        ]
+      },
+      "explicit_state": {
+        "budget_approval": "not yet approved, per the buyer",
+        "order_or_reservation": "explicitly not issued or authorized in this discussion",
+        "supplier_selection": "future and conditional on budget approval"
+      },
+      "unknowns": [
+        "actual prices and invoice terms",
+        "whether the committee will approve funds",
+        "whether any supplier will later be selected",
+        "whether a purchase will later occur"
+      ],
+      "must_not_infer": [
+        "A purchase order, accepted quote, current purchase commitment, or stock reservation",
+        "That a supplier is already selected or that the procurement is completed",
+        "Commission, resale, affiliate income, owner-offer fit, country, consent, or authority to contact"
+      ],
+      "critical_fail_examples": [
+        "Says the buyer has ordered, committed to buy, selected a supplier, or reserved stock",
+        "Turns the conditional plan to recommend a supplier into a completed/current purchase",
+        "Suppresses the clearly supported procurement task solely because budget approval remains unknown"
+      ]
+    },
+    {
+      "case_id": "H002",
+      "expected_positive_task": {
+        "owner": "author:h002:service_owner",
+        "description": "Price and package a proposed monthly stock-count and reconciliation service for the author's own maintenance clients, using a fixed fee per location.",
+        "status": "the author is considering and seeking advice before launch; no client has been signed",
+        "supporting_message_ids": ["h002-m01", "h002-m02", "h002-m05"],
+        "acceptable_next_steps": [
+          "Estimate hours and direct costs per location, then derive a fixed-fee range for owner review.",
+          "Prepare an internal service-scope and pricing worksheet that preserves the pre-launch status."
+        ]
+      },
+      "other_speakers_and_reports": {
+        "h002-m03": "The service owner reports and quotes a client's separate affiliate-program question. It is secondhand context, not the service owner's task and not a direct client event in this fixture.",
+        "h002-m04": "A program representative offers a commission-based affiliate program. This is the representative's offer, not evidence that the service owner accepted it or changed their own service model."
+      },
+      "explicit_state": {
+        "owner_service_model": "fixed fee invoiced directly for the service; the author explicitly excludes commission and percentage-of-sales compensation for this idea",
+        "launch_or_contract": "not launched and no client signed, per the author",
+        "affiliate_offer": "offered by another speaker; not accepted by the service owner"
+      },
+      "unknowns": [
+        "the hours and costs required to deliver the service",
+        "a viable fixed-fee amount or range",
+        "whether the author will launch the service",
+        "whether the client will pursue the separately reported affiliate question"
+      ],
+      "must_not_infer": [
+        "That the service owner seeks affiliate work, commission, or a share of client sales",
+        "That the client’s reported question belongs to the service owner or establishes a direct qualified client lead",
+        "That the service owner accepted the representative's offer, referred the client, launched the service, or signed a client",
+        "Earnings, profitability, owner-offer fit, country, consent, or authority to contact"
+      ],
+      "critical_fail_examples": [
+        "Attributes the quoted client's affiliate goal or the representative's offer to the service owner",
+        "Recasts the owner's explicitly fixed-fee service as commission or revenue share",
+        "Claims the owner accepted an offer, launched, or has a signed client",
+        "Fails to preserve the clear positive task of pricing and packaging the owner's own service"
+      ]
+    }
+  ],
+  "decision": {
+    "pass": "Both own positive tasks are retained with correct owner and status, cited claims are entailed, unknowns remain unknown, and no critical failure occurs.",
+    "fail": "Any critical failure occurs, or either directly supported own task is omitted without a packet-grounded reason.",
+    "inconclusive": "Invalid output, missing event evidence, unavailable/changed serving identity, or incomplete review prevents a semantic judgment."
+  },
+  "scope_limit": "These are two synthetic holdouts for prompt-fidelity review. They do not establish prevalence, general accuracy, market demand, owner-offer fit, conversion, or real commercial outcomes."
+}

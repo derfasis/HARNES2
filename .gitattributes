@@ -5,3 +5,7 @@ business/migrations/013-audience-attention.sql text eol=lf
 business/migrations/016-audience-source-epochs.sql text eol=lf
 business/migrations/017-source-observation-epochs.sql text eol=lf
 business/migrations/020-engagement-reviewed-references.sql text eol=lf
+# Frozen synthetic fidelity inputs/gold keep the same hashes after Windows checkout.
+benchmarks/audience-interpretation-fidelity-v1/**/*.json text eol=lf
+# Exact experiment prompt bytes include historical CRLF/mixed endings.
+benchmarks/audience-interpretation-fidelity-v1/prompts/*.md -text -diff -merge

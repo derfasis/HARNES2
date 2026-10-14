@@ -1,0 +1,243 @@
+{
+  "case_id": "H002",
+  "goal_id": "f2c736dc-564b-42af-bfa3-fe6ee5ed025b",
+  "assessment_id": "d51b60d8-7f22-4e16-a4bb-df2ddf77ba86",
+  "run_id": "99c5b0fa-2512-4ee4-b0ad-0b7550dd8a4d",
+  "disposition": "proposal_created",
+  "assessment_status": "proposed",
+  "decision_review": {
+    "scope": "supplied_packet_only",
+    "epistemic_status": "unverified_model_interpretation",
+    "resolution": "unknown",
+    "state": "current",
+    "review": {
+      "version": 1,
+      "scope": "supplied_packet_only",
+      "disposition": "needs_proposed",
+      "summary": "Владелец сервиса по обслуживанию оборудования запросил методологию оценки трудозатрат и расчета фиксированной ставки за локацию для планируемой услуги ежемесячной инвентаризации и сверки остатков. Встречное предложение партнерской программы относилось к стороннему вопросу клиента и не закрыло задачу автора.",
+      "unknowns": [
+        "Объем номенклатуры, количество позиций и среднее время на одну инвентаризацию у клиентов автора.",
+        "Географический регион, специфика обслуживаемого оборудования и уровень рыночных ставок на подобные услуги.",
+        "Готовность текущих клиентов заказывать и оплачивать данную дополнительную услугу по фиксированной ставке."
+      ],
+      "exchange_reviews": [
+        {
+          "exchange_id": "86bd9166-7663-4dc0-a453-d4d4f17fa120",
+          "judgment": "relevant",
+          "reason": "Автор ветки формулирует собственный практический коммерческий запрос по ценообразованию новой услуги, отделяет его от стороннего вопроса клиента о комиссии и подтверждает актуальность нерешенной задачи после предложения партнерской программы.",
+          "evidence_event_ids": [
+            "4",
+            "6",
+            "8",
+            "10",
+            "12"
+          ],
+          "support_quotes": [
+            {
+              "source_event_id": "4",
+              "quote": "I want help deciding a flat fee per location that covers the work. How would you estimate the hours and set a fixed price?"
+            },
+            {
+              "source_event_id": "6",
+              "quote": "I am asking how to price and package the service before deciding whether to offer it."
+            },
+            {
+              "source_event_id": "8",
+              "quote": "That is the client’s question, not my task. I am quoting it only to keep it separate from my fixed-fee service question."
+            },
+            {
+              "source_event_id": "10",
+              "quote": "My brand has an affiliate program that pays commission. I can send you the terms if you want to join."
+            },
+            {
+              "source_event_id": "12",
+              "quote": "I am still asking for help pricing my own fixed-fee stock-count service."
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "output": {
+    "decision_review": {
+      "version": 1,
+      "scope": "supplied_packet_only",
+      "disposition": "needs_proposed",
+      "summary": "Владелец сервиса по обслуживанию оборудования запросил методологию оценки трудозатрат и расчета фиксированной ставки за локацию для планируемой услуги ежемесячной инвентаризации и сверки остатков. Встречное предложение партнерской программы относилось к стороннему вопросу клиента и не закрыло задачу автора.",
+      "unknowns": [
+        "Объем номенклатуры, количество позиций и среднее время на одну инвентаризацию у клиентов автора.",
+        "Географический регион, специфика обслуживаемого оборудования и уровень рыночных ставок на подобные услуги.",
+        "Готовность текущих клиентов заказывать и оплачивать данную дополнительную услугу по фиксированной ставке."
+      ],
+      "exchange_reviews": [
+        {
+          "exchange_id": "86bd9166-7663-4dc0-a453-d4d4f17fa120",
+          "judgment": "relevant",
+          "reason": "Автор ветки формулирует собственный практический коммерческий запрос по ценообразованию новой услуги, отделяет его от стороннего вопроса клиента о комиссии и подтверждает актуальность нерешенной задачи после предложения партнерской программы.",
+          "evidence_event_ids": [
+            "4",
+            "6",
+            "8",
+            "10",
+            "12"
+          ],
+          "support_quotes": [
+            {
+              "source_event_id": "4",
+              "quote": "I want help deciding a flat fee per location that covers the work. How would you estimate the hours and set a fixed price?"
+            },
+            {
+              "source_event_id": "6",
+              "quote": "I am asking how to price and package the service before deciding whether to offer it."
+            },
+            {
+              "source_event_id": "8",
+              "quote": "That is the client’s question, not my task. I am quoting it only to keep it separate from my fixed-fee service question."
+            },
+            {
+              "source_event_id": "10",
+              "quote": "My brand has an affiliate program that pays commission. I can send you the terms if you want to join."
+            },
+            {
+              "source_event_id": "12",
+              "quote": "I am still asking for help pricing my own fixed-fee stock-count service."
+            }
+          ]
+        }
+      ]
+    },
+    "needs": [
+      {
+        "need_id": null,
+        "proposal_version": 2,
+        "title": "Расчет фиксированной стоимости услуги ежемесячной инвентаризации и сверки остатков",
+        "hypothesis": "Владелец малого бизнеса по обслуживанию оборудования нуждается в практической методике оценки трудозатрат (в часах) и формировании фиксированной цены за одну локацию для добавления услуги регулярного учета запасов.",
+        "why_now": "Сообщение с уточнением и подтверждением актуальности вопроса опубликовано 14 октября 2026 года в 09:26 UTC (наблюдение в тот же день). Автор явно отклонил неподходящие предложения и подтвердил, что вопрос ценообразования остается открытым.",
+        "exchange_ids": [
+          "86bd9166-7663-4dc0-a453-d4d4f17fa120"
+        ],
+        "evidence_event_ids": [
+          "4",
+          "6",
+          "12"
+        ],
+        "counterevidence_event_ids": [],
+        "context_event_ids": [
+          "8",
+          "10"
+        ],
+        "context_review": [
+          {
+            "exchange_id": "86bd9166-7663-4dc0-a453-d4d4f17fa120",
+            "classification": "supporting",
+            "evidence_event_ids": [
+              "4",
+              "6",
+              "8",
+              "10",
+              "12"
+            ],
+            "reason": "Ветка содержит прямой запрос участника о структуре ценообразования (события 4 и 6), размежевание со сторонним запросом клиента (событие 8), нерелевантный ответ стороннего участника (событие 10) и подтверждение открытого статуса собственной задачи (событие 12)."
+          }
+        ],
+        "support_quotes": [
+          {
+            "source_event_id": "4",
+            "quote": "I want help deciding a flat fee per location that covers the work. How would you estimate the hours and set a fixed price?"
+          },
+          {
+            "source_event_id": "6",
+            "quote": "I am asking how to price and package the service before deciding whether to offer it."
+          },
+          {
+            "source_event_id": "8",
+            "quote": "That is the client’s question, not my task. I am quoting it only to keep it separate from my fixed-fee service question."
+          },
+          {
+            "source_event_id": "10",
+            "quote": "My brand has an affiliate program that pays commission. I can send you the terms if you want to join."
+          },
+          {
+            "source_event_id": "12",
+            "quote": "I am still asking for help pricing my own fixed-fee stock-count service."
+          }
+        ],
+        "next_step": "prepare_material",
+        "reason": "Задача носит конкретный коммерческий характер. В соответствии с ограничением на отсутствие внешних действий подготовлен внутренний аналитический бриф для владельца с разбором структуры затрат и открытых вопросов.",
+        "unknowns": [
+          "Среднее число SKU/позиций и физическая площадь одной типичной локации клиента.",
+          "Необходимость использования специализированного ПО или сканирующего оборудования.",
+          "Почасовая ставка и норма прибыли, закладываемые автором в текущий бизнес по обслуживанию."
+        ],
+        "material_preview": {
+          "title": "Внутренний бриф: методология ценообразования услуги инвентаризации для сервисного бизнеса",
+          "content": "### Аналитический бриф: ценообразование услуги инвентаризации\n\n#### Контекст ситуации\nУчастник ведет малый бизнес по обслуживанию оборудования и рассматривает расширение каталога услуг: добавление ежемесячного пересчета и сверки складских остатков с прямым выставлением счета клиенту по фиксированной ставке за локацию.\n\n#### Исходные ограничения автора\n- Модель: фиксированная цена за объект (flat fee per location), покрывающая трудозатраты.\n- Исключено: процент от продаж или комиссионная схема.\n- Статус: услуга еще не запущена, контракты не подписаны; участник принимает решение о целесообразности запуска.\n- Сторонние темы: запрос клиента автора на партнерскую программу со сбытом косметики не имеет отношения к данной задаче.\n\n#### Ключевые переменные для оценки трудоемкости (часов на локацию)\n1. **Объем номенклатуры (SKU):** зависимость времени пересчета от количества позиций и единиц хранения.\n2. **Организация учета на стороне клиента:** наличие штрихкодирования, адресного хранения или необходимость ручного подсчета.\n3. **Процесс сверки (reconciliation):** время на сопоставление физических данных с учетной системой клиента и оформление акта расхождений.\n4. **Логистика и выезд:** учет времени на дорогу и подготовку отчетности в рамках фиксированного тарифа.\n\n#### Открытые факторы\n- Текущая базовая ставка часа работы специалистов автора.\n- Степень однородности локаций клиентов (размер склада, типы деталей).\n- Готовность клиентов к фиксированному тарифу без учета фактического времени.",
+          "evidence_event_ids": [
+            "4",
+            "6",
+            "12"
+          ]
+        }
+      }
+    ]
+  },
+  "receipt": {
+    "disposition": "proposal_created",
+    "goal_id": "f2c736dc-564b-42af-bfa3-fe6ee5ed025b",
+    "assessment_id": "d51b60d8-7f22-4e16-a4bb-df2ddf77ba86",
+    "decision_contract_version": 1,
+    "model_projection_version": 1,
+    "model_input_fingerprint": "cd368dfb847606b8e2827ca60008accb9475d2f81d676d9b4bbd658e2f7e8b82",
+    "output_fingerprint": "0286e3f5de82d36b96fb31f512a84286e5b2fbdcf5fee22ff396ad968dc7aaea",
+    "run_id": "99c5b0fa-2512-4ee4-b0ad-0b7550dd8a4d",
+    "model_identity": {
+      "model_id": "gemini-3.8-flash-n",
+      "model_version": "gemini-3.8-flash-n"
+    },
+    "model_profile": {
+      "id": "9e0807bf-2355-44b3-8b61-e66f12375b85",
+      "definition_hash": "b47f85ae26fc62b8cf64bfbc082e246800ed0f6c77bd18fecc505318f7de3705"
+    },
+    "model_identity_reason": null,
+    "model_api_calls": 1,
+    "failure_cause": null
+  },
+  "usage": {
+    "input_tokens": 6920,
+    "output_tokens": 6992,
+    "estimated_cost_usd": null,
+    "cost_status": "unknown"
+  },
+  "model_identity": {
+    "model_id": "gemini-3.8-flash-n",
+    "model_version": "gemini-3.8-flash-n"
+  },
+  "model_api_calls": 1,
+  "tool_absence": {
+    "toolset_count": 0,
+    "returned_tool_call_count": 0,
+    "no_tools_enforced_by_native_decision_adapter": true
+  },
+  "packet": {
+    "basis_fingerprint": "6ff71c68a0f4f932973424efa70cb5be336c2ae789416cbcb141ad38fb388d70",
+    "scope_fingerprint": "6ff71c68a0f4f932973424efa70cb5be336c2ae789416cbcb141ad38fb388d70",
+    "projection_fingerprint": "2ffacb45f169a6304996ce1f1498cc9e782b7b56f80569e899cca22e49ccd690",
+    "prompt_fingerprint": "eeeebce01cd1ec917bf1e80f3328b72a41148cb0a2b5afa0dfc72b1ceabc5d99",
+    "contract_fingerprint": "e41aa39545346f70880d612ab1c6cb9dabddf60af5c803835515fd0afdb12fbb",
+    "evidence_count": 5,
+    "canonical_reply_to_edges": 4,
+    "projected_reply_to_edges": 4,
+    "projected_reply_to_edges_omitted": 0
+  },
+  "side_effect_counts": {
+    "persons": 0,
+    "conversations": 0,
+    "messages": 0,
+    "contact_permissions": 0,
+    "drafts": 0,
+    "approvals": 0,
+    "delivery_attempts": 0,
+    "action_attempts": 0
+  },
+  "gold_read": false
+}
