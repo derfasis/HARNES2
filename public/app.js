@@ -1,5 +1,6 @@
 const $ = selector => document.querySelector(selector);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const safeHttpUrl = value => { try { const url=new URL(String(value??'')); return ['http:','https:'].includes(url.protocol)?url.href:null; } catch { return null; } };
 const labels = {pending:'Ожидает',proposed:'Предложено',running:'В работе',done:'Готово',completed:'Завершён',failed:'Ошибка',cancelled:'Отменено',interrupted:'Прервано',blocked:'Приостановлено',approved:'Одобрено',sent:'Отправлено',sending:'Отправляется',stale:'Устарел',rejected:'Отклонено',delivery_unknown:'Нужна сверка',candidate:'На рассмотрении',active:'Активно',retired:'В архиве',new:'Новый',qualified:'Квалифицирован',call_proposed:'Звонок предложен',call_accepted:'Согласие на звонок',call_booked:'Звонок назначен',call_attended:'Звонок состоялся',no_show:'Не пришёл',joined:'Присоединился',declined:'Отказ',business_value:'Бизнес-ценность',AI_OWNED:'Ведёт партнёр',HUMAN_OWNED:'Ведёт человек',accepted_for_development:'Принято в разработку',available:'Доступно',available_manual_sources:'Ручные источники',needs_configuration:'Нужно подключение',planned:'Запланировано',draft:'Черновик',reply:'Ответ',follow_up:'Продолжение диалога',research:'Исследование',planning:'Планирование',review:'Разбор',operator:'Владелец',agent:'Партнёр',system:'Система',confirmed:'Подтверждено'};
 const label = x => labels[x] ?? x;
 const date = value => value ? new Date(value).toLocaleString('ru-RU',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : '—';
@@ -10,6 +11,7 @@ const empty = (title,text,action='') => `<div class="empty"><strong>${esc(title)
 const panel = (title,content,action='') => `<section class="panel"><div class="panel-head"><h2>${esc(title)}</h2>${action}</div>${content}</section>`;
 let token='',state=null,tab='overview',selected=null,detail=null;
 let reviewFilter='pending',reviewOffset=0,reviewDetail=null;
+let referenceView={engagementId:null,items:[],unavailable:[],materials:[],questionMessageId:null,offerId:null,error:''},referenceRequest=0;
 let renderActivationCard = () => '';
 const pending = new Map();
 let researchView = null, actionsView = null, outcomesView = null, workspaceView = null, scoutView = null, audienceView = null;
@@ -24,6 +26,9 @@ async function command(action,payload) {
 }
 async function refresh() {
   state=await api('/api/state');if(selected) detail=await api(`/api/conversations/${encodeURIComponent(selected)}`);
+  const currentEngagement=(detail?.engagements??[]).find(e=>!['CLOSED','STOPPED'].includes(e.status));
+  if(currentEngagement) await loadEngagementReferences(currentEngagement.id);
+  else { referenceRequest++; referenceView={engagementId:null,items:[],unavailable:[],materials:[],questionMessageId:null,offerId:null,error:''}; }
   if(tab==='tasks')state.opportunity_reviews=await api(`/api/opportunities?status=${encodeURIComponent(reviewFilter)}&offset=${reviewOffset}`);
   if(tab==='discovery')await loadDiscovery();
   if(tab==='research'){
@@ -62,6 +67,24 @@ async function refresh() {
   if(releaseLabel){const sha=typeof state.release?.code_sha==='string'?state.release.code_sha.slice(0,12):'без SHA';
     releaseLabel.textContent=`${state.release?.verified===true&&state.release?.dirty!==true?'Проверен':'Не проверен'} · ${sha}`;}
   render();
+}
+async function loadEngagementReferences(engagementId){
+  const request=++referenceRequest;
+  referenceView={engagementId,items:[],unavailable:[],materials:[],questionMessageId:null,offerId:null,error:''};
+  try{
+    const [context,materials]=await Promise.all([
+      api(`/api/engagement/references?engagement_id=${encodeURIComponent(engagementId)}`),
+      api(`/api/engagement/reference-materials?engagement_id=${encodeURIComponent(engagementId)}`)
+    ]);
+    const stillCurrent=request===referenceRequest&&selected===detail?.conversation?.id
+      &&(detail?.engagements??[]).some(e=>e.id===engagementId&&!['CLOSED','STOPPED'].includes(e.status));
+    if(!stillCurrent)return;
+    referenceView={engagementId,items:context.items??[],unavailable:context.unavailable??[],materials:materials.items??[],
+      questionMessageId:materials.question_message_id??null,offerId:materials.offer_id??null,error:''};
+  }catch(error){
+    if(request!==referenceRequest)return;
+    referenceView={engagementId,items:[],unavailable:[],materials:[],questionMessageId:null,offerId:null,error:error.message||'Материалы для вопроса недоступны'};
+  }
 }
 function render(){
   const titles={overview:'Обзор',people:'Люди и диалоги',tasks:'Задачи',discovery:'Discovery',research:'Исследования',actions:'Действия',outcomes:'Результаты',scout:'Источники',workspace:'Partner Workspace',audience:'Audience Intelligence',experience:'Память и опыт',capabilities:'Способности',runs:'История работы',settings:'Подключения'};
@@ -235,8 +258,29 @@ function engagementPanel(){
   <h3>Зобов’язання</h3>${e.commitments.map(c=>`<p>${esc(c.text)} · ${esc(c.owner)} · ${esc(c.status)} ${c.due_at?date(c.due_at):''}</p>${button('Зафіксувати результат','eng-commitment',c.id)}`).join('')||'<p>Поки немає. Proposed не означає, що обіцянку вже дано.</p>'}
   <h3>Передача людині</h3>${e.handoffs.map(h=>`<p>${esc(h.status)} · ${esc(h.owner)} · ${esc(h.reason)}</p>${h.status==='requested'?button('Прийняти відповідальність','eng-handoff-accept',h.id):button('Повернути AI / завершити','eng-handoff-resolve',h.id)}`).join('')||'<p>Немає відкритої передачі.</p>'}
   <h3>Дозволи на контакт</h3>${(detail.contact_permissions??[]).map(g=>`<p>${esc(g.purpose)} · ${esc(g.granted_by)} · до ${date(g.expires_at)} · ${g.revoked_at?'відкликано':'перевіряється під час дії'}</p>${!g.revoked_at?button('Відкликати','eng-permission-revoke',g.id):''}`).join('')}${button('Зафіксувати явний дозвіл','eng-permission-grant',e.id)}
+  ${reviewedReferenceSection(e)}
   <h3>Історія рішень</h3>${decisions.map(d=>`<p>${esc(d.kind)} · ${esc(d.status)} · ${esc(d.reason)}</p>${button('Рішення → дія → результат','eng-episode',d.id)}`).join('')||'<p>Поки немає.</p>'}
   <div class="actions">${button('Кандидат уроку з outcome','eng-lesson',e.id)}</div><p>Стратегії: ${e.strategies.map(x=>esc(`v${x.version}: ${x.guidance}`)).join('; ')||'немає активних'}. Вони не змінюють прав.</p>`);
+}
+
+function reviewedReferenceSection(e){
+  if(referenceView.engagementId!==e.id)return `<section class="workspace-summary"><h3>Дослідницькі посилання для цього питання</h3><p>Завантажуємо поточне основание та доступні матеріали.</p></section>`;
+  if(referenceView.error)return `<section class="workspace-summary"><h3>Дослідницькі посилання для цього питання</h3><p role="status">Дані тимчасово недоступны: ${esc(referenceView.error)}</p><p>Додавання посилання не створює дозволу на контакт і не відправляє повідомлення.</p></section>`;
+  const refs=referenceView.items??[],unavailable=referenceView.unavailable??[];
+  const rows=refs.map(r=>`<article class="workspace-observation"><div class="panel-head"><strong>${esc(r.title)}</strong><span class="badge">${esc(r.market)} · ${esc(r.epistemic_status)}</span></div>
+    <p><strong>Рассмотренная интерпретация, не подтверждённый факт.</strong></p><pre>${esc(r.excerpt)}</pre>
+    <small>Вопрос ${esc(r.question_message_id)} · offer ${esc(r.offer_id)} · материал ${esc(r.material_id)} · SHA-256 ${esc(r.material_sha256)} · действует до ${esc(date(r.expires_at))}</small>
+    ${(r.sources??[]).map(s=>{const sourceUrl=safeHttpUrl(s.url);return `<details><summary>Основание: наблюдение источника, не независимая проверка</summary><p>${esc(s.text)}</p><small>${esc(s.source_ref)} · событие ${esc(s.source_event_id)} · сообщение ${esc(s.message_id)} · версия ${esc(s.message_version)}${s.observed_at?` · зафиксировано ${esc(date(s.observed_at))}`:''}${s.published_at?` · дата публикации по источнику ${esc(date(s.published_at))}`:''}</small>${sourceUrl?`<p><a href="${esc(sourceUrl)}" target="_blank" rel="noopener noreferrer">Открыть первичный источник</a></p>`:''}<small>Время наблюдения и дата публикации показаны отдельно; они сами по себе не подтверждают цену.</small></details>`;}).join('')}
+    <div class="actions">${button('Отозвать ссылку','eng-reference-revoke',r.reference_id??r.id,'danger')}</div></article>`).join('');
+  const withheld=unavailable.map(x=>`<div class="section-note"><strong>Содержимое скрыто · ${esc(x.status)}</strong><p>${esc(x.reason)}</p></div>`).join('');
+  const canAttach=referenceView.questionMessageId&&referenceView.offerId&&referenceView.materials.length&&refs.length<4;
+  return `<section class="workspace-summary"><h3>Дослідницькі посилання для цього питання</h3>
+    <p>Це явний дозвіл лише читати вибраний уривок у межах поточного питання та зазначеного ринку. Ринок описує застосовність посилання, а не країну людини чи власника. Він не надає дозволу на контакт, схвалення відповіді або відправлення.</p>
+    ${rows||'<p class="muted">Для цього питання ще немає активних розглянутих посилань.</p>'}${withheld}
+    ${canAttach?button('Додати розглянутий матеріал','eng-reference-attach',e.id,'secondary'):''}
+    ${referenceView.materials.length===0?'<p class="muted">Наразі немає актуальних схвалених матеріалів Work.</p>':''}
+    ${refs.length>=4?'<p class="muted">До одного питання можна додати не більше чотирьох поточних матеріалів.</p>':''}
+  </section>`;
 }
 
 function people(){
@@ -352,6 +396,47 @@ async function act(action,itemId,extra){
     if(action==='eng-open'){modal('Відкрити постійну справу',field('topic','Тема')+field('current_need','Поточна потреба','textarea')+field('close_condition','Умова завершення','textarea'),p=>command('engagement.open',{...convPayload(),...p}));return;}
     if(action==='eng-episode'){const data=await api(`/api/decisions/${encodeURIComponent(itemId)}`);opportunityReadOnly('Епізод рішення',`<p>Асоціація з outcome не доводить причинність.</p><pre class="code">${esc(JSON.stringify(data,null,2))}</pre>`);return;}
     if(!e)throw new Error('Спершу відкрийте нову справу');
+    if(action==='eng-reference-attach'){
+      if(referenceView.engagementId!==e.id||!referenceView.questionMessageId||!referenceView.offerId||!referenceView.materials.length)throw new Error('Поточне питання або схвалений матеріал недоступні. Оновіть картку справи.');
+      const inbound=(detail.messages??[]).filter(m=>m.direction==='in').at(-1);
+      if(!inbound||inbound.id!==referenceView.questionMessageId)throw new Error('Поточне вхідне питання змінилося. Оновіть картку справи.');
+      const materials=[...referenceView.materials],refs=[...referenceView.items];
+      const materialOptions=materials.map(m=>[m.material_id,`${m.title} · SHA-256 ${m.sha256}`]);
+      const questionOption=[[inbound.id,`${inbound.text.slice(0,160)} · ${inbound.id}`]];
+      const materialDetails=materials.map(m=>`<details><summary>${esc(m.title)} · точний схвалений текст</summary><pre>${esc(m.content)}</pre><small>${esc((m.evidence_event_ids??[]).join(', '))}</small></details>`).join('');
+      const localDateTime=value=>{const d=new Date(value),local=new Date(d.valueOf()-d.getTimezoneOffset()*60_000);return local.toISOString().slice(0,16);};
+      const expiresMin=localDateTime(Date.now()+60_000),expiresMax=localDateTime(Date.now()+7*86400000);
+      const form=`<p>Посиланням буде надано лише доступ для читання в контексті цього питання. Воно не вказує країну людини або власника та не надає права на контакт чи відправлення.</p>
+        ${field('question_message_id','Поточне вхідне питання','select','',[['','Явно виберіть поточне питання'],...questionOption])}
+        ${field('material_id','Схвалений матеріал Work','select','',[['','Виберіть матеріал'],...materialOptions])}${materialDetails}
+        ${field('market','Країна, для якої застосовне посилання (2 великі літери ISO)','text','')}
+        ${field('excerpt','Точний уривок із матеріалу, максимум 8000 символів','textarea')}
+        <label for="f-expires_at">Строк дії (не більше семи днів)</label><input id="f-expires_at" name="expires_at" type="datetime-local" min="${esc(expiresMin)}" max="${esc(expiresMax)}">
+        ${field('note','Чому цей уривок слід читати для цього питання','textarea')}
+        <p>Активна пропозиція: ${esc(referenceView.offerId)}. До чотирьох посилань на те саме питання й ринок.</p>`;
+      modal('Додати розглянутий матеріал до питання',form,p=>{
+        const chosen=materials.find(m=>m.material_id===p.material_id);
+        const expires=new Date(p.expires_at),delta=expires.valueOf()-Date.now();
+        if(referenceView.engagementId!==e.id||referenceView.questionMessageId!==inbound.id||p.question_message_id!==inbound.id)throw new Error('Питання змінилося. Оновіть картку та перевірте основу ще раз.');
+        if(!chosen||!p.material_id||!p.market||!/^[A-Z]{2}$/.test(p.market))throw new Error('Виберіть матеріал і введіть країну двома великими літерами ISO.');
+        if(!p.excerpt?.trim()||p.excerpt.length>8000||!chosen.content.includes(p.excerpt))throw new Error('Уривок має бути точним непорожнім фрагментом вибраного матеріалу до 8000 символів.');
+        if(!Number.isFinite(expires.valueOf())||delta<=0||delta>7*86400000)throw new Error('Строк має бути в майбутньому, не більше ніж на сім днів.');
+        if(!p.note?.trim()||p.note.trim().length>2000)throw new Error('Укажіть коротке обґрунтування до 2000 символів.');
+        if(refs.some(r=>r.market!==p.market||r.offer_id!==referenceView.offerId))throw new Error('Активні посилання цього питання мають спільний ринок і пропозицію.');
+        if(refs.length>=4)throw new Error('До одного питання можна додати не більше чотирьох поточних посилань.');
+        return command('reference.attach',{engagement_id:e.id,expected_revision:e.revision,material_id:chosen.material_id,
+          material_sha256:chosen.sha256,question_message_id:inbound.id,offer_id:referenceView.offerId,market:p.market,
+          excerpt:p.excerpt,expires_at:expires.toISOString(),note:p.note.trim()});
+      });return;
+    }
+    if(action==='eng-reference-revoke'){
+      const reference=referenceView.items.find(r=>(r.reference_id??r.id)===itemId);
+      if(referenceView.engagementId!==e.id||!reference)throw new Error('Активне посилання більше недоступне. Оновіть картку справи.');
+      modal('Відкликати доступ до цього дослідницького посилання',`${field('reason','Причина відкликання','textarea')}<p>Це відкликає доступ до уривка в майбутньому контексті. Дозволи на контакт та надсилання мають окремий стан.</p>`,p=>{
+        if(!p.reason?.trim()||p.reason.trim().length>2000)throw new Error('Укажіть причину до 2000 символів.');
+        return command('reference.revoke',{engagement_id:e.id,expected_revision:e.revision,reference_id:reference.reference_id??reference.id,reason:p.reason.trim()});
+      });return;
+    }
     if(action==='eng-update'){modal('Поточний стан справи',field('current_need','Поточна потреба','textarea',e.current_need)+field('unknowns','Невідоме, по одному пункту в рядку','textarea',e.unknowns.join('\n')),p=>command('engagement.update',{...ep,...p,unknowns:p.unknowns.split('\n').map(x=>x.trim()).filter(Boolean),expected_revision:e.revision}));return;}
     if(action==='eng-wake'){modal('Подія для перегляду рішення',field('event','Тип події','select','operator_response',['operator_response','inbound','permission_changed','commitment_due','outcome'].map(x=>[x,x]))+field('evidence','Що реально змінилося','textarea'),p=>command('engagement.wake',{...ep,...p}));return;}
     if(action==='eng-close'){modal('Завершити справу',field('evidence','Підстава завершення','textarea'),p=>command('engagement.close',{...ep,...p}));return;}
@@ -369,7 +454,7 @@ async function act(action,itemId,extra){
   }
   if(action.startsWith('go-')){tab=action.slice(3);await refresh();return;}
   if(action==='modal-close'){$('#modal').close();return;}
-  if(action==='person-select'){selected=itemId;detail=await api(`/api/conversations/${itemId}`);render();return;}
+  if(action==='person-select'){selected=itemId;detail=await api(`/api/conversations/${itemId}`);const e=(detail.engagements??[]).find(x=>!['CLOSED','STOPPED'].includes(x.status));if(e)await loadEngagementReferences(e.id);else{referenceRequest++;referenceView={engagementId:null,items:[],unavailable:[],materials:[],questionMessageId:null,offerId:null,error:''};}render();return;}
   if(action==='opportunity-capture'){
     modal('Зарегистрировать разрешённый публичный snapshot',field('snapshot','Opportunity input JSON (с текущим active_offer)','textarea')+field('conversation_id','Необязательная связь с CRM, утверждение оператора','select','',convOptions()),async p=>{
       const result=await command('opportunity.capture',{snapshot:JSON.parse(p.snapshot),...(p.conversation_id?{conversation_id:p.conversation_id}:{})});

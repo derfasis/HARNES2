@@ -259,6 +259,11 @@ export async function start({ config = loadConfig(), directory = DATA, deploymen
         if (match) { ensure([...url.searchParams].length === 0, 'Invalid executive query', 400); return send(200, service.executive.detail(decodeURIComponent(match[1]))); }
         return send(404, { error: 'not found' });
       }
+      if (req.method === 'GET' && ['/api/engagement/references','/api/engagement/reference-materials'].includes(url.pathname)) {
+        ensure([...url.searchParams.keys()].every(k=>k==='engagement_id') && url.searchParams.getAll('engagement_id').length===1, 'Invalid reference query',400);
+        const engagementId=requiredText(url.searchParams.get('engagement_id'),'engagement_id',100);
+        return send(200,url.pathname.endsWith('reference-materials') ? service.references.materials(engagementId) : service.references.context(engagementId));
+      }
       if (req.method === 'GET' && url.pathname.startsWith('/api/continuity/')) {
         if (url.pathname === '/api/continuity/threads') {
           ensure([...url.searchParams.keys()].every(k => ['limit','cursor'].includes(k))

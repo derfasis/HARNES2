@@ -25,12 +25,13 @@ export class EngagementLoop {
   evidence(e, refs, { nonempty = true } = {}) {
     list(refs); ensure(!nonempty || refs.length,'Evidence required');
     return refs.map(ref => {
-      ensure(ref && typeof ref === 'object' && ['message','fact','outcome'].includes(ref.type), 'Unsupported evidence type');
+      ensure(ref && typeof ref === 'object' && ['message','fact','outcome','reference'].includes(ref.type), 'Unsupported evidence type');
       requiredText(ref.id,'evidence id',100);
       let row;
       if (ref.type === 'message') row = this.db.get('SELECT * FROM messages WHERE id=? AND conversation_id=?',ref.id,e.conversation_id);
       if (ref.type === 'fact') row = this.db.get("SELECT f.* FROM facts f JOIN conversations c ON c.person_id=f.person_id WHERE f.id=? AND c.id=? AND f.status='confirmed'",ref.id,e.conversation_id);
       if (ref.type === 'outcome') row = this.db.get('SELECT * FROM outcome_events WHERE id=? AND conversation_id=?',ref.id,e.conversation_id);
+      if (ref.type === 'reference') row = this.s.references.evidence(e,ref.id);
       ensure(row,'Evidence missing or outside engagement scope',409,'invalid_evidence');
       return {type:ref.type,id:ref.id};
     });
@@ -38,7 +39,8 @@ export class EngagementLoop {
   snapshot(eid) {
     const e = this.get(eid), c = this.s.conversation(e.conversation_id);
     return {...e, unknowns:parse(e.unknowns_json), ownership:c.ownership,
-      beliefs:this.db.all("SELECT * FROM engagement_beliefs WHERE engagement_id=? AND status='current' AND (expires_at IS NULL OR expires_at>?) ORDER BY created_at,rowid",eid,now()).map(b=>({...b,evidence:parse(b.evidence_json),counterevidence:parse(b.counterevidence_json)})),
+      beliefs:this.db.all("SELECT * FROM engagement_beliefs WHERE engagement_id=? AND status='current' AND (expires_at IS NULL OR expires_at>?) ORDER BY created_at,rowid",eid,now()).map(b=>({...b,evidence:parse(b.evidence_json),counterevidence:parse(b.counterevidence_json)}))
+        .filter(b=>this.s.references.beliefCurrent(eid,[...b.evidence,...b.counterevidence])),
       commitments:this.db.all("SELECT * FROM engagement_commitments WHERE engagement_id=? AND status IN ('open','proposed') ORDER BY created_at,rowid",eid),
       explained:this.db.all('SELECT * FROM engagement_explanations WHERE engagement_id=? ORDER BY created_at,rowid',eid),
       waiting:this.db.all("SELECT * FROM engagement_waits WHERE engagement_id=? AND status='waiting'",eid).map(w=>({...w,events:parse(w.events_json)})),
@@ -138,6 +140,7 @@ export class EngagementLoop {
     const decision=this.decision(action.decision_id),c=this.s.conversation(e.conversation_id);
     ensure(decision.status==='current'&&decision.conversation_revision===c.revision,'Decision is stale',409,'stale_decision');
     const beliefs=parse(decision.snapshot_json).engagement.beliefs;
+    this.s.references.assertFrozen(e.id, parse(decision.snapshot_json).reviewed_references);
     ensure(!beliefs.some(b=>b.expires_at&&b.expires_at<=now()),'Decision contains expired belief evidence',409,'stale_decision');
     // Recheck the exact grant recorded in the decision; a new grant never revives it.
     const grant=this.db.get('SELECT * FROM contact_permissions WHERE id=?',action.permission_id);
@@ -158,7 +161,8 @@ export class EngagementLoop {
     ensure(['ACT','WAIT','IGNORE','HANDOFF','STOP'].includes(p.kind),'Invalid decision');
     const ev=this.evidence(e,p.evidence),reason=requiredText(p.reason,'reason',4000),expected=requiredText(p.expected_next,'expected next',2000);
     const c=this.s.conversation(e.conversation_id),snapshot=this.snapshot(e.id);
-    const evidenceSnapshot=ev.map(ref=>({reference:ref,record:this.db.get(`SELECT * FROM ${{message:'messages',fact:'facts',outcome:'outcome_events'}[ref.type]} WHERE id=?`,ref.id)}));
+    const evidenceSnapshot=ev.map(ref=>({reference:ref,record:ref.type === 'reference' ? this.s.references.evidence(e,ref.id)
+      : this.db.get(`SELECT * FROM ${{message:'messages',fact:'facts',outcome:'outcome_events'}[ref.type]} WHERE id=?`,ref.id)}));
     const state=p.state?{current_need:requiredText(p.state.current_need??e.current_need,'current need',2000),unknowns:texts(p.state.unknowns??parse(e.unknowns_json))}:null;
     const run=a.runId?this.db.get('SELECT context_json FROM runs WHERE id=?',a.runId):null;
     const attention=this.db.get("SELECT et.trigger_json FROM engagement_tasks et JOIN tasks t ON t.id=et.task_id WHERE et.engagement_id=? AND t.status IN ('pending','running') ORDER BY t.created_at DESC,t.rowid DESC LIMIT 1",e.id);
@@ -181,7 +185,9 @@ export class EngagementLoop {
     const prior=this.db.get("SELECT id FROM engagement_decisions WHERE engagement_id=? AND status='current'",e.id);
     ensure(!prior,'Current decision must first be invalidated by a new event',409,'decision_already_current');
     const did=id(),strategy=snapshot.strategies.at(-1)?.id??null;
-    this.db.run('INSERT INTO engagement_decisions VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',did,e.id,a.runId??null,e.revision,c.revision,p.kind,reason,JSON.stringify(ev),expected,JSON.stringify({trigger,engagement:snapshot,run_context:run?parse(run.context_json):null,evidence:ev,evidence_snapshot:evidenceSnapshot,proposed_state:state,conversation_revision:c.revision,permission}),strategy,'current',a.kind,now());
+    const reviewedReferences = run ? parse(run.context_json).reviewed_references : this.s.references.context(e.id);
+    this.s.references.assertFrozen(e.id,reviewedReferences);
+    this.db.run('INSERT INTO engagement_decisions VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',did,e.id,a.runId??null,e.revision,c.revision,p.kind,reason,JSON.stringify(ev),expected,JSON.stringify({trigger,engagement:snapshot,run_context:run?parse(run.context_json):null,evidence:ev,evidence_snapshot:evidenceSnapshot,proposed_state:state,conversation_revision:c.revision,permission,reviewed_references:reviewedReferences}),strategy,'current',a.kind,now());
     this.db.run("UPDATE engagement_waits SET status='cancelled' WHERE engagement_id=? AND status='waiting'",e.id);
     this.db.run("UPDATE engagements SET status='OPEN',updated_at=? WHERE id=?",now(),e.id);
     if(state)this.db.run('UPDATE engagements SET current_need=?,unknowns_json=? WHERE id=?',state.current_need,JSON.stringify(state.unknowns),e.id);

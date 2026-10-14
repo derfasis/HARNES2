@@ -87,6 +87,8 @@ export class Scheduler {
       try { await this.service.exclusive(() => this.service.work.reconcile()); this.workReconcileState = 'reconciled'; }
       catch { this.workReconcileState = 'failed'; }
       await this.service.exclusive(() => this.service.store.transaction(() => this.service.engagement.sweep()));
+      try { await this.service.exclusive(() => this.service.store.transaction(() => this.service.references.reconcile())); this.referenceState={disposition:'reconciled'}; }
+      catch { this.referenceState={disposition:'reconciliation_failed'}; }
       // The first thing a source pass does, before any reconciliation and before anything is
       // begun. This is the only moment at which "a refresh attempt is still `running`" means "the
       // pass that owned it is gone" — it is true because `busy` admits one pass at a time, so
@@ -482,6 +484,14 @@ export class Scheduler {
       try { result = await this.runtime.run(run, context); }
       catch (error) { result = { completed: false, error: error.message }; }
       await this.service.exclusive(() => this.service.store.transaction(() => {
+        const frozenReferences = run.context_json ? JSON.parse(run.context_json) : null;
+        if (frozenReferences?.reviewed_references?.items?.length) {
+          try { this.service.references.assertFrozen(frozenReferences.engagement.id,frozenReferences.reviewed_references); }
+          catch {
+            result={...result,completed:false,error:'REFERENCE_BASIS_CHANGED'};
+            this.service.invalidate(run.conversation_id,'reference_basis_changed_before_completion');
+          }
+        }
         const task = this.service.store.get('SELECT * FROM tasks WHERE id=?', run.task_id);
         const decision = task.kind==='engagement_evaluate' ? this.service.store.get('SELECT * FROM engagement_decisions WHERE run_id=?',run.id) : null;
         if (task.kind==='engagement_evaluate' && result.completed && !result.error && !decision) {

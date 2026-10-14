@@ -11,6 +11,7 @@ import { WORK_TABLES, CONTROL_TABLES } from '../business/work-tables.mjs';
 import { SCOUT_TABLES } from '../business/scout-tables.mjs';
 import { AUDIENCE_TABLES } from '../business/audience-tables.mjs';
 import { MODEL_PROFILE_TABLES } from '../business/model-profile-tables.mjs';
+import { REFERENCE_TABLES } from '../business/reference-tables.mjs';
 import { BusinessService } from '../business/service.mjs';
 import { workspaceHarness } from './helpers/workspace-harness.mjs';
 
@@ -38,6 +39,7 @@ function addPrivateHistory(h) {
 
 function importBundle(t, h, destinationName, { migrationCount = 12 } = {}) {
   const bundle = exportPartner(h.store);
+  if (migrationCount < 20) for (const table of REFERENCE_TABLES) delete bundle.tables[table];
   if (migrationCount < 19) delete bundle.tables.scout_model_requests;
   if (migrationCount < 18) delete bundle.tables.audience_first_contact_heads;
   if (migrationCount < 17) delete bundle.tables.source_observation_epochs;
@@ -160,7 +162,7 @@ test('schema-9 bundle remains a supported positive control with Outcome transfer
   assert.equal(Object.keys(bundle.tables).some(table => [...WORK_TABLES, ...CONTROL_TABLES].includes(table)), false);
   const store = new Store(path.join(destination, 'data'));
   try {
-    assert.equal(store.all('SELECT * FROM schema_migrations').length, 19);
+    assert.equal(store.all('SELECT * FROM schema_migrations').length, 20);
     assert.equal(store.get('SELECT COUNT(*) n FROM work_cases').n, 0);
     assert.equal(store.get('SELECT COUNT(*) n FROM control_tickets').n, 0);
     assert.deepEqual(store.all('PRAGMA foreign_key_check'), []);
@@ -174,7 +176,7 @@ test('schema-10 historical bundle has work/control state but excludes later Scou
   assert.equal(Object.hasOwn(bundle.tables,'work_cases'),true);
   const store=new Store(path.join(destination,'data'));
   try{
-    assert.equal(store.all('SELECT * FROM schema_migrations').length,19);
+    assert.equal(store.all('SELECT * FROM schema_migrations').length,20);
     assert.equal(store.get('SELECT COUNT(*) n FROM work_cases WHERE id=?',caseId).n,1);
     assert.equal(store.get('SELECT COUNT(*) n FROM scout_campaigns').n,0);
     assert.deepEqual(store.all('PRAGMA foreign_key_check'),[]);

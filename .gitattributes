@@ -4,3 +4,4 @@ tests/fixtures/deployed-011-source-scout.sql -text -diff -merge
 business/migrations/013-audience-attention.sql text eol=lf
 business/migrations/016-audience-source-epochs.sql text eol=lf
 business/migrations/017-source-observation-epochs.sql text eol=lf
+business/migrations/020-engagement-reviewed-references.sql text eol=lf

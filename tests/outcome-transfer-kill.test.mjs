@@ -15,6 +15,7 @@ import { Store, hash, id, migrationChecksumMatches } from '../business/store.mjs
 import { WORK_TABLES, CONTROL_TABLES } from '../business/work-tables.mjs';
 import { SCOUT_TABLES } from '../business/scout-tables.mjs';
 import { AUDIENCE_TABLES } from '../business/audience-tables.mjs';
+import { REFERENCE_TABLES } from '../business/reference-tables.mjs';
 
 const legacyCandidateColumns = ['basis','conversation_id','created_at','decision_id','detector','detector_version','draft_id',
   'engagement_id','evidence_json','id','kind','observed_at','outcome_id','partner_id','resolution_note','revision','source_message_id','status','updated_at'];
@@ -141,6 +142,7 @@ function managedObservation(h, cid, label, offsetHours) {
 
 function alterAs008(bundle, { withoutCoverage = false } = {}) {
   bundle.migrations = bundle.migrations.slice(0, 8);
+  for (const table of REFERENCE_TABLES) delete bundle.tables[table];
   delete bundle.tables.scout_model_requests;
   delete bundle.tables.source_observation_epochs;
   delete bundle.tables.model_profiles; delete bundle.tables.audience_attention_models;
