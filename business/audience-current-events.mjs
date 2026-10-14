@@ -2,6 +2,7 @@
 // Expired ancestors establish lineage only. They never enter model citations.
 import { AppError } from './errors.mjs';
 import { digest, sourceRows } from './source-ingestion.mjs';
+import { annotateAudienceEvidence, structuralAudienceRelations } from './audience-source-relations.mjs';
 
 const HASH = /^[a-f0-9]{64}$/;
 const IDS = value => Array.isArray(value) && value.length <= 32 && new Set(value).size === value.length
@@ -47,8 +48,9 @@ export function currentExchange(a, goal, row, eventIds) {
       if (!cursor) reasons.push('AUDIENCE_ANCESTRY_INCOMPLETE');
     }
   }
-  const evidence = [...a.service.continuity.evidenceStates({ max_age_seconds: goal.max_age_seconds },
-    watch ? [{ ...watch, policy_hash: a.service.continuity.policyHash(watch.source_ref) }] : [], eventIds).values()];
+  const evidence = annotateAudienceEvidence(a.service, row.source_ref,
+    [...a.service.continuity.evidenceStates({ max_age_seconds: goal.max_age_seconds },
+      watch ? [{ ...watch, policy_hash: a.service.continuity.policyHash(watch.source_ref) }] : [], eventIds).values()]);
   if (evidence.length !== eventIds.length) reasons.push('AUDIENCE_EVIDENCE_STALE');
   for (const item of evidence) {
     if (!Number.isFinite(Date.parse(item.observed_at)) || item.confirmed_at!==null && !Number.isFinite(Date.parse(item.confirmed_at)))
@@ -57,11 +59,14 @@ export function currentExchange(a, goal, row, eventIds) {
   }
   const currentIds = [...eventIds].sort((x,y) => Number(x)-Number(y));
   const structuralIds = [...structural.keys()].sort((x,y) => Number(x)-Number(y));
+  const structural_relations = structuralAudienceRelations(a.service, row.source_ref,
+    structuralIds.map(id => structural.get(id)), currentIds);
   const fingerprint = digest({ version:2, id:row.id, source_ref:row.source_ref, anchor_id:row.anchor_id,
     current:currentIds.map(id => [id,byEvent.get(id)?.message ?? null]),
     structural:structuralIds.map(id => [id,structural.get(id).message]) });
   return { id:row.id,source_ref:row.source_ref,anchor_id:row.anchor_id,fingerprint,
     current_event_ids:currentIds,structural_event_ids:structuralIds,
+    structural_relations,
     evidence_scope:'current_events_with_structural_ancestry_v1',
     evidence:evidence.filter(e => e.current),current:reasons.length === 0,reasons:[...new Set(reasons)],
     unsupported_count:0,coverage:'bounded_new_current_events_with_verified_lineage' };

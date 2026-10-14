@@ -10,6 +10,7 @@ import { proposalRefs, proposalBindings, previewHash, frozenProposalBasis } from
 import { normalizeFailureCause } from './failure-cause.mjs';
 import { decisionBindings, assessmentDecision } from './audience-decisions.mjs';
 import { currentBasis, currentBasisState } from './audience-current-events.mjs';
+import { annotateAudienceEvidence } from './audience-source-relations.mjs';
 import { FOLLOWUP_TEMPORARY } from './audience-followup.mjs';
 import { watchEpoch, sourceRenewalPreview, assertRenewalRequest, renewSource } from './audience-source-renewal.mjs';
 import { sourceObservationFloor } from './source-observation-epochs.mjs';
@@ -253,8 +254,9 @@ export class AudienceLoop {
     const floor = watch ? this.watchObservationFloor(watch) : Number.MAX_SAFE_INTEGER;
     const selectedIds = state.evidence.filter(ref => Number(ref) > floor);
     if (state.evidence.length && !selectedIds.length) reasons.push('AUDIENCE_EVIDENCE_BEFORE_RENEWAL');
-    const evidence = [...this.service.continuity.evidenceStates({ max_age_seconds: goal.max_age_seconds },
-      watch ? [{ ...watch, policy_hash: this.service.continuity.policyHash(watch.source_ref) }] : [], selectedIds).values()];
+    const evidence = annotateAudienceEvidence(this.service, exchange.source_ref,
+      [...this.service.continuity.evidenceStates({ max_age_seconds: goal.max_age_seconds },
+        watch ? [{ ...watch, policy_hash: this.service.continuity.policyHash(watch.source_ref) }] : [], selectedIds).values()]);
     if (!evidence.length) reasons.push('AUDIENCE_NO_SUPPORTED_EVIDENCE');
     if (evidence.length !== selectedIds.length) reasons.push('AUDIENCE_EVIDENCE_STALE');
     for (const e of evidence) if (!e.current) reasons.push(...e.reasons);
