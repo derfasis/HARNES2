@@ -1,0 +1,11 @@
+# Audience reply topology fidelity
+
+Baseline: `main@f61c99e8feaddf5d59e7d20592a6ff2bbd52dd90`. The saved native Audience control retained 43 reply edges in normalized source events but supplied zero to the model. Existing projection tests hand-seeded relation fields and did not exercise the actual producer.
+
+New Audience evidence copies `thread_id` and `reply_to_id` from its partner-scoped immutable source event after checking source/message/event/version/author bindings. Follow-up current evidence uses the same mapping. Older ancestry has a separate bounded `structural_relations` list, marked `structural_only:true`, containing only relation identity and version; it has no text or fresh citation authority. Missing or foreign parents are never synthesized or fetched from another source.
+
+The existing explicit-reply grouping, ancestry/currentness checks, source permissions, model grants, review, import and outbound boundaries are unchanged. Same-topic independent roots do not become one discussion. No parser, migration, capability, contact permission, UI or Action/Continuity hash change was added. The existing model projection v1 receives additive metadata on newly assembled packets; stored assessment/run packets are not rewritten or retrofitted. Undefined legacy relation properties do not enter serialized model input.
+
+Five black-box tests exercise native ingestion through Audience capture/model projection, exact pairings in intertwined branches, source-ID isolation, parent edit/delete invalidation, unrelated opaque-leaf isolation and follow-up structural-only separation. The intended producer test failed before implementation because both relation fields were absent; all five pass after it. Existing related suites pass 39 tests. Full regression and hosted verification must pass before integration.
+
+This proves preservation and safety of model input, not improved model accuracy, voluntary human interest, offer compatibility or recruitment yield. No real model/network/send is needed to prove this mapping. The previously reported two factuality caveats and unknown owner market/commercial terms remain unresolved. Generic Continuity/Action ancestor-dependency closure and Scout topic mapping remain separate architectural questions; this repair does not claim to solve them.
