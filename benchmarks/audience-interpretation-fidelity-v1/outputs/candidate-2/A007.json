@@ -1,0 +1,146 @@
+{
+  "case_id": "A007",
+  "goal_id": "36c3c5f8-61e0-4db6-b1fb-eda9a7bc26f9",
+  "assessment_id": "9a603d63-31a4-4d9f-bca4-e72ec158fd4d",
+  "run_id": "548f6f7a-4794-49a5-a6f0-74d071e44d89",
+  "disposition": "no_need_proposed",
+  "assessment_status": "proposed",
+  "decision_review": {
+    "scope": "supplied_packet_only",
+    "epistemic_status": "unverified_model_interpretation",
+    "resolution": "unknown",
+    "state": "current",
+    "review": {
+      "version": 1,
+      "scope": "supplied_packet_only",
+      "disposition": "no_need_proposed",
+      "summary": "В предоставленной ветке отсутствует личное намерение искать товары или партнёрские программы для продажи: участник repolab-author:7:71 прямо пояснил, что приведённое объявление является чужой цитатой в контексте обсуждения правил модерации, и однозначно отверг поиск партнёрств или товаров для себя.",
+      "unknowns": [
+        "Существуют ли в сообществе другие участники с реальным коммерческим запросом вне данного фрагмента обсуждения"
+      ],
+      "exchange_reviews": [
+        {
+          "exchange_id": "d5000f77-cfdc-4c02-963f-db0282a8fac8",
+          "judgment": "no_proposal",
+          "reason": "Упоминание поиска партнёров является цитатой чужого текста в дискуссии о модерации чата; автор цитаты прямо опроверг наличие у себя коммерческих намерений.",
+          "evidence_event_ids": [
+            "6",
+            "8",
+            "12"
+          ],
+          "support_quotes": [
+            {
+              "source_event_id": "6",
+              "quote": "Пример объявления: «Ищу партнёров для продажи товаров за комиссию! Пишите мне». Это чужая реклама, цитирую для обсуждения модерации."
+            },
+            {
+              "source_event_id": "8",
+              "quote": "Сам ничего продавать и партнёрскую программу искать не собираюсь."
+            },
+            {
+              "source_event_id": "12",
+              "quote": "Нет, чужая цитата. Не приписывайте её мне; обсуждаем только правила чата."
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "output": {
+    "decision_review": {
+      "version": 1,
+      "scope": "supplied_packet_only",
+      "disposition": "no_need_proposed",
+      "summary": "В предоставленной ветке отсутствует личное намерение искать товары или партнёрские программы для продажи: участник repolab-author:7:71 прямо пояснил, что приведённое объявление является чужой цитатой в контексте обсуждения правил модерации, и однозначно отверг поиск партнёрств или товаров для себя.",
+      "unknowns": [
+        "Существуют ли в сообществе другие участники с реальным коммерческим запросом вне данного фрагмента обсуждения"
+      ],
+      "exchange_reviews": [
+        {
+          "exchange_id": "d5000f77-cfdc-4c02-963f-db0282a8fac8",
+          "judgment": "no_proposal",
+          "reason": "Упоминание поиска партнёров является цитатой чужого текста в дискуссии о модерации чата; автор цитаты прямо опроверг наличие у себя коммерческих намерений.",
+          "evidence_event_ids": [
+            "6",
+            "8",
+            "12"
+          ],
+          "support_quotes": [
+            {
+              "source_event_id": "6",
+              "quote": "Пример объявления: «Ищу партнёров для продажи товаров за комиссию! Пишите мне». Это чужая реклама, цитирую для обсуждения модерации."
+            },
+            {
+              "source_event_id": "8",
+              "quote": "Сам ничего продавать и партнёрскую программу искать не собираюсь."
+            },
+            {
+              "source_event_id": "12",
+              "quote": "Нет, чужая цитата. Не приписывайте её мне; обсуждаем только правила чата."
+            }
+          ]
+        }
+      ]
+    },
+    "needs": []
+  },
+  "receipt": {
+    "disposition": "no_need_proposed",
+    "goal_id": "36c3c5f8-61e0-4db6-b1fb-eda9a7bc26f9",
+    "assessment_id": "9a603d63-31a4-4d9f-bca4-e72ec158fd4d",
+    "decision_contract_version": 1,
+    "model_projection_version": 1,
+    "model_input_fingerprint": "dc977585356fc49d3c889d821bf9d2eb1aa31b6951b2ba8b4428518b1ba6f26f",
+    "output_fingerprint": "b177daaf015080adf14879ff20b519dd8faa4e52fcc05c4592eb10940d4746a0",
+    "run_id": "548f6f7a-4794-49a5-a6f0-74d071e44d89",
+    "model_identity": {
+      "model_id": "gemini-3.8-flash-n",
+      "model_version": "gemini-3.8-flash-n"
+    },
+    "model_profile": {
+      "id": "9b6e30a2-0630-4038-9821-832671526b56",
+      "definition_hash": "9d1ba992a87534a3d14f81578b070a8b960a371346643ae0077f904c92c6dddc"
+    },
+    "model_identity_reason": null,
+    "model_api_calls": 1,
+    "failure_cause": null
+  },
+  "usage": {
+    "input_tokens": 6733,
+    "output_tokens": 1221,
+    "estimated_cost_usd": null,
+    "cost_status": "unknown"
+  },
+  "model_identity": {
+    "model_id": "gemini-3.8-flash-n",
+    "model_version": "gemini-3.8-flash-n"
+  },
+  "model_api_calls": 1,
+  "tool_absence": {
+    "toolset_count": 0,
+    "returned_tool_call_count": 0,
+    "no_tools_enforced_by_native_decision_adapter": true
+  },
+  "packet": {
+    "basis_fingerprint": "3f7c9adba367241c5f64d6e5eaba6ca64cb14b1204217ffeac0a1fb52b3f4805",
+    "scope_fingerprint": "3f7c9adba367241c5f64d6e5eaba6ca64cb14b1204217ffeac0a1fb52b3f4805",
+    "projection_fingerprint": "09309959ef54df5e8a1f110674518c9142a73a8daf4ebbfdaab8b0f4b3dad9bd",
+    "prompt_fingerprint": "eeeebce01cd1ec917bf1e80f3328b72a41148cb0a2b5afa0dfc72b1ceabc5d99",
+    "contract_fingerprint": "e41aa39545346f70880d612ab1c6cb9dabddf60af5c803835515fd0afdb12fbb",
+    "evidence_count": 5,
+    "canonical_reply_to_edges": 4,
+    "projected_reply_to_edges": 4,
+    "projected_reply_to_edges_omitted": 0
+  },
+  "side_effect_counts": {
+    "persons": 0,
+    "conversations": 0,
+    "messages": 0,
+    "contact_permissions": 0,
+    "drafts": 0,
+    "approvals": 0,
+    "delivery_attempts": 0,
+    "action_attempts": 0
+  },
+  "gold_read": false
+}

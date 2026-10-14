@@ -1,0 +1,128 @@
+{
+  "schema": "independent-semantic-review-v1",
+  "review_scope": "H001 and H002 only; exact holdouts.json and specified result.json outputs; no gold or raw worker files read",
+  "overall_verdict": "Both positive practical-task proposals are supported, with material wording/classification corrections required. Neither case supports an order, purchase commitment, launch commitment, or external action.",
+  "need2_positive_preserved": true,
+  "material_factuality_errors": true,
+  "authority_and_effects": {
+    "external_action_requested": false,
+    "observed_side_effect_counts_each_case": {
+      "persons": 0,
+      "conversations": 0,
+      "messages": 0,
+      "contact_permissions": 0,
+      "drafts": 0,
+      "approvals": 0,
+      "delivery_attempts": 0,
+      "action_attempts": 0
+    },
+    "toolset_count": 0,
+    "returned_tool_call_count": 0,
+    "model_calls_each_case": 1,
+    "estimated_cost_usd": null,
+    "cost_status": "unknown"
+  },
+  "cases": [
+    {
+      "case_id": "H001",
+      "verdict": "supported_unresolved_procurement_information_task_no_purchase_commitment",
+      "claims": [
+        {
+          "status": "supported",
+          "claim": "A buyer is collecting price, lead-time, and invoice-term quotations for 12 lockable weatherproof cabinets for their organization.",
+          "source_quotes": [
+            {"source_message_id": "h001-m01", "source_event_id": "4", "quote": "Our maintenance team needs 12 lockable weatherproof storage cabinets. I am collecting quotes for our organization. Please send the unit price, delivery lead time, and invoice terms so I can prepare a comparison for our budget discussion."}
+          ]
+        },
+        {
+          "status": "supported",
+          "claim": "This is explicitly an information request, not an order. Budget is unapproved, no purchase order exists, no stock should be reserved, and recommending a supplier is conditional on committee approval on 20 October.",
+          "source_quotes": [
+            {"source_message_id": "h001-m02", "source_event_id": "6", "quote": "Our budget committee meets on 20 October. Only if it approves the funds will I recommend a supplier afterward. This is a request for information, not an order: no funds are approved, no purchase order has been issued, and please do not reserve stock."}
+          ]
+        },
+        {
+          "status": "supported",
+          "claim": "The supplier only offers to send a written quote; its stock is not reserved without an order confirmation. The buyer asks for the quote but defers review until after the committee meeting and prohibits creating an order or reservation for now.",
+          "source_quotes": [
+            {"source_message_id": "h001-m03", "source_event_id": "8", "quote": "I can send a written quote with those details. Our stock is not reserved until we receive an order confirmation."},
+            {"source_message_id": "h001-m04", "source_event_id": "10", "quote": "Please send the quote. I will review it after the committee meeting. For now, do not create an order or reservation for us."}
+          ]
+        },
+        {
+          "status": "unknown",
+          "claim": "Whether an actual written quotation or any other supplier proposals have been received. The fixture shows only an offer to send a quote, not a received quote or price.",
+          "source_quotes": [
+            {"source_message_id": "h001-m03", "source_event_id": "8", "quote": "I can send a written quote with those details."}
+          ]
+        },
+        {
+          "status": "contradicted_classification",
+          "claim": "The need classifies the supplier response and buyer's request to receive/review a quote as counterevidence. They are counterevidence to an immediate order, but support the unresolved information-gathering task; the task-level counterevidence classification is inaccurate.",
+          "source_quotes": [
+            {"source_message_id": "h001-m03", "source_event_id": "8", "quote": "I can send a written quote with those details. Our stock is not reserved until we receive an order confirmation."},
+            {"source_message_id": "h001-m04", "source_event_id": "10", "quote": "Please send the quote. I will review it after the committee meeting. For now, do not create an order or reservation for us."}
+          ]
+        }
+      ],
+      "owner_facing_review": "The material correctly preserves RFI status, committee condition, no approved funds/PO/reservation, and the supplier's offer to send a quote. Avoid wording that implies a quotation has already been received; call the committee date a decision point, not a purchase deadline. The need proposal is valid as an unresolved procurement-information task.",
+      "commitment_and_economics": "No order, approved budget, purchase, reservation, price, delivery promise, or supplier recommendation is established. The supplier's statement is only willingness to send a quote.",
+      "authority_review": "No purchase, stock reservation, external message, or action authority is inferred."
+    },
+    {
+      "case_id": "H002",
+      "verdict": "supported_unresolved_owner_service_pricing_task_not_a_launch_commitment",
+      "claims": [
+        {
+          "status": "supported",
+          "claim": "The author runs an equipment-maintenance service and is considering a monthly stock-count/reconciliation service for clients; they seek help estimating hours and a fixed per-location fee, invoiced directly to the client.",
+          "source_quotes": [
+            {"source_message_id": "h002-m01", "source_event_id": "4", "quote": "I run a small equipment-maintenance service. I am considering adding a monthly stock-count and reconciliation service for my clients, and I want help deciding a flat fee per location that covers the work. How would you estimate the hours and set a fixed price? I would invoice the client directly for this service."}
+          ]
+        },
+        {
+          "status": "supported",
+          "claim": "The proposed fee is for work, not commission or a percentage of client sales; the service has not launched, no client is signed, and the author is deciding whether to offer it.",
+          "source_quotes": [
+            {"source_message_id": "h002-m02", "source_event_id": "6", "quote": "To clarify my own service idea: the price would be a fixed fee for the work, not a commission or percentage of a client’s sales. I have not launched it or signed a client for it. I am asking how to price and package the service before deciding whether to offer it."}
+          ]
+        },
+        {
+          "status": "supported",
+          "claim": "The affiliate-program question is attributed to the author's client and explicitly kept separate from the author's own pricing task; the author has not accepted the affiliate offer or referred anyone.",
+          "source_quotes": [
+            {"source_message_id": "h002-m03", "source_event_id": "8", "quote": "A client separately asked me, “I want to promote a skincare brand for commission. Does anyone know a company with an affiliate program?” That is the client’s question, not my task. I am quoting it only to keep it separate from my fixed-fee service question."},
+            {"source_message_id": "h002-m04", "source_event_id": "10", "quote": "My brand has an affiliate program that pays commission. I can send you the terms if you want to join."},
+            {"source_message_id": "h002-m05", "source_event_id": "12", "quote": "That affiliate offer may be relevant to my client’s separate question, but I have not accepted it or referred anyone. I am still asking for help pricing my own fixed-fee stock-count service."}
+          ]
+        },
+        {
+          "status": "contradicted_or_overstated",
+          "claim": "The summary says the author plans to introduce the service and the reason says the task is fully outlined. The author only says they are considering it and asks for pricing before deciding; scale, time, labor cost, and operating assumptions remain unresolved.",
+          "source_quotes": [
+            {"source_message_id": "h002-m01", "source_event_id": "4", "quote": "I am considering adding a monthly stock-count and reconciliation service for my clients"},
+            {"source_message_id": "h002-m02", "source_event_id": "6", "quote": "I have not launched it or signed a client for it. I am asking how to price and package the service before deciding whether to offer it."}
+          ]
+        },
+        {
+          "status": "unsupported",
+          "claim": "The material calls this B2B service pricing, but the fixture says only “my clients” and does not establish that the clients are businesses.",
+          "source_quotes": [
+            {"source_message_id": "h002-m01", "source_event_id": "4", "quote": "for my clients"}
+          ]
+        },
+        {
+          "status": "unknown",
+          "claim": "Client location/type, inventory scale/SKU count, labor rates, travel costs, actual hours, and whether the author will launch the service.",
+          "source_quotes": [
+            {"source_message_id": "h002-m01", "source_event_id": "4", "quote": "I want help deciding a flat fee per location that covers the work. How would you estimate the hours and set a fixed price?"},
+            {"source_message_id": "h002-m02", "source_event_id": "6", "quote": "before deciding whether to offer it."}
+          ]
+        }
+      ],
+      "owner_facing_review": "The core need is valid and the material's cost components are useful as a proposed checklist, not observed facts. Rephrase launch status as “considering whether to offer”; avoid saying fully outlined or B2B unless supported. Keep the client affiliate question separate.",
+      "commitment_and_economics": "A fixed-fee model and direct invoicing are stated; no rate, actual cost, signed client, launch, or accepted affiliate arrangement is established.",
+      "authority_review": "No service launch, affiliate acceptance/referral, external contact, or action authority is inferred."
+    }
+  ]
+}

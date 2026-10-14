@@ -1,0 +1,229 @@
+{
+  "case_id": "H001",
+  "goal_id": "c151274d-be7c-4838-b30a-08279374dad7",
+  "assessment_id": "16d7ec50-fec2-4815-9762-3d6ffee6987a",
+  "run_id": "c49b32fe-7421-4215-864d-399330599971",
+  "disposition": "proposal_created",
+  "assessment_status": "proposed",
+  "decision_review": {
+    "scope": "supplied_packet_only",
+    "epistemic_status": "unverified_model_interpretation",
+    "resolution": "unknown",
+    "state": "current",
+    "review": {
+      "version": 1,
+      "scope": "supplied_packet_only",
+      "disposition": "needs_proposed",
+      "summary": "В предоставленной ветке обнаружен прямой практический запрос сотрудника организации на сбор ценовых предложений для закупки 12 всепогодных шкафов. Запрос является предварительным сбором информации к заседанию бюджетного комитета 20 октября 2026 года; внешний контакт исключен условиями задачи.",
+      "unknowns": [
+        "Решение бюджетного комитета организации на заседании 20 октября 2026 года",
+        "Точные технические спецификации, материалы и габариты требуемых шкафов",
+        "Страна и локация доставки организации покупателя",
+        "Наличие других коммерческих предложений помимо полученного в ветке ответа"
+      ],
+      "exchange_reviews": [
+        {
+          "exchange_id": "2dbbb35f-1b00-4004-84a9-f56c4671137d",
+          "judgment": "relevant",
+          "reason": "Покупатель запрашивает ценовые предложения и условия поставки на 12 шкафов к 20 октября; один поставщик согласился направить расчет, однако окончательное решение зависит от выделения бюджета.",
+          "evidence_event_ids": [
+            "4",
+            "6",
+            "8",
+            "10"
+          ],
+          "support_quotes": [
+            {
+              "source_event_id": "4",
+              "quote": "Our maintenance team needs 12 lockable weatherproof storage cabinets. I am collecting quotes for our organization. Please send the unit price, delivery lead time, and invoice terms so I can prepare a comparison for our budget discussion."
+            },
+            {
+              "source_event_id": "6",
+              "quote": "Our budget committee meets on 20 October. Only if it approves the funds will I recommend a supplier afterward. This is a request for information, not an order: no funds are approved, no purchase order has been issued, and please do not reserve stock."
+            },
+            {
+              "source_event_id": "8",
+              "quote": "I can send a written quote with those details. Our stock is not reserved until we receive an order confirmation."
+            },
+            {
+              "source_event_id": "10",
+              "quote": "Please send the quote. I will review it after the committee meeting. For now, do not create an order or reservation for us."
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "output": {
+    "decision_review": {
+      "version": 1,
+      "scope": "supplied_packet_only",
+      "disposition": "needs_proposed",
+      "summary": "В предоставленной ветке обнаружен прямой практический запрос сотрудника организации на сбор ценовых предложений для закупки 12 всепогодных шкафов. Запрос является предварительным сбором информации к заседанию бюджетного комитета 20 октября 2026 года; внешний контакт исключен условиями задачи.",
+      "unknowns": [
+        "Решение бюджетного комитета организации на заседании 20 октября 2026 года",
+        "Точные технические спецификации, материалы и габариты требуемых шкафов",
+        "Страна и локация доставки организации покупателя",
+        "Наличие других коммерческих предложений помимо полученного в ветке ответа"
+      ],
+      "exchange_reviews": [
+        {
+          "exchange_id": "2dbbb35f-1b00-4004-84a9-f56c4671137d",
+          "judgment": "relevant",
+          "reason": "Покупатель запрашивает ценовые предложения и условия поставки на 12 шкафов к 20 октября; один поставщик согласился направить расчет, однако окончательное решение зависит от выделения бюджета.",
+          "evidence_event_ids": [
+            "4",
+            "6",
+            "8",
+            "10"
+          ],
+          "support_quotes": [
+            {
+              "source_event_id": "4",
+              "quote": "Our maintenance team needs 12 lockable weatherproof storage cabinets. I am collecting quotes for our organization. Please send the unit price, delivery lead time, and invoice terms so I can prepare a comparison for our budget discussion."
+            },
+            {
+              "source_event_id": "6",
+              "quote": "Our budget committee meets on 20 October. Only if it approves the funds will I recommend a supplier afterward. This is a request for information, not an order: no funds are approved, no purchase order has been issued, and please do not reserve stock."
+            },
+            {
+              "source_event_id": "8",
+              "quote": "I can send a written quote with those details. Our stock is not reserved until we receive an order confirmation."
+            },
+            {
+              "source_event_id": "10",
+              "quote": "Please send the quote. I will review it after the committee meeting. For now, do not create an order or reservation for us."
+            }
+          ]
+        }
+      ]
+    },
+    "needs": [
+      {
+        "need_id": null,
+        "proposal_version": 2,
+        "title": "Сбор ценовых предложений на 12 запираемых всепогодных шкафов",
+        "hypothesis": "Покупатель собирает коммерческие предложения (цена за единицу, сроки поставки, условия оплаты) для формирования сравнительного анализа к заседанию бюджетного комитета 20 октября 2026 года.",
+        "why_now": "Запрос опубликован 14 октября 2026 года и привязан к конкретной дате заседания бюджетного комитета (20 октября 2026 года), до которой участник формирует сводную таблицу.",
+        "exchange_ids": [
+          "2dbbb35f-1b00-4004-84a9-f56c4671137d"
+        ],
+        "evidence_event_ids": [
+          "4",
+          "6"
+        ],
+        "counterevidence_event_ids": [
+          "8"
+        ],
+        "context_event_ids": [
+          "10"
+        ],
+        "support_quotes": [
+          {
+            "source_event_id": "4",
+            "quote": "Our maintenance team needs 12 lockable weatherproof storage cabinets. I am collecting quotes for our organization. Please send the unit price, delivery lead time, and invoice terms so I can prepare a comparison for our budget discussion."
+          },
+          {
+            "source_event_id": "6",
+            "quote": "Our budget committee meets on 20 October. Only if it approves the funds will I recommend a supplier afterward. This is a request for information, not an order: no funds are approved, no purchase order has been issued, and please do not reserve stock."
+          },
+          {
+            "source_event_id": "8",
+            "quote": "I can send a written quote with those details. Our stock is not reserved until we receive an order confirmation."
+          },
+          {
+            "source_event_id": "10",
+            "quote": "Please send the quote. I will review it after the committee meeting. For now, do not create an order or reservation for us."
+          }
+        ],
+        "next_step": "prepare_material",
+        "reason": "Подготовка внутренней аналитической справки для владельца с фиксацией параметров запроса и ограничений, исключая внешние коммуникации согласно заданию.",
+        "unknowns": [
+          "Одобрит ли комитет бюджет 20 октября 2026 года",
+          "Точные габариты и технические требования к шкафам",
+          "Условия доставки и географическое расположение объекта"
+        ],
+        "context_review": [
+          {
+            "exchange_id": "2dbbb35f-1b00-4004-84a9-f56c4671137d",
+            "classification": "counterevidence",
+            "evidence_event_ids": [
+              "4",
+              "6",
+              "8",
+              "10"
+            ],
+            "reason": "Ветка содержит как исходный запрос и условия покупателя (события 4 и 6), так и встречный ответ поставщика с готовностью выслать расчет (событие 8), а также указание покупателя отложить принятие решений до заседания комитета (событие 10)."
+          }
+        ],
+        "material_preview": {
+          "title": "Внутренняя справка: мониторинг запроса на 12 всепогодных шкафов",
+          "content": "### Обзор запроса\n- **Предмет:** 12 запираемых всепогодных шкафов для хранения (lockable weatherproof storage cabinets).\n- **Запрашиваемая информация:** цена за единицу, сроки поставки, условия оплаты по счету.\n- **Статус процесса:** запрос информации (RFI), сбор предложений для бюджетного сравнения.\n\n### Ограничения и сроки\n- Заседание бюджетного комитета: **20 октября 2026 года**.\n- Средства не выделены, официальный заказ (PO) не оформлен, бронирование товара не требуется.\n- Рекомендация поставщика будет производиться покупателем только в случае одобрения бюджета комитетом.\n\n### Текущий статус диалога\n- Один из участников треда выразил готовность предоставить расчет.\n- Покупатель подтвердил готовность принять расчет для ознакомления, подтвердив запрет на создание заказа/бронирования до решения комитета.",
+          "evidence_event_ids": [
+            "4",
+            "6"
+          ]
+        }
+      }
+    ]
+  },
+  "receipt": {
+    "disposition": "proposal_created",
+    "goal_id": "c151274d-be7c-4838-b30a-08279374dad7",
+    "assessment_id": "16d7ec50-fec2-4815-9762-3d6ffee6987a",
+    "decision_contract_version": 1,
+    "model_projection_version": 1,
+    "model_input_fingerprint": "424d41eeeb99d927ce4e047965eaab159c78513995f895716f893e1729536528",
+    "output_fingerprint": "d47b1cc9c2be7516be4eb87f232e777ecb51faa12e3ca590fe15c27349631b21",
+    "run_id": "c49b32fe-7421-4215-864d-399330599971",
+    "model_identity": {
+      "model_id": "gemini-3.8-flash-n",
+      "model_version": "gemini-3.8-flash-n"
+    },
+    "model_profile": {
+      "id": "fdd801d0-759b-4d25-a375-ca8f9b18c317",
+      "definition_hash": "cb5de10089d7129d4cb62c57366a1cdb587b21f2c72f144eb3de4e84507a3b55"
+    },
+    "model_identity_reason": null,
+    "model_api_calls": 1,
+    "failure_cause": null
+  },
+  "usage": {
+    "input_tokens": 6530,
+    "output_tokens": 6332,
+    "estimated_cost_usd": null,
+    "cost_status": "unknown"
+  },
+  "model_identity": {
+    "model_id": "gemini-3.8-flash-n",
+    "model_version": "gemini-3.8-flash-n"
+  },
+  "model_api_calls": 1,
+  "tool_absence": {
+    "toolset_count": 0,
+    "returned_tool_call_count": 0,
+    "no_tools_enforced_by_native_decision_adapter": true
+  },
+  "packet": {
+    "basis_fingerprint": "5da4dd343e0f9aaf0b09a565b2efd6206790fd1a094dc6f865ac2d255c90f925",
+    "scope_fingerprint": "5da4dd343e0f9aaf0b09a565b2efd6206790fd1a094dc6f865ac2d255c90f925",
+    "projection_fingerprint": "80ec92dbd47beb2b8f277a3c7c17d87abfe310b182fb5b0c74f484ca1aeeeecb",
+    "prompt_fingerprint": "0abc3cd81d93fc7c763e3a282945785240ffaca297b108cecf431bd20ad7c869",
+    "contract_fingerprint": "e41aa39545346f70880d612ab1c6cb9dabddf60af5c803835515fd0afdb12fbb",
+    "evidence_count": 4,
+    "canonical_reply_to_edges": 3,
+    "projected_reply_to_edges": 3,
+    "projected_reply_to_edges_omitted": 0
+  },
+  "side_effect_counts": {
+    "persons": 0,
+    "conversations": 0,
+    "messages": 0,
+    "contact_permissions": 0,
+    "drafts": 0,
+    "approvals": 0,
+    "delivery_attempts": 0,
+    "action_attempts": 0
+  },
+  "gold_read": false
+}
