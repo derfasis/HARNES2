@@ -8,6 +8,7 @@ import { spawnSync } from 'node:child_process';
 import { exportPartner } from '../business/export.mjs';
 import { ROOT } from '../business/config.mjs';
 import { Store, hash, id } from '../business/store.mjs';
+import { REFERENCE_TABLES } from '../business/reference-tables.mjs';
 import { processAudienceAssessment } from '../business/audience-reasoning.mjs';
 import { digest } from '../business/source-ingestion.mjs';
 import { audienceHarness, SOURCE, SOURCE_B, modelOutputFrom } from './audience-test-helpers.mjs';
@@ -532,6 +533,7 @@ test('transfer retires grants and pending retry requests without losing historic
   // the current database also has later attention and follow-up tables.
   const legacy = structuredClone(bundle);
   legacy.migrations = legacy.migrations.slice(0, 12);
+  for (const table of REFERENCE_TABLES) delete legacy.tables[table];
   delete legacy.tables.scout_model_requests;
   delete legacy.tables.source_observation_epochs;
   delete legacy.tables.audience_first_contact_heads;
@@ -554,7 +556,7 @@ test('transfer retires grants and pending retry requests without losing historic
   try {
     assert.equal(restoredLegacy.get('SELECT COUNT(*) n FROM audience_attention_grants').n, 0);
     assert.equal(restoredLegacy.get('SELECT COUNT(*) n FROM audience_attention_attempts').n, 0);
-    assert.equal(restoredLegacy.get('SELECT COUNT(*) n FROM schema_migrations').n, 19,
+    assert.equal(restoredLegacy.get('SELECT COUNT(*) n FROM schema_migrations').n, 20,
       'a pre-013 bundle is restored into the current schema without inventing authority');
   } finally { restoredLegacy.close(); }
 });

@@ -14,9 +14,11 @@ import { SCOUT_TABLES } from '../business/scout-tables.mjs';
 import { AUDIENCE_TABLES, AUDIENCE_ATTENTION_TABLES, AUDIENCE_SOURCE_EPOCH_TABLES, AUDIENCE_FIRST_CONTACT_TABLES } from '../business/audience-tables.mjs';
 import { MODEL_PROFILE_TABLES } from '../business/model-profile-tables.mjs';
 import { AUDIENCE_FOLLOWUP_TABLES } from '../business/audience-followup-tables.mjs';
+import { REFERENCE_TABLES } from '../business/reference-tables.mjs';
 import { validateWatchEpochs } from '../business/audience-source-renewal.mjs';
 import { finishTelegramRebaseline, validateSourceObservationEpochs } from '../business/source-observation-epochs.mjs';
 import { BusinessService } from '../business/service.mjs';
+import { digest } from '../business/source-ingestion.mjs';
 
 const [source,destinationArg] = process.argv.slice(2);
 if (!source || !destinationArg) throw new Error('Usage: npm run import -- export.json exports/restore-new');
@@ -27,7 +29,10 @@ if (fs.existsSync(destination)) throw new Error('Destination already exists. Cho
 if (bundle.format !== 'digital-ai-partner' || bundle.schema_version !== 1 || !bundle.tables) throw new Error('Unsupported bundle');
 const migrationCount = Array.isArray(bundle.migrations) ? bundle.migrations.length : -1;
 const TELEGRAM_SOURCE_EPOCH_TABLES = ['source_observation_epochs'];
-const preScopedScoutTables = TABLES.filter(table => table !== 'scout_model_requests');
+// Migration 020 adds references at the end of TABLES. Keep the schema-19
+// catalogue frozen so older bundles cannot gain a table by importing today.
+const preReferenceTables = TABLES.filter(table => !REFERENCE_TABLES.includes(table));
+const preScopedScoutTables = preReferenceTables.filter(table => table !== 'scout_model_requests');
 const priorTables = preScopedScoutTables.filter(table => !AUDIENCE_FIRST_CONTACT_TABLES.includes(table));
 const without = (...groups) => {
   const excluded = new Set([...groups.flat(),...SCOUT_TABLES,...AUDIENCE_TABLES,...MODEL_PROFILE_TABLES,...AUDIENCE_FOLLOWUP_TABLES,...TELEGRAM_SOURCE_EPOCH_TABLES]);
@@ -55,7 +60,8 @@ const inputCatalogues = new Map([
   [16, priorTables.filter(table => !TELEGRAM_SOURCE_EPOCH_TABLES.includes(table))],
   [17, priorTables],
   [18, preScopedScoutTables],
-  [19, TABLES],
+  [19, preReferenceTables],
+  [20, TABLES],
 ]);
 const inputTables = inputCatalogues.get(migrationCount);
 if (!inputTables) throw new Error('Migration version differs');
@@ -79,6 +85,85 @@ for (const asset of bundle.assets) {
 }
 if (!assetPaths.has('partner/profile.json')) throw new Error('Missing partner profile');
 for (const table of inputTables) if (!Array.isArray(bundle.tables[table])) throw new Error(`Invalid rows for ${table}`);
+
+function validateTransferredReferences(tables) {
+  const rows = tables.engagement_references ?? [];
+  const columns = ['created_at','engagement_id','expires_at','excerpt','id','market','material_id','material_sha256','note',
+    'offer_id','packet_json','packet_sha256','partner_id','question_message_id','reason','retired_at','status'];
+  const packetColumns = ['engagement_id','excerpt','expires_at','market','material','observations','observed_at','offer_id','question_message_id','schema'];
+  const materialColumns = ['basis_fingerprint','case_id','evidence_event_ids','format','id','sha256','thread_id','title','turn_id','version'];
+  const observationColumns = ['author_id','message_id','message_version','source_event_id','source_ref','text','truncated'];
+  const observedAtColumns = ['observed_at','published_at','source_event_id'];
+  const exact = (value, keys) => value && typeof value === 'object' && !Array.isArray(value)
+    && Object.keys(value).sort().join('|') === [...keys].sort().join('|');
+  const engagements = new Map((tables.engagements ?? []).map(row => [row.id,row]));
+  const partners = new Set((tables.partners ?? []).map(row => row.id));
+  const messages = new Map((tables.messages ?? []).map(row => [row.id,row]));
+  const materials = new Map((tables.work_materials ?? []).map(row => [row.id,row]));
+  const cases = new Map((tables.work_cases ?? []).map(row => [row.id,row]));
+  const events = new Map((tables.events ?? []).filter(row => row.kind === 'source.message' && row.actor === 'system').map(row => [String(row.id),row]));
+  const fail = () => { throw new Error('Invalid transferred engagement reference'); };
+  for (const row of rows) {
+    if (!exact(row, columns) || !['active','stale','revoked','quarantined'].includes(row.status)
+      || typeof row.id !== 'string' || typeof row.partner_id !== 'string' || typeof row.material_sha256 !== 'string'
+      || !/^[a-f0-9]{64}$/.test(row.material_sha256) || typeof row.packet_sha256 !== 'string'
+      || !/^[a-f0-9]{64}$/.test(row.packet_sha256) || typeof row.market !== 'string' || !/^[A-Z]{2}$/.test(row.market)
+      || typeof row.excerpt !== 'string' || row.excerpt.length < 1 || row.excerpt.length > 8000
+      || typeof row.offer_id !== 'string' || typeof row.note !== 'string'
+      || typeof row.created_at !== 'string' || typeof row.expires_at !== 'string'
+      || row.reason !== null && typeof row.reason !== 'string' || row.retired_at !== null && typeof row.retired_at !== 'string') fail();
+    let packet;
+    try { packet = JSON.parse(row.packet_json); } catch { fail(); }
+    if (Buffer.byteLength(row.packet_json) > 600000) fail();
+    if (!exact(packet, packetColumns) || digest(packet) !== row.packet_sha256
+      || packet.schema !== 'reviewed-reference-v1' || packet.engagement_id !== row.engagement_id
+      || packet.question_message_id !== row.question_message_id || packet.offer_id !== row.offer_id
+      || packet.market !== row.market || packet.excerpt !== row.excerpt || packet.expires_at !== row.expires_at
+      || !exact(packet.material, materialColumns) || !Array.isArray(packet.observations) || !packet.observations.length
+      || packet.observations.length > 32 || !Array.isArray(packet.observed_at) || packet.observed_at.length !== packet.observations.length) fail();
+    const engagement = engagements.get(row.engagement_id), material = materials.get(row.material_id);
+    const workCase = material && cases.get(material.case_id), question = messages.get(row.question_message_id);
+    if (!partners.has(row.partner_id) || !engagement || engagement.partner_id !== row.partner_id || !material || !workCase
+      || workCase.partner_id !== row.partner_id || material.sha256 !== row.material_sha256
+      || !question || question.conversation_id !== engagement.conversation_id || question.direction !== 'in') fail();
+    let evidenceIds;
+    try { evidenceIds = JSON.parse(material.evidence_json); } catch { fail(); }
+    const pinnedMaterial = { id: material.id, case_id: material.case_id, version: material.version, title: material.title,
+      format: material.format, sha256: material.sha256, evidence_event_ids: evidenceIds,
+      thread_id: workCase.thread_id, basis_fingerprint: material.basis_fingerprint, turn_id: material.turn_id };
+    if (digest(packet.material) !== digest(pinnedMaterial)
+      || typeof material.content !== 'string' || !material.content.includes(row.excerpt)
+      || !Array.isArray(evidenceIds) || !evidenceIds.length || evidenceIds.length > 32
+      || new Set(evidenceIds).size !== evidenceIds.length || evidenceIds.some(value => typeof value !== 'string')) fail();
+    const workPacket = (() => { try { return JSON.parse(workCase.packet_json); } catch { fail(); } })();
+    const workEvidence = new Set((workPacket?.evidence ?? []).map(e => String(e.source_event_id)));
+    const seen = new Set();
+    for (let i=0; i<packet.observations.length; i++) {
+      const observation = packet.observations[i], captured = packet.observed_at[i];
+      if (!exact(observation, observationColumns) || !exact(captured, observedAtColumns)
+        || typeof observation.source_event_id !== 'string' || !/^[1-9][0-9]*$/.test(observation.source_event_id)
+        || seen.has(observation.source_event_id) || !workEvidence.has(observation.source_event_id)
+        || captured.source_event_id !== observation.source_event_id || typeof captured.observed_at !== 'string'
+        || captured.published_at !== null && typeof captured.published_at !== 'string'
+        || typeof observation.source_ref !== 'string' || typeof observation.message_id !== 'string'
+        || typeof observation.message_version !== 'number' || !Number.isInteger(observation.message_version)
+        || observation.author_id !== null && typeof observation.author_id !== 'string'
+        || typeof observation.text !== 'string' || typeof observation.truncated !== 'boolean') fail();
+      const source = events.get(observation.source_event_id);
+      let payload;
+      try { payload = source && JSON.parse(source.payload_json); } catch { fail(); }
+      if (!source || source.partner_id !== row.partner_id || !payload || typeof payload !== 'object' || Array.isArray(payload)
+        || payload.source_id !== observation.source_ref
+        || payload.message_id !== observation.message_id || payload.version !== observation.message_version
+        || payload.author_id !== observation.author_id || typeof payload.text !== 'string'
+        || payload.text.slice(0, 2000) !== observation.text
+        || observation.truncated !== (payload.text.length > 2000)
+        || source.created_at !== captured.observed_at) fail();
+      seen.add(observation.source_event_id);
+    }
+  }
+}
+if (migrationCount >= 20) validateTransferredReferences(bundle.tables);
 
 const migration008 = bundle.migrations.find(m => m.version === '008-outcome-candidates.sql');
 const legacyCandidateColumns = ['basis','conversation_id','created_at','decision_id','detector','detector_version','draft_id',
@@ -318,6 +403,12 @@ try {
       const partnerId = JSON.parse(profile.content).id;
       if (!partnerId || store.get('SELECT id FROM partners WHERE id=?', partnerId) == null) throw new Error('Imported profile does not match partner data');
       sanitizeTransferredWorkspace(store, partnerId);
+    }
+    if (migrationCount >= 20) {
+      // The reviewed excerpt and its provenance are history. The read grant is
+      // local authority and always requires fresh admission after transfer.
+      store.run("UPDATE engagement_references SET status='revoked',reason='TRANSFER_REQUIRES_REFERENCE_ADMISSION',retired_at=COALESCE(retired_at,?)",
+        new Date().toISOString());
     }
     if (migrationCount >= 11) {
       store.run("UPDATE scout_model_requests SET status='revoked',revoked_at=?,revocation_reason='TRANSFER_AUTHORITY_REQUIRES_REVIEW' WHERE status='active'", new Date().toISOString());

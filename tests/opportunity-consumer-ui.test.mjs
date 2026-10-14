@@ -176,7 +176,10 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // Observation recovery adds its immutable epoch table to transfer exports;
     // native, freshness, crash rollback and exact-prefix transfer kill tests
     // are in telegram-rebaseline-*.test.mjs. Old SQL and send paths stay pinned.
-    "business/store.mjs": "5f79de34cfdeca821668a164848f474e65e137bc",
+    // Reviewed reference v1 appends its durable read-admission table only. Old
+    // migrations, checksum guards, recovery and source/transport pins stay fixed.
+    // Reference admission/freshness/corruption/transfer kills prove the extension.
+    "business/store.mjs": "9ecb35924beaffbe7ed87ef74a8c257abfe17331",
     "adapters/hermes/credentials.py": "2797bd89081eaf4a950178cec3d637015ee8f45f",
     "adapters/hermes/runner.py": "e631237829d9b7a4521799b4a19c4c500b33f5aa",
     // Deliberate v0 extension: existing worker, no-tool envelope tested in opportunity-runtime.test.mjs.

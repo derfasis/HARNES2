@@ -8,6 +8,7 @@ import { ROOT } from '../business/config.mjs';
 import { Store, hash, id } from '../business/store.mjs';
 import { BusinessService } from '../business/service.mjs';
 import { exportPartner } from '../business/export.mjs';
+import { REFERENCE_TABLES } from '../business/reference-tables.mjs';
 import { RuntimeActivation } from '../business/deployment.mjs';
 import { processScoutAssessment } from '../business/scout-reasoning.mjs';
 import { ACCOUNT, channel, message, noHistory, scoutHarness } from './scout-test-helpers.mjs';
@@ -65,7 +66,7 @@ function importBundle(t, h, bundle, name) {
   return { destination, child };
 }
 
-test('schema-18 catalogue imports without Scout scoped requests; schema-19 transfer revokes authority and retains spent receipt', async t => {
+test('schema-18 catalogue imports without Scout scoped requests; schema-20 transfer revokes authority and retains spent receipt', async t => {
   const x = await prepared(t);
   let runtimeCalls = 0;
   const outcome = await processScoutAssessment(x.h.service, { decide: async () => {
@@ -92,19 +93,20 @@ test('schema-18 catalogue imports without Scout scoped requests; schema-19 trans
 
   const old18 = exportPartner(x.h.store);
   old18.migrations = old18.migrations.slice(0, 18);
+  for (const table of REFERENCE_TABLES) delete old18.tables[table];
   delete old18.tables.scout_model_requests;
   old18.tables_sha256 = hash(JSON.stringify(old18.tables));
   const imported18 = importBundle(t, x.h, old18, 'scout-transfer-schema18');
   const oldStore = new Store(path.join(imported18.destination, 'data'));
   try {
-    assert.equal(oldStore.all('SELECT * FROM schema_migrations').length, 19);
+    assert.equal(oldStore.all('SELECT * FROM schema_migrations').length, 20);
     assert.equal(oldStore.get('SELECT COUNT(*) n FROM scout_model_requests').n, 0);
     assert.deepEqual(oldStore.all('PRAGMA foreign_key_check'), []);
   } finally { oldStore.close(); }
 
-  const current19 = exportPartner(x.h.store);
-  assert.equal(current19.migrations.length, 19);
-  const imported19 = importBundle(t, x.h, current19, 'scout-transfer-schema19');
+  const current20 = exportPartner(x.h.store);
+  assert.equal(current20.migrations.length, 20);
+  const imported19 = importBundle(t, x.h, current20, 'scout-transfer-schema20');
   const store = new Store(path.join(imported19.destination, 'data'));
   try {
     const transferredRequest = store.get('SELECT * FROM scout_model_requests WHERE id=?', requestBefore.id);

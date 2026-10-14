@@ -251,7 +251,8 @@
                 "enum": [
                   "message",
                   "fact",
-                  "outcome"
+                  "outcome",
+                  "reference"
                 ]
               },
               "id": {
@@ -278,7 +279,8 @@
                 "enum": [
                   "message",
                   "fact",
-                  "outcome"
+                  "outcome",
+                  "reference"
                 ]
               },
               "id": {
@@ -362,7 +364,8 @@
                 "enum": [
                   "message",
                   "fact",
-                  "outcome"
+                  "outcome",
+                  "reference"
                 ]
               },
               "id": {
