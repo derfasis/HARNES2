@@ -10,7 +10,7 @@ import { ACTION_TABLES } from '../business/action-tables.mjs';
 import { EXECUTIVE_TABLES } from '../business/executive-tables.mjs';
 import { OUTCOME_TABLES } from '../business/outcome-tables.mjs';
 import { WORK_TABLES, CONTROL_TABLES } from '../business/work-tables.mjs';
-import { SCOUT_TABLES } from '../business/scout-tables.mjs';
+import { SCOUT_TABLES, SCOUT_QUERY_TABLES } from '../business/scout-tables.mjs';
 import { AUDIENCE_TABLES, AUDIENCE_ATTENTION_TABLES, AUDIENCE_SOURCE_EPOCH_TABLES, AUDIENCE_FIRST_CONTACT_TABLES } from '../business/audience-tables.mjs';
 import { MODEL_PROFILE_TABLES } from '../business/model-profile-tables.mjs';
 import { AUDIENCE_FOLLOWUP_TABLES } from '../business/audience-followup-tables.mjs';
@@ -29,9 +29,10 @@ if (fs.existsSync(destination)) throw new Error('Destination already exists. Cho
 if (bundle.format !== 'digital-ai-partner' || bundle.schema_version !== 1 || !bundle.tables) throw new Error('Unsupported bundle');
 const migrationCount = Array.isArray(bundle.migrations) ? bundle.migrations.length : -1;
 const TELEGRAM_SOURCE_EPOCH_TABLES = ['source_observation_epochs'];
-// Migration 020 adds references at the end of TABLES. Keep the schema-19
-// catalogue frozen so older bundles cannot gain a table by importing today.
-const preReferenceTables = TABLES.filter(table => !REFERENCE_TABLES.includes(table));
+// Migration 021 adds query evidence at the end of TABLES. Keep every older
+// catalogue frozen so a historical bundle cannot gain tables from today's Store.
+const preQueryTables = TABLES.filter(table => !SCOUT_QUERY_TABLES.includes(table));
+const preReferenceTables = preQueryTables.filter(table => !REFERENCE_TABLES.includes(table));
 const preScopedScoutTables = preReferenceTables.filter(table => table !== 'scout_model_requests');
 const priorTables = preScopedScoutTables.filter(table => !AUDIENCE_FIRST_CONTACT_TABLES.includes(table));
 const without = (...groups) => {
@@ -61,7 +62,8 @@ const inputCatalogues = new Map([
   [17, priorTables],
   [18, preScopedScoutTables],
   [19, preReferenceTables],
-  [20, TABLES],
+  [20, preQueryTables],
+  [21, TABLES],
 ]);
 const inputTables = inputCatalogues.get(migrationCount);
 if (!inputTables) throw new Error('Migration version differs');
@@ -409,6 +411,11 @@ try {
       // local authority and always requires fresh admission after transfer.
       store.run("UPDATE engagement_references SET status='revoked',reason='TRANSFER_REQUIRES_REFERENCE_ADMISSION',retired_at=COALESCE(retired_at,?)",
         new Date().toISOString());
+    }
+    if (migrationCount >= 21) {
+      // Query interpretation is review material tied to a local receipt and
+      // authority. Preserve it for audit, but never transfer an approval.
+      store.run("UPDATE scout_query_proposals SET status='stale' WHERE status IN ('proposed','approved')");
     }
     if (migrationCount >= 11) {
       store.run("UPDATE scout_model_requests SET status='revoked',revoked_at=?,revocation_reason='TRANSFER_AUTHORITY_REQUIRES_REVIEW' WHERE status='active'", new Date().toISOString());

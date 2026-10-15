@@ -7,6 +7,7 @@ import { ROOT } from '../business/config.mjs';
 import { exportPartner } from '../business/export.mjs';
 import { hash, id, Store, TABLES } from '../business/store.mjs';
 import { REFERENCE_TABLES } from '../business/reference-tables.mjs';
+import { SCOUT_QUERY_TABLES } from '../business/scout-tables.mjs';
 import { digest } from '../business/source-ingestion.mjs';
 import { workspaceHarness, SOURCE } from './helpers/workspace-harness.mjs';
 
@@ -51,7 +52,13 @@ function stageImport(t, h, bundle, label) {
     { cwd: ROOT, encoding: 'utf8', windowsHide: true });
   return { source, destination, child };
 }
+function historicalV20(bundle) {
+  for (const table of SCOUT_QUERY_TABLES) delete bundle.tables[table];
+  bundle.migrations = bundle.migrations.slice(0, 20);
+  return freezeBundle(bundle);
+}
 function historicalV19(bundle) {
+  historicalV20(bundle);
   for (const table of REFERENCE_TABLES) delete bundle.tables[table];
   bundle.migrations = bundle.migrations.slice(0, 19);
   return freezeBundle(bundle);
@@ -61,23 +68,23 @@ test('schema-19 catalogue stays exact and imports without the appended reference
   const h = workspaceHarness(t);
   const bundle = historicalV19(exportPartner(h.store));
   assert.equal(bundle.migrations.length, 19);
-  assert.deepEqual(Object.keys(bundle.tables).sort(), TABLES.filter(table => !REFERENCE_TABLES.includes(table)).sort());
+  assert.deepEqual(Object.keys(bundle.tables).sort(), TABLES.filter(table => !REFERENCE_TABLES.includes(table)&&!SCOUT_QUERY_TABLES.includes(table)).sort());
   const { destination, child } = stageImport(t, h, bundle, 'reviewed-reference-v19-transfer');
   assert.equal(child.status, 0, child.stderr);
   const restored = new Store(path.join(destination, 'data'));
   try {
     assert.equal(restored.get('SELECT COUNT(*) n FROM engagement_references').n, 0);
-    assert.equal(restored.all('SELECT * FROM schema_migrations').length, 20,
-      'staging still upgrades its local database through migration 020');
+    assert.equal(restored.all('SELECT * FROM schema_migrations').length, 21,
+      'staging upgrades the schema-19 bundle through the current schema');
     assert.deepEqual(restored.all('PRAGMA foreign_key_check'), []);
   } finally { restored.close(); }
 });
 
 test('schema-20 transfer keeps reference history and provenance but revokes every reading grant', async t => {
   const h = workspaceHarness(t), fixture = await preparedReference(h);
-  const bundle = exportPartner(h.store);
+  const bundle = historicalV20(exportPartner(h.store));
   assert.equal(bundle.migrations.length, 20);
-  assert.deepEqual(Object.keys(bundle.tables).sort(), [...TABLES].sort());
+  assert.deepEqual(Object.keys(bundle.tables).sort(), TABLES.filter(table=>!SCOUT_QUERY_TABLES.includes(table)).sort());
   const original = bundle.tables.engagement_references.find(row => row.id === fixture.referenceId);
   assert.equal(original.status, 'active');
   const { destination, child } = stageImport(t, h, bundle, 'reviewed-reference-v20-transfer');
@@ -102,7 +109,7 @@ test('schema-20 transfer keeps reference history and provenance but revokes ever
 
 test('schema-20 transfer accepts canonical truncation of long source observations', async t => {
   const h = workspaceHarness(t), sourceText = `Germany fixture observation: ${'long-source-'.repeat(220)}`;
-  const fixture = await preparedReference(h, sourceText), bundle = exportPartner(h.store);
+  const fixture = await preparedReference(h, sourceText), bundle = historicalV20(exportPartner(h.store));
   const row = bundle.tables.engagement_references.find(value => value.id === fixture.referenceId);
   const packet = JSON.parse(row.packet_json);
   assert.equal(packet.observations[0].text, sourceText.slice(0, 2000));
@@ -119,7 +126,7 @@ test('schema-20 transfer accepts canonical truncation of long source observation
 
 test('schema-20 transfer rejects a false truncation flag', async t => {
   const h = workspaceHarness(t), sourceText = `Germany fixture observation: ${'long-source-'.repeat(220)}`;
-  const fixture = await preparedReference(h, sourceText), bundle = exportPartner(h.store);
+  const fixture = await preparedReference(h, sourceText), bundle = historicalV20(exportPartner(h.store));
   const row = bundle.tables.engagement_references.find(value => value.id === fixture.referenceId);
   const packet = JSON.parse(row.packet_json); packet.observations[0].truncated = false;
   row.packet_json = JSON.stringify(packet); row.packet_sha256 = digest(packet);
@@ -131,7 +138,7 @@ test('schema-20 transfer rejects a false truncation flag', async t => {
 
 test('schema-20 transfer rejects source observation text that differs from canonical truncation', async t => {
   const h = workspaceHarness(t), sourceText = `Germany fixture observation: ${'long-source-'.repeat(220)}`;
-  const fixture = await preparedReference(h, sourceText), bundle = exportPartner(h.store);
+  const fixture = await preparedReference(h, sourceText), bundle = historicalV20(exportPartner(h.store));
   const row = bundle.tables.engagement_references.find(value => value.id === fixture.referenceId);
   const packet = JSON.parse(row.packet_json); packet.observations[0].text = `${packet.observations[0].text.slice(0, -1)}X`;
   row.packet_json = JSON.stringify(packet); row.packet_sha256 = digest(packet);

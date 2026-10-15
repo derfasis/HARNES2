@@ -23,15 +23,16 @@ export class HermesAdapter {
     return run.runtime === 'hermes-scout-v1' && (frozen.scout_assessment_request !== undefined
       || !!this.service.store.get('SELECT id FROM scout_model_requests WHERE run_id=? AND partner_id=?', run.id, this.service.config.partnerId));
   }
-  assertDecision(run) {
+  assertDecision(run, context) {
     const frozen = run.runtime === 'hermes-scout-v1' ? JSON.parse(run.context_json) : {};
     if (this.scopedScoutRun(run, frozen)) {
       // This exact sample request is model authority; the public pipeline switch is not.
-      this.service.scout.modelRequests.assertForRun(run);
+      const authority=this.service.scout.modelRequests.assertForRun(run);
+      if(authority.definition.version===2)this.service.scout.queries.assertContext(run,context,authority);
       this.service.control.require(run.id, { plane: 'public' });
     } else automaticBoundary(this.service);
   }
-  decide(run, context) { this.assertDecision(run); return this.run(run, context, true); }
+  decide(run, context) { this.assertDecision(run,context); return this.run(run, context, true); }
   async run(run, context, decision = false) {
     const globalConfig = this.service.config;
     const frozen = ['hermes-scout-v1','hermes-audience-v1'].includes(run.runtime) ? JSON.parse(run.context_json) : {};
@@ -43,7 +44,7 @@ export class HermesAdapter {
     const controlEnabled = config.controlPlane?.enabled === true || !!this.service.control?.ticket(run.id);
     let ticket = null;
     if (decision) {
-      this.assertDecision(run);
+      this.assertDecision(run,context);
       if (controlEnabled) ticket = this.service.control.require(run.id, { plane: ['public', 'work'] });
     } else if (controlEnabled) {
       if (config.runtime.enabled !== true) throw new Error('Ordinary agent runtime is disabled');

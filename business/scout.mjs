@@ -6,6 +6,7 @@ import { scoutSignals } from './scout-signals.mjs';
 import { telegramReadState } from './telegram-read-gate.mjs';
 import { scoutAssessmentDiagnostic } from './scout-assessment-output.mjs';
 import { ScoutModelRequests } from './scout-model-requests.mjs';
+import { ScoutQueries, SCOUT_QUERY_EVALUATOR } from './scout-queries.mjs';
 export { SCOUT_TABLES, SCOUT_COMMANDS } from './scout-tables.mjs';
 const check=(ok,code)=>ensure(ok,code,409,code);
 export const SCOUT_EVALUATOR_VERSION='scout-assessment-v3';
@@ -24,7 +25,7 @@ function reference(raw) {
  check(match,'SCOUT_PUBLIC_REFERENCE_REQUIRED');return {username:match[1]};
 }
 export class SourceScout {
- constructor(service){this.service=service;this.db=service.store;this.modelRequests=new ScoutModelRequests(service);}
+ constructor(service){this.service=service;this.db=service.store;this.modelRequests=new ScoutModelRequests(service);this.queries=new ScoutQueries(service);}
  get cfg(){return this.service.config.scout;}
  get partnerId(){return this.service.config.partnerId;}
  get evaluatorVersion(){return SCOUT_EVALUATOR_VERSION;}
@@ -50,6 +51,7 @@ export class SourceScout {
    this.db.run("UPDATE scout_grants SET status='stale',reason=? WHERE campaign_id=? AND status='active'",reason,c.id);
    this.db.run("UPDATE scout_jobs SET status='stale',reason=?,updated_at=? WHERE campaign_id=? AND status IN ('queued','running','interrupted')",reason,now(),c.id);
    this.db.run("UPDATE scout_assessments SET status='stale' WHERE campaign_id=? AND status IN ('proposed','approved')",c.id);
+   this.db.run("UPDATE scout_query_proposals SET status='stale' WHERE campaign_id=? AND status IN ('proposed','approved')",c.id);
    for(const {source_ref} of sources)this.syncMonitorCheckpoint(source_ref);
  }
  enqueue(c,g,kind,cursor,candidateId=null,sampleId=null){
@@ -62,6 +64,7 @@ export class SourceScout {
  command(action,p,actor){
    check(actor?.kind==='operator','SCOUT_OPERATOR_REQUIRED');this.ready();
    if(action==='scout.revoke_assessment')return this.modelRequests.revoke(p);
+   if(['scout.query_messages','scout.request_query_assessment','scout.review_query'].includes(action))return this.queries.command(action,p);
    if(action==='scout.create'){
      fields(p,['title','topic','audience','language','geography','queries']);
      check(this.db.get('SELECT COUNT(*) n FROM scout_campaigns WHERE partner_id=?',this.partnerId).n<50,'SCOUT_CAMPAIGN_CAPACITY');
@@ -119,6 +122,7 @@ export class SourceScout {
      this.event('monitor.admitted',{campaign_id:c.id,candidate_id:candidate.id,grant_id:grantId,source_ref:sample.source_ref,sample_id:sample.id,contact_permission:false});return {grant_id:grantId,source_ref:sample.source_ref,contact_permission:false};
    }
    const grant=this.auditGrant(c);
+   if(action==='scout.register'){fields(p,['campaign_id','revision','reference']);const ref=reference(p.reference);check(ref.username,'SCOUT_PUBLIC_REFERENCE_REQUIRED');return this.enqueue(c,grant,'resolve',{reference:ref,register_only:true});}
    if(action==='scout.seed'){fields(p,['campaign_id','revision','reference']);return this.enqueue(c,grant,'resolve',{reference:reference(p.reference)});}
    if(action==='scout.search'){
      fields(p,['campaign_id','revision']);return {jobs:JSON.parse(c.config_json).queries.map(query=>this.enqueue(c,grant,'search',{query}))};
@@ -255,7 +259,12 @@ export class SourceScout {
        const {grant}=this.jobAuthority(job,{runtime:false});
        if(this.db.get('SELECT id FROM scout_model_requests WHERE job_id=? AND partner_id=?',job.id,this.partnerId))
          this.modelRequests.forJob(job,{runtime:false,allowSpent:job.attempts>0||!!job.run_id});
-       if(job.kind==='assessment')check(JSON.parse(job.cursor_json)?.evaluator_version===SCOUT_EVALUATOR_VERSION,'SCOUT_ASSESSMENT_STALE');
+       const cursor=JSON.parse(job.cursor_json);
+       if(this.queries.isQueryJob(job)){
+         this.queries.assertRead(job,{runtime:false});
+         check(job.attempts<3,'SCOUT_QUERY_ATTEMPTS_EXHAUSTED');
+       }
+       if(job.kind==='assessment')check(cursor?.evaluator_version===(cursor.mode==='query_intent_v1'?SCOUT_QUERY_EVALUATOR:SCOUT_EVALUATOR_VERSION),'SCOUT_ASSESSMENT_STALE');
        // Startup runs before getMe. Waiting for the right account must not retire
        // valid work or resurrect an interrupted billable assessment.
        if(grant.account_id!==this.service.telegramAccountId)continue;
@@ -275,7 +284,7 @@ export class SourceScout {
      return {...candidate,joined:candidate.joined===1,source_ref:`telegram:channel:${candidate.channel_id}`,origin:JSON.parse(candidate.origin_json),sample,assessment,reason,checkpoint,checkpoint_fingerprint:checkpoint?digest(checkpoint):null,observation_recovery:observationRecoveryPresentation(this.service,`telegram:channel:${candidate.channel_id}`),monitor_grant:monitor?{...monitor,current:this.grantCurrent(monitor,c,'monitor')&&this.monitorAuthorityPolicies().some(p=>digest(p)===digest(this.monitorPolicy({...monitor,channel_id:candidate.channel_id}))),checkpoint}:null};
    });
    const grant=this.db.get("SELECT * FROM scout_grants WHERE campaign_id=? AND kind='audit' ORDER BY created_at DESC,rowid DESC LIMIT 1",c.id);
-   return {...c,config:JSON.parse(c.config_json),authority:{scout:grant?{...grant,current:this.grantCurrent(grant,c,'audit')}:null},candidates,
+   return {...c,config:JSON.parse(c.config_json),authority:{scout:grant?{...grant,current:this.grantCurrent(grant,c,'audit')}:null},candidates,message_queries:this.queries.presentation(c),
      jobs:this.db.all('SELECT j.id,j.kind,j.status,j.reason,j.next_at,j.attempts,r.result_json FROM scout_jobs j LEFT JOIN runs r ON r.id=j.run_id AND r.partner_id=? AND r.runtime=\'hermes-scout-v1\' WHERE j.campaign_id=? ORDER BY j.updated_at DESC,j.rowid DESC LIMIT 30',this.partnerId,c.id).map(({result_json,...job})=>{
        let diagnostic=null;try{diagnostic=scoutAssessmentDiagnostic(JSON.parse(result_json)?.diagnostic);}catch{/* Corrupt receipts are not diagnostics. */}
        return {...job,diagnostic,model_request:this.modelRequests.presentation(job.id)};

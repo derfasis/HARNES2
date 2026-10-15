@@ -36,25 +36,45 @@ export class ScoutRuntime {
        this.scout.reconcile();
        for(const job of this.db.all("SELECT j.* FROM scout_jobs j JOIN scout_campaigns c ON c.id=j.campaign_id JOIN scout_grants g ON g.id=j.grant_id WHERE c.partner_id=? AND g.account_id=? AND j.status='queued' AND j.kind!='assessment' AND j.next_at<=? ORDER BY j.updated_at,j.id LIMIT 30",this.scout.partnerId,this.service.telegramAccountId,now())){
          try{
+           const cursor=JSON.parse(job.cursor_json),queryJob=this.scout.queries.isQueryJob(job);
+           if(queryJob){
+             if(job.attempts>=3){this.db.run("UPDATE scout_jobs SET status='failed',reason='SCOUT_QUERY_ATTEMPTS_EXHAUSTED',updated_at=? WHERE id=?",now(),job.id);continue;}
+             this.scout.queries.assertRead(job,{runtime:true});
+           }
            const {grant}=this.scout.jobAuthority(job,{runtime:false});
            if(grant.account_id!==this.service.telegramAccountId)continue;
-           this.scout.jobAuthority(job);JSON.parse(job.cursor_json);
-           const reservation=this.reserve(job,job.kind,job.kind==='history'?2:job.kind==='resolve'?3:1);
+           this.scout.jobAuthority(job);
+           const reservation=this.reserve(job,queryJob?'message_query_v1':job.kind,queryJob?2:job.kind==='history'?2:job.kind==='resolve'?cursor.register_only===true?1:3:1);
            if(reservation.wait){this.db.run('UPDATE scout_jobs SET next_at=?,reason=?,updated_at=? WHERE id=?',reservation.wait,reservation.reason,now(),job.id);continue;}
            this.db.run("UPDATE scout_jobs SET status='running',owner_id=?,attempts=attempts+1,updated_at=? WHERE id=? AND status='queued'",this.service.control.ownerId,now(),job.id);
-           return {job,reservation,cursor:JSON.parse(job.cursor_json)};
+           return {job,reservation,cursor,queryJob};
          }catch(e){if(!(e instanceof AppError)&&!(e instanceof SyntaxError))throw e;this.db.run("UPDATE scout_jobs SET status='stale',reason=?,updated_at=? WHERE id=?",e.code??'SCOUT_RECORD_INVALID',now(),job.id);}
        }return null;
      }));
      if(!prepared)return this.state={disposition:'idle_or_budget_wait'};
-     const {job,cursor,reservation}=prepared,rpc=this.rpcFactory(this.telegram,{beforeRead:()=>{check(!this.stopped,'SCOUT_STOPPED');this.scout.jobAuthority(job);const active=this.db.get('SELECT * FROM scout_jobs WHERE id=?',job.id);check(active?.status==='running'&&active.owner_id===this.service.control.ownerId,'SCOUT_JOB_RETIRED');},sourceId:job.candidate_id?`telegram:channel:${this.scout.candidate(job.candidate_id,job.campaign_id).channel_id}`:null,priority:job.kind==='search'?'search':'audit'});check(rpc.accountId===reservation.account,'SCOUT_ACCOUNT_MISMATCH');
+     const {job,cursor,reservation,queryJob}=prepared,rpc=this.rpcFactory(this.telegram,{beforeRead:()=>{
+       check(!this.stopped,'SCOUT_STOPPED');const active=this.db.get('SELECT * FROM scout_jobs WHERE id=?',job.id);
+       check(active?.status==='running'&&active.owner_id===this.service.control.ownerId,'SCOUT_JOB_RETIRED');
+       if(queryJob)this.scout.queries.assertRead(active,{runtime:true});else this.scout.jobAuthority(active);
+     },sourceId:job.candidate_id?`telegram:channel:${this.scout.candidate(job.candidate_id,job.campaign_id).channel_id}`:null,priority:job.kind==='search'?'search':'audit'});check(rpc.accountId===reservation.account,'SCOUT_ACCOUNT_MISMATCH');
      let output;
+     let querySourceCursor=null;
      try{
-       if(job.kind==='search')output=await rpc.search({query:cursor.query,limit:Math.min(30,this.scout.cfg.maxCandidates)});
+       if(queryJob){
+         const active=this.db.get('SELECT * FROM scout_jobs WHERE id=?',job.id),scope=this.scout.queries.assertRead(active,{runtime:true});
+         const {definition,candidate}=scope;querySourceCursor=this.scout.queries.sourceCursor();
+         const native=await rpc.resolve({username:definition.public_username});
+         this.scout.queries.assertRead(this.db.get('SELECT * FROM scout_jobs WHERE id=?',job.id),{runtime:true});
+         check(native.channel_id===definition.channel_id&&native.channel_id===candidate.channel_id,'SCOUT_QUERY_PEER_CHANGED');
+         check(typeof native.username==='string'&&native.username.toLowerCase()===definition.public_username.toLowerCase(),'SCOUT_QUERY_USERNAME_CHANGED');
+         output=await rpc.messageSearch({channel_id:definition.channel_id,access_hash:native.access_hash,
+           username:definition.public_username,query:definition.query,from_date:definition.from,until_date:definition.until,limit:definition.limit});
+         this.scout.queries.assertRead(this.db.get('SELECT * FROM scout_jobs WHERE id=?',job.id),{runtime:true});
+       }else if(job.kind==='search')output=await rpc.search({query:cursor.query,limit:Math.min(30,this.scout.cfg.maxCandidates)});
        else if(job.kind==='resolve'){
          const native=await rpc.resolve(cursor.reference);this.peers.set(`${reservation.account}:${native.channel_id}`,native);
          // A linked discussion is a candidate, never automatically a monitor permission.
-         this.scout.jobAuthority(job);output={native,linked:native.kind==='channel'?await rpc.discussions(native):null};
+         this.scout.jobAuthority(job);output={native,linked:cursor.register_only===true?null:native.kind==='channel'?await rpc.discussions(native):null};
        }else{
          const candidate=this.scout.candidate(job.candidate_id,job.campaign_id),sample=this.scout.sample(job.sample_id);
          let native=this.peers.get(this.peerKey(candidate));
@@ -70,21 +90,31 @@ export class ScoutRuntime {
          const retrySeconds=['SCOUT_FLOOD_WAIT','SCOUT_FLOOD_WAIT_MANUAL'].includes(e.code)?e.retrySeconds:null;
          const retryAt=retrySeconds?new Date(Date.now()+retrySeconds*1000).toISOString():null;
          this.settle(reservation.calls,e.code==='SCOUT_RPC_TIMEOUT'?'unknown':'failed',e.code??'SCOUT_READ_FAILED',retryAt);
-         const current=this.db.get('SELECT * FROM scout_jobs WHERE id=?',job.id);
+         const current=this.db.get('SELECT * FROM scout_jobs WHERE id=?',job.id),queryJob=prepared.queryJob;
          if(current?.status==='running'&&current.owner_id===this.service.control.ownerId){
            const gate=telegramReadState(this.service,reservation.account),held=['SCOUT_READ_BUDGET','SCOUT_ACCOUNT_BACKOFF','SCOUT_READ_QUEUE_FULL'].includes(e.code);
-           const retry=retryAt??(held?gate.retry_at??new Date(Date.now()+60000).toISOString():null);
-           this.db.run('UPDATE scout_jobs SET status=?,reason=?,next_at=?,updated_at=? WHERE id=?',retry&&e.code!=='SCOUT_FLOOD_WAIT_MANUAL'?'queued':'failed',e.code??'SCOUT_READ_FAILED',retry??now(),now(),job.id);
+           const retry=retryAt??(held?gate.retry_at??new Date(Date.now()+60000).toISOString():null),withinQueryLimit=!queryJob||current.attempts<3;
+           const requeue=retry&&e.code!=='SCOUT_FLOOD_WAIT_MANUAL'&&withinQueryLimit;
+           this.db.run('UPDATE scout_jobs SET status=?,reason=?,next_at=?,updated_at=? WHERE id=?',requeue?'queued':'failed',e.code??'SCOUT_READ_FAILED',requeue?retry:now(),now(),job.id);
          }return {disposition:retryAt?'backoff':'read_failed',job_id:job.id,reason:e.code??'SCOUT_READ_FAILED'};
        }));
      }
      return this.state=await this.service.exclusive(()=>this.db.transaction(()=>{
        if(!this.service.control.processCurrent())return {disposition:'ownership_lost'};
        const current=this.db.get('SELECT * FROM scout_jobs WHERE id=?',job.id);
-       this.settle(reservation.calls,'completed');
-       try{check(!this.stopped&&current?.status==='running'&&current.owner_id===this.service.control.ownerId,'SCOUT_JOB_RETIRED');this.scout.jobAuthority(current);check(rpc.connected()&&rpc.accountId===reservation.account,'SCOUT_CONNECTION_CHANGED');}
-       catch(e){if(!(e instanceof AppError))throw e;this.db.run("UPDATE scout_jobs SET status='stale',reason=?,updated_at=? WHERE id=? AND status='running'",e.code,now(),job.id);return {disposition:'withheld',reason:e.code};}
+       try{check(!this.stopped&&current?.status==='running'&&current.owner_id===this.service.control.ownerId,'SCOUT_JOB_RETIRED');
+         if(queryJob)this.scout.queries.assertRead(current,{runtime:true});else this.scout.jobAuthority(current);
+         check(rpc.connected()&&rpc.accountId===reservation.account,'SCOUT_CONNECTION_CHANGED');}
+       catch(e){if(!(e instanceof AppError))throw e;this.settle(reservation.calls,'completed',e.code);this.db.run("UPDATE scout_jobs SET status='stale',reason=?,updated_at=? WHERE id=? AND status='running'",e.code,now(),job.id);return {disposition:'withheld',reason:e.code};}
        const {campaign,grant}=this.scout.jobAuthority(current);
+       if(queryJob){
+         const callId=reservation.calls[1];
+         this.settle(reservation.calls,'completed');
+         const receipt=this.scout.queries.applyReceipt(current,output,callId,querySourceCursor);
+         this.db.run("UPDATE scout_jobs SET status='completed',reason='MESSAGE_QUERY_RECEIPT',updated_at=? WHERE id=?",now(),job.id);
+         return {disposition:'query_receipt_created',job_id:job.id,receipt_id:receipt.receipt_id};
+       }
+       this.settle(reservation.calls,'completed');
        if(job.kind==='search'){
          check(output&&Array.isArray(output.candidates)&&output.candidates.length<=30,'SCOUT_SEARCH_INVALID');
          for(const native of output.candidates){
@@ -95,7 +125,9 @@ export class ScoutRuntime {
            if(native.kind==='channel'&&native.username)this.scout.enqueue(campaign,grant,'resolve',{reference:{channel_id:native.channel_id,username:native.username}},candidate.id);
          }
        }else if(job.kind==='resolve'){
-         const candidate=this.scout.upsertCandidate(campaign,grant,output.native,{kind:'owner_seed_or_resolved_candidate',reference:cursor.reference,observed_at:now()});this.queueAudit(campaign,grant,candidate);
+         const registered=cursor.register_only===true;
+         const candidate=this.scout.upsertCandidate(campaign,grant,output.native,{kind:registered?'owner_registered_source':'owner_seed_or_resolved_candidate',reference:cursor.reference,observed_at:now()});
+         if(!registered)this.queueAudit(campaign,grant,candidate);
          if(output.linked){const linked=this.scout.upsertCandidate(campaign,grant,output.linked,{kind:'linked_discussion',channel_id:output.native.channel_id,observed_at:now()});this.peers.set(this.peerKey(linked),output.linked);this.queueAudit(campaign,grant,linked);}
        }else{return this.applyHistory(current,cursor,output);}
        this.db.run("UPDATE scout_jobs SET status='completed',reason='BOUNDED_SEARCH_NOT_EXHAUSTIVE',updated_at=? WHERE id=?",now(),job.id);return {disposition:'candidates_added',job_id:job.id};

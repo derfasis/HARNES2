@@ -195,7 +195,10 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // The real adapter and scheduler seam is exercised in need-followthrough-runtime.
     // Exact Scout authority is selected from the durable run binding, never a mutable marker.
     // Scoped assessment kills include missing-marker legacy fallback and completed-run replay.
-    "business/runtime.mjs": "af58871230a47a8813a782df36a3c6c41b6ceae4",
+    // Query-receipt authority additionally binds the actual worker packet, prompt,
+    // contract and input before child dispatch. Query model tamper kills exercise
+    // this no-tool extension; the worker, credentials and send paths stay pinned.
+    "business/runtime.mjs": "765a4d72cd3f8205dd6672463a5d545a492378d5",
     // Outcome completion projects provider time and versions message-record
     // identities by partner. Delivery gates remain unchanged; real stub adapter
     // races and crash/receipt replay are in outcome-timing/redteam-kill tests.

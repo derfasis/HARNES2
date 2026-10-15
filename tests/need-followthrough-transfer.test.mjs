@@ -8,6 +8,7 @@ import { spawnSync } from 'node:child_process';
 import { ROOT } from '../business/config.mjs';
 import { Store, hash, id } from '../business/store.mjs';
 import { REFERENCE_TABLES } from '../business/reference-tables.mjs';
+import { SCOUT_QUERY_TABLES } from '../business/scout-tables.mjs';
 import { exportPartner } from '../business/export.mjs';
 import { BusinessService } from '../business/service.mjs';
 import { processAudienceAssessment } from '../business/audience-reasoning.mjs';
@@ -91,7 +92,7 @@ function importBundle(t,h,bundle,label) {
     {cwd:ROOT,encoding:'utf8',windowsHide:true})};
 }
 
-test('schema-20 transfer preserves request, attempt and receipt history while revoking pending authority',async t=>{
+test('schema-21 transfer preserves request, attempt and receipt history while revoking pending authority',async t=>{
   const h=setup(t),selected=await profile(h);
   const completed=await seedNeed(h,'completed');
   await addFreshEvent(h,'completed');
@@ -103,7 +104,7 @@ test('schema-20 transfer preserves request, attempt and receipt history while re
   const pendingRequest=await request(h,pending.need,selected);
 
   const bundle=exportPartner(h.store);
-  assert.equal(bundle.migrations.length,20);
+  assert.equal(bundle.migrations.length,21);
   assert.equal(bundle.tables.audience_followup_requests.length,2);
   assert.equal(bundle.tables.audience_followup_attempts.length,1);
   const consumedSource=bundle.tables.audience_followup_attempts.find(row=>row.request_id===completedRequest.request_id);
@@ -138,9 +139,10 @@ test('schema-20 transfer preserves request, attempt and receipt history while re
   } finally { restored.close(); }
 });
 
-test('actual schema-14 catalogue imports without follow-up or epoch tables and upgrades to 20',async t=>{
+test('actual schema-14 catalogue imports without follow-up or epoch tables and upgrades to 21',async t=>{
   const h=setup(t),bundle=exportPartner(h.store);
   bundle.migrations=bundle.migrations.slice(0,14);
+  for(const table of SCOUT_QUERY_TABLES)delete bundle.tables[table];
   for(const table of REFERENCE_TABLES)delete bundle.tables[table];
   delete bundle.tables.scout_model_requests;
   delete bundle.tables.source_observation_epochs;
@@ -155,14 +157,14 @@ test('actual schema-14 catalogue imports without follow-up or epoch tables and u
   assert.equal(result.status,0,result.stderr);
   const restored=new Store(path.join(destination,'data'));
   try {
-    assert.equal(restored.get('SELECT COUNT(*) n FROM schema_migrations').n,20);
+    assert.equal(restored.get('SELECT COUNT(*) n FROM schema_migrations').n,21);
     assert.equal(restored.get('SELECT COUNT(*) n FROM audience_followup_requests').n,0);
     assert.equal(restored.get('SELECT COUNT(*) n FROM audience_followup_attempts').n,0);
     assert.deepEqual(restored.all('PRAGMA foreign_key_check'),[]);
   } finally { restored.close(); }
 });
 
-test('schema-20 catalogue and follow-up row shape are exact on import',async t=>{
+test('schema-21 catalogue and follow-up row shape are exact on import',async t=>{
   const h=setup(t),base=exportPartner(h.store);
   const malformedBundles=[];
   const missingTable=structuredClone(base);
@@ -172,6 +174,7 @@ test('schema-20 catalogue and follow-up row shape are exact on import',async t=>
 
   const misplacedTables=structuredClone(base);
   misplacedTables.migrations=misplacedTables.migrations.slice(0,14);
+  for(const table of SCOUT_QUERY_TABLES)delete misplacedTables.tables[table];
   delete misplacedTables.tables.scout_model_requests;
   delete misplacedTables.tables.source_observation_epochs;
   delete misplacedTables.tables.audience_first_contact_heads;

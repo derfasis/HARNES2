@@ -19,7 +19,7 @@ export const message=(message_id='1',extra={})=>{
 };
 export const noHistory=async(input={})=>({empty:true,requested_count:input.limit??100,received_count:0,oldest_id:null,messages:[]});
 
-export function scoutHarness(t,{history=noHistory,search=async()=>({candidates:[]}),resolve=async()=>channel(),discussions=async()=>null,modelEnabled=false}={}){
+export function scoutHarness(t,{history=noHistory,search=async()=>({candidates:[]}),messageSearch=async()=>({messages:[],requested_count:0,received_count:0,omitted_count:0,truncated:false,selection_kind:'message_query_v1',exhaustive:false}),resolve=async()=>channel(),discussions=async()=>null,modelEnabled=false}={}){
   const directory=fs.mkdtempSync(path.join(os.tmpdir(),'harnes2-scout-'));
   let store=new Store(directory),config=readJson(path.join(ROOT,'config/default.json'));
   config=structuredClone(config);
@@ -29,7 +29,7 @@ export function scoutHarness(t,{history=noHistory,search=async()=>({candidates:[
   let service=new BusinessService(store,config);service.control.acquireProcess();service.setTelegramAccount(ACCOUNT);
   const owner={connected:true,stopped:false};
   const rpcFactory=()=>({accountId:ACCOUNT,connected:()=>owner.connected,
-    search,resolve,discussions,history});
+    search,messageSearch,resolve,discussions,history});
   let runtime=new ScoutRuntime(service,owner,{rpcFactory});
   t.after(()=>{try{service.control.close();service.control.releaseProcess();}catch{}try{store.close();}catch{}fs.rmSync(directory,{recursive:true,force:true});});
   const h={
