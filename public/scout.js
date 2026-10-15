@@ -1,3 +1,5 @@
+import { handleScoutQueryAction, renderScoutQueries } from './scout-queries.js';
+
 export function createScoutView({ api, command, esc, modal, refresh, openAudienceGoal = null }) {
   let data = null;
   let selectedId = null;
@@ -100,7 +102,7 @@ export function createScoutView({ api, command, esc, modal, refresh, openAudienc
     const jobsMarkup=jobs.length?jobs.map(j=>`<div class="feature"><div>${esc(j.kind)}<small>${esc(j.reason||'')} · Следующий запуск: ${esc(date(j.next_at))}</small>${j.model_request?`<small>Одна попытка · профиль ${esc(j.model_request.profile?.id??'—')} · до ${esc(date(j.model_request.expires_at))} · ${esc(j.model_request.purpose)} · ${j.model_request.spent?'попытка использована':'не использована'}. Текущий интерес и соответствие предложению неизвестны.</small>${j.model_request.status==='active'?button('Отозвать оценку','scout-assessment-revoke',j.id):''}`:''}${assessmentFailure(j.diagnostic)?`<small>${esc(assessmentFailure(j.diagnostic))}</small>`:''}</div>${badge(j.status)}</div>`).join(''):empty('Очередь пуста','Новые задания появятся после явного запуска поиска или проверки.');
     const unknown=(c.unknown??[]).length?`<ul>${c.unknown.map(v=>`<li>${esc(v)}</li>`).join('')}</ul>`:empty('Неизвестных состояний нет','');
     const queries=(cfg.queries??[]).join('\n');
-    return `${panel(`Тема: ${c.title||c.topic||'Кампания'}`,`<div class="feature"><div>Состояние<small>Ревизия ${esc(c.revision)}</small></div>${badge(c.status)}</div><p>Тема: ${esc(cfg.topic??c.topic??'')}<br>Аудитория: ${esc(cfg.audience??'')}<br>Язык: ${esc(cfg.language??'')}<br>География: ${esc(cfg.geography??'')}</p><details><summary>Поисковые запросы и основание</summary><pre class="workspace-pre">${esc(queries||'Запросов нет')}</pre></details><div class="scout-audit"><strong>Разрешение на ограниченный поиск и чтение истории</strong>${safeGrant(scoutGrant)}</div><div class="actions">${!disabled&&!auditCurrent?button('Выдать разрешение поиска','scout-authorize',c.id,'primary'):''}${!disabled&&auditCurrent?button('Запустить поиск','scout-search',c.id,'primary'):''}${button('Изменить тему','scout-revise',c.id)}${c.status==='active'?button('Приостановить кампанию','scout-pause',c.id,'danger'):''}</div>`,button('Открыть Partner Workspace','scout-workspace'))}${panel('Кандидаты и доказательства',candidateMarkup,button('Добавить источник вручную','scout-seed',c.id))}${panel('Задания и повторы',jobsMarkup)}${panel('Неизвестное / требует проверки',unknown)}`;
+    return `${panel(`Тема: ${c.title||c.topic||'Кампания'}`,`<div class="feature"><div>Состояние<small>Ревизия ${esc(c.revision)}</small></div>${badge(c.status)}</div><p>Тема: ${esc(cfg.topic??c.topic??'')}<br>Аудитория: ${esc(cfg.audience??'')}<br>Язык: ${esc(cfg.language??'')}<br>География: ${esc(cfg.geography??'')}</p><details><summary>Поисковые запросы и основание</summary><pre class="workspace-pre">${esc(queries||'Запросов нет')}</pre></details><div class="scout-audit"><strong>Разрешение на ограниченный поиск и чтение истории</strong>${safeGrant(scoutGrant)}</div><div class="actions">${!disabled&&!auditCurrent?button('Выдать разрешение поиска','scout-authorize',c.id,'primary'):''}${!disabled&&auditCurrent?button('Запустить поиск','scout-search',c.id,'primary'):''}${button('Изменить тему','scout-revise',c.id)}${c.status==='active'?button('Приостановить кампанию','scout-pause',c.id,'danger'):''}</div>`,button('Открыть Partner Workspace','scout-workspace'))}${panel('Кандидаты и доказательства',candidateMarkup,button('Добавить без чтения истории','scout-register',c.id))}${renderScoutQueries({detail:c,disabled,esc,button,area,input})}${panel('Задания и повторы',jobsMarkup)}${panel('Неизвестное / требует проверки',unknown)}`;
   }
   function createCampaign() {
     modal('Новая кампания источников',input('title','Название кампании')+input('topic','Тема')+area('audience','Целевая аудитория')+input('language','Язык','ru')+input('geography','География')+area('queries','Поисковые запросы, по одному в строке'),p=>{
@@ -112,6 +114,11 @@ export function createScoutView({ api, command, esc, modal, refresh, openAudienc
     const c=campaign();
     if(action==='scout-select') return select(id);
     if(action==='scout-create') return createCampaign();
+    if(action==='scout-register'||action==='scout-query-start'||action==='scout-query-assess'||action==='scout-query-review-approve'||action==='scout-query-review-reject') {
+      if(!c) throw new Error('Сначала выберите кампанию.');
+      await handleScoutQueryAction({action,id,campaign:c,detail:c,api,command,modal,esc,input,area});
+      return;
+    }
     if(action==='scout-workspace') { document.querySelector('[data-tab="workspace"]')?.click(); return; }
     if(!c) throw new Error('Сначала выберите кампанию.');
     const base={campaign_id:c.id,revision:c.revision};

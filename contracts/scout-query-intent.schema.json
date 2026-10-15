@@ -1,0 +1,20 @@
+{
+ "$schema":"http://json-schema.org/draft-07/schema#",
+ "title":"Inert hypotheses over one query-selected page",
+ "type":"object","additionalProperties":false,"required":["summary","items","unknowns"],
+ "properties":{
+  "summary":{"type":"string","minLength":1,"maxLength":2000},
+  "unknowns":{"type":"array","minItems":1,"maxItems":10,"items":{"type":"string","minLength":1,"maxLength":500}},
+  "items":{"type":"array","maxItems":12,"items":{"type":"object","additionalProperties":false,
+   "required":["message_id","interpretation","classification","missing_context","suggested_public_reply","current_intent","offer_fit","contact_permission"],
+   "properties":{
+    "message_id":{"type":"string","pattern":"^[1-9][0-9]*$"},
+    "interpretation":{"type":"string","minLength":1,"maxLength":1500},
+    "classification":{"enum":["own_business_request","provider_offer","third_party_context","unclear","other"]},
+    "missing_context":{"type":"array","maxItems":8,"items":{"type":"string","minLength":1,"maxLength":500}},
+    "suggested_public_reply":{"type":["string","null"],"minLength":1,"maxLength":2000},
+    "current_intent":{"const":"unknown"},"offer_fit":{"const":"unknown"},"contact_permission":{"const":false}
+   }
+  }}
+ }
+}

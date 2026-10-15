@@ -51,6 +51,7 @@ export class ScoutModelRequests {
     check(row&&row.partner_id===this.partnerId&&isUuid(row.id)&&isUuid(row.job_id)
       && isUuid(row.model_profile_id)&&HASH.test(row.request_fingerprint??''), 'SCOUT_MODEL_REQUEST_INVALID');
     const d=parse(row.definition_json);
+    if(d?.version===2)return this.service.scout.queries.validateModelDefinition(row,d);
     check(exact(d,DEF_KEYS)&&d.version===1&&d.id===row.id&&d.partner_id===row.partner_id&&d.job_id===row.job_id
       &&d.model_profile_id===row.model_profile_id&&d.expires_at===row.expires_at
       &&Number.isInteger(d.campaign_revision)&&d.campaign_revision>0&&HASH.test(d.topic_hash??'')
@@ -144,19 +145,24 @@ export class ScoutModelRequests {
     const {campaign,grant}=scout.jobAuthority(job,{runtime:false});
     check(job.id===d.job_id&&job.kind==='assessment'&&job.campaign_id===d.campaign_id
       &&job.campaign_revision===d.campaign_revision&&job.grant_id===d.audit_grant_id
-      &&job.candidate_id===d.candidate_id&&job.sample_id===d.sample_id
+      &&job.candidate_id===d.candidate_id&&(d.version===2?job.sample_id===null:job.sample_id===d.sample_id)
       &&campaign.revision===d.campaign_revision&&campaign.topic_hash===d.topic_hash
       &&grant.id===d.audit_grant_id&&grant.account_id===d.account_id
       &&scout.grantCurrent(grant,campaign,'audit'),'SCOUT_MODEL_REQUEST_STALE');
     if(runtime) check(grant.account_id===this.service.telegramAccountId,'SCOUT_MODEL_REQUEST_STALE');
     const candidate=scout.candidate(d.candidate_id,campaign.id);
     check(candidate.account_id===d.account_id&&candidate.channel_id===d.channel_id,'SCOUT_MODEL_REQUEST_STALE');
-    const sample=scout.sample(d.sample_id,candidate);scout.sampleFresh(sample);
-    check(sample.digest===d.sample_digest&&sample.source_ref===d.sample_source_ref&&sample.source_cursor===d.sample_cursor
-      &&sample.finished_at===d.sample_finished_at,'SCOUT_MODEL_REQUEST_STALE');
-    const cursor=parse(job.cursor_json);
-    check(cursor.sample_digest===d.sample_digest&&cursor.topic_hash===d.topic_hash
-      &&cursor.evaluator_version===d.evaluator_version,'SCOUT_MODEL_REQUEST_STALE');
+    let basis;
+    if(d.version===2)basis=scout.queries.modelBasis(d,job,{runtime});
+    else{
+      const sample=scout.sample(d.sample_id,candidate);scout.sampleFresh(sample);
+      check(sample.digest===d.sample_digest&&sample.source_ref===d.sample_source_ref&&sample.source_cursor===d.sample_cursor
+        &&sample.finished_at===d.sample_finished_at,'SCOUT_MODEL_REQUEST_STALE');
+      const cursor=parse(job.cursor_json);
+      check(cursor.sample_digest===d.sample_digest&&cursor.topic_hash===d.topic_hash
+        &&cursor.evaluator_version===d.evaluator_version,'SCOUT_MODEL_REQUEST_STALE');
+      basis={sample};
+    }
     check(row.run_id===null&&job.attempts===0&&job.run_id===null
       ? !allowSpent&&job.status==='queued'
       : allowSpent&&isUuid(row.run_id)&&row.run_id===job.run_id&&job.attempts===1&&['running','completed','failed','interrupted'].includes(job.status),
@@ -167,7 +173,7 @@ export class ScoutModelRequests {
     Object.assign(resolved,{timeoutSeconds:d.execution_bounds.timeout_seconds,maxApiCalls:d.execution_bounds.max_api_calls,
       maxIterations:d.execution_bounds.max_iterations});
     check(digest(resolved)===digest(d.model_config),'SCOUT_MODEL_PROFILE_STALE');
-    return {request:row,definition:d,model_config:resolved,model_profile:{id:d.model_profile_id,definition_hash:d.profile_hash},fingerprint:row.request_fingerprint,job,campaign,grant,sample};
+    return {request:row,definition:d,model_config:resolved,model_profile:{id:d.model_profile_id,definition_hash:d.profile_hash},fingerprint:row.request_fingerprint,job,campaign,grant,...basis};
   }
 
   forJob(job,{allowSpent=false,runtime=true}={}) {
@@ -214,11 +220,12 @@ export class ScoutModelRequests {
       'SCOUT_MODEL_REQUEST_RUN_OWNER');
     const live=this.liveBindings(row,d,job,{runtime:true,allowSpent:true});
     check(binding.fingerprint===row.request_fingerprint&&frozen.job_id===job.id&&frozen.campaign_id===d.campaign_id
-      &&frozen.campaign_revision===d.campaign_revision&&frozen.sample_id===d.sample_id&&frozen.sample_digest===d.sample_digest
+      &&frozen.campaign_revision===d.campaign_revision&&(d.version===2||frozen.sample_id===d.sample_id&&frozen.sample_digest===d.sample_digest)
       &&frozen.evaluator_version===d.evaluator_version&&digest(frozen.campaign_config)===digest(JSON.parse(live.campaign.config_json))
       &&frozen.model_profile?.id===d.model_profile_id&&frozen.model_profile?.definition_hash===d.profile_hash
       &&digest(frozen.model_config)===digest(d.model_config)&&run.model===d.model_config.model,
     'SCOUT_MODEL_REQUEST_RUN_BINDING');
+    if(d.version===2)this.service.scout.queries.assertRunBasis(frozen,d);
     return live;
   }
 

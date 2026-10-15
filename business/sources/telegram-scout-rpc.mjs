@@ -100,6 +100,14 @@ function inputChannel(channel_id, access_hash) {
   return new Api.InputChannel({ channelId: bigInt(identifier(channel_id)), accessHash: bigInt(accessHash(access_hash)) });
 }
 
+function isoDate(value) {
+  if(typeof value!=='string')throw new AppError('Invalid Telegram message search window',400,'SCOUT_INVALID_REQUEST');
+  const millis=Date.parse(value);
+  if(!Number.isFinite(millis)||new Date(millis).toISOString()!==value)
+    throw new AppError('Invalid Telegram message search window',400,'SCOUT_INVALID_REQUEST');
+  return millis;
+}
+
 export class TelegramScoutRpc {
   #owner;
   #client;
@@ -173,6 +181,41 @@ export class TelegramScoutRpc {
       if (candidates.length >= limit) break;
     }
     return { candidates, inexact: true };
+  }
+
+  async messageSearch({ channel_id, access_hash, username, query, from_date, until_date, limit = 10 } = {}) {
+    const id=identifier(channel_id),hash=accessHash(access_hash);
+    if(hash==null||typeof username!=='string'||!/^[A-Za-z][A-Za-z0-9_]{3,31}$/.test(username)
+        ||typeof query!=='string'||!query.trim()||query.length>200
+        ||!Number.isInteger(limit)||limit<1||limit>100)
+      throw new AppError('Invalid Telegram message search request',400,'SCOUT_INVALID_REQUEST');
+    const from=isoDate(from_date),until=isoDate(until_date),nowMs=Date.now();
+    if(from>=until||until>nowMs||until-from>30*86400_000)
+      throw new AppError('Invalid Telegram message search window',400,'SCOUT_INVALID_REQUEST');
+    const peer=new Api.InputPeerChannel({channelId:bigInt(id),accessHash:bigInt(hash)});
+    const request=new Api.messages.Search({peer,q:query,filter:new Api.InputMessagesFilterEmpty(),
+      minDate:Math.floor(from/1000),maxDate:Math.floor(until/1000),offsetId:0,addOffset:0,
+      limit,maxId:0,minId:0,hash:bigInt.zero});
+    const response=await this.#invoke(request);
+    check(Array.isArray(response?.messages)&&response.messages.length<=limit);
+    const received=response.messages.length,messages=[];let omitted=0;
+    for(const native of response.messages){
+      check(native instanceof Api.Message||native instanceof Api.MessageService);
+      check(native.peerId instanceof Api.PeerChannel&&decimal(native.peerId.channelId)===id);
+      const semantic=mapTelegramMessage({channelId:id},native);
+      const seconds=Number(semantic.date),time=seconds*1000;
+      check(Number.isSafeInteger(seconds)&&seconds>0&&Number.isFinite(new Date(time).getTime()));
+      if(time<from||time>until){omitted++;continue;}
+      const messageId=String(semantic.id),replySource=semantic.reply_to_channel_id&&semantic.reply_to_channel_id!==id
+        ?`telegram:channel:${semantic.reply_to_channel_id}`:null;
+      messages.push({message_id:messageId,author_ref:semantic.from_id?`${semantic.from_id.kind}:${semantic.from_id.id}`:null,
+        date:dateIso(semantic.date),edit_date:semantic.edit_date==null?null:dateIso(semantic.edit_date),text:semantic.text,
+        reply_to:semantic.reply_to_msg_id==null?null:String(semantic.reply_to_msg_id),reply_to_source:replySource,
+        unsupported:semantic.unsupported?.reason??null,content_hash:digest(semantic),
+        link:`https://t.me/${username}/${messageId}`});
+    }
+    return {messages,requested_count:limit,received_count:received,omitted_count:omitted,
+      truncated:received>=limit,selection_kind:'message_query_v1',exhaustive:false};
   }
 
   async #entity({ channel_id, username, access_hash }) {
