@@ -132,6 +132,17 @@ model paraphrase and labels suggested wording as inert material.
   jobs/proposals and never grants model/contact/send authority. Freeze schema-20
   and earlier input catalogues before adding the schema-21 tables.
 
+## Rejected model output
+
+A schema rejection persists only the existing closed diagnostic: stage, code and
+bounded JSON Schema keywords. Query interpretation uses the same diagnostic
+boundary as ordinary Scout assessment, including `const` failures for the frozen
+unknown/permission fields. The operator view translates known keywords into fixed
+explanations. Model output, field names, instance paths and AJV parameters are not
+stored or displayed. Old receipts without keywords keep their generic diagnosis;
+the missing cause cannot be reconstructed or invented. Diagnostics never repair an
+answer, relax validation, create a proposal or schedule another billable attempt.
+
 ## Acceptance before release
 
 First add black-box tests proving registration performs no sampling; exact
