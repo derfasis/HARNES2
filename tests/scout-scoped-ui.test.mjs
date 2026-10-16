@@ -48,6 +48,23 @@ function harness({ scopedAvailable = true, profiles = 'available', readOnly = fa
   return { view, calls, dialogs, data, detail };
 }
 
+test('schema rejection shows closed explanations without echoing model keys, paths, or diagnostic extras',async()=>{
+  const h=harness();
+  h.detail.jobs=[{id:jobId,kind:'assessment',status:'failed',reason:'SCOUT_QUERY_SCHEMA_INVALID',diagnostic:{
+    code:'SCOUT_SCHEMA_INVALID',stage:'schema',schema_keywords:['required','enum','const','required','<script>private-diagnostic-sentinel</script>','__proto__'],
+    instancePath:'/items/0/private-diagnostic-sentinel',params:{additionalProperty:'private-diagnostic-sentinel'},raw:'private-diagnostic-sentinel',
+  }}];
+  await h.view.load();const html=h.view.render();
+  assert.match(html,/Отсутствуют обязательные поля\./);
+  assert.match(html,/Выбрано недопустимое значение\./);
+  assert.match(html,/Нарушено обязательное фиксированное значение\./);
+  assert.equal(html.split('Отсутствуют обязательные поля.').length-1,1);
+  assert.equal(html.includes('private-diagnostic-sentinel'),false);
+  assert.deepEqual(h.calls.filter(call=>call.method==='POST'),[]);
+  h.detail.jobs[0].diagnostic={code:'SCOUT_SCHEMA_INVALID',stage:'schema'};
+  await h.view.load();assert.match(h.view.render(),/Ответ не соответствует обязательной структуре оценки\./,'old diagnostics remain readable without inventing a missing cause');
+});
+
 test('scoped assessment requires explicit valid form submission and sends one exact sample/profile request', async () => {
   const h = harness();
   await h.view.load();

@@ -39,7 +39,26 @@ export function createScoutView({ api, command, esc, modal, refresh, openAudienc
     SCOUT_EVIDENCE_INVALID:'Модель сослалась на сообщения вне прочитанного образца.',
     SCOUT_EVIDENCE_REQUIRED:'Модель предложила источник без подтверждающих сообщений.',
   };
-  const assessmentFailure = diagnostic => typeof diagnostic?.code==='string'&&Object.hasOwn(assessmentFailures,diagnostic.code)?assessmentFailures[diagnostic.code]:'';
+  const schemaFailures = {
+    required:'Отсутствуют обязательные поля.',
+    additionalProperties:'Есть поля вне контракта.',
+    type:'Неверный тип поля.',
+    enum:'Выбрано недопустимое значение.',
+    const:'Нарушено обязательное фиксированное значение.',
+    minLength:'Поле короче допустимого.',
+    maxLength:'Поле длиннее допустимого.',
+    pattern:'Неверный формат поля.',
+    minItems:'Недостаточно элементов.',
+    maxItems:'Слишком много элементов.',
+  };
+  const assessmentFailure = diagnostic => {
+    if(typeof diagnostic?.code!=='string'||!Object.hasOwn(assessmentFailures,diagnostic.code))return '';
+    const base=assessmentFailures[diagnostic.code];
+    if(diagnostic.code!=='SCOUT_SCHEMA_INVALID'||!Array.isArray(diagnostic.schema_keywords))return base;
+    // Translate closed keywords only; never render model keys, paths, or AJV params.
+    const details=[...new Set(diagnostic.schema_keywords.filter(k=>typeof k==='string'&&Object.hasOwn(schemaFailures,k)))].slice(0,8).map(k=>schemaFailures[k]);
+    return [base,...details].join(' ');
+  };
   const safeGrant = grant => grant ? `<div class="scout-grant"><strong>${esc(grant.purpose||'Разрешение выдано')}</strong><small>Истекает: ${esc(date(grant.expires_at))} · ${esc(label(grant.status||'active'))}${typeof grant.current==='boolean'?` · ${grant.current?'Действует сейчас':'Сейчас не действует'}`:''}</small>${grant.id?button('Отозвать разрешение','scout-revoke',grant.id,'danger'):''}</div>` : `<span class="muted">Разрешение отсутствует</span>`;
   const readGateMarkup = (gate, limits) => {
     if (!gate || typeof gate !== 'object') return '';

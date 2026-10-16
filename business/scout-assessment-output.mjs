@@ -16,7 +16,7 @@ const stages = Object.freeze({
   SCOUT_EVIDENCE_INVALID: 'evidence',
   SCOUT_EVIDENCE_REQUIRED: 'evidence',
 });
-const schemaKeywords = new Set(['type', 'required', 'additionalProperties', 'enum', 'minLength', 'maxLength', 'pattern', 'minItems', 'maxItems']);
+const schemaKeywords = new Set(['type', 'required', 'additionalProperties', 'enum', 'const', 'minLength', 'maxLength', 'pattern', 'minItems', 'maxItems']);
 
 // Diagnostics contain only closed codes/keywords, never output, JSON keys, AJV
 // params or provider text. Apply the same boundary when reading persisted data.

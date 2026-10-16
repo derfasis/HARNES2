@@ -42,6 +42,21 @@ test('query output contract requires literal included evidence, closed interpret
     'SCOUT_QUERY_EVIDENCE_INVALID');
 });
 
+const PRIVATE_SCHEMA_SENTINEL='private-query-schema-sentinel';
+for(const testCase of [
+  {keyword:'additionalProperties',name:'additional properties',mutate:output=>({...output,private_field:PRIVATE_SCHEMA_SENTINEL})},
+  {keyword:'required',name:'required fields',mutate:output=>{const{summary,...rest}=output;return rest;}},
+  {keyword:'enum',name:'enum values',mutate:output=>({...output,items:output.items.map(item=>({...item,classification:PRIVATE_SCHEMA_SENTINEL}))})},
+  {keyword:'const',name:'constant values',mutate:output=>({...output,items:output.items.map(item=>({...item,current_intent:PRIVATE_SCHEMA_SENTINEL}))})},
+])test(`query schema diagnostic safely reports ${testCase.keyword}`,()=>{
+  const packet={source_ref:'telegram:channel:123456789',messages:[{message_id:'906',text:'I run a small shop and need a supplier. ',
+    author_ref:'author-1',reply_to:null,reply_to_source:null,missing_parent:false}]};
+  const result=scoutQueryOutput({completed:true,final_response:JSON.stringify(testCase.mutate(validIntent()))},packet);
+  assert.equal(result.reason,'SCOUT_QUERY_SCHEMA_INVALID');
+  assert.deepEqual(result.diagnostic,{stage:'schema',code:'SCOUT_SCHEMA_INVALID',schema_keywords:[testCase.keyword]});
+  assert.equal(JSON.stringify(result.diagnostic).includes(PRIVATE_SCHEMA_SENTINEL),false);
+});
+
 async function prepared(t){
   const oldKey=process.env.PARTNER_MODEL_API_KEY;
   process.env.PARTNER_MODEL_API_KEY='offline-query-intent-sentinel';
@@ -146,6 +161,34 @@ test('scoped query interpretation persists only a grounded inert proposal over t
   assert.deepEqual(JSON.parse(stored.output_json),{...output,items:output.items.map(item=>({...item,
     quoted_text:'I run a small shop and need a supplier for physical goods.'}))});
   assert.equal(x.h.store.get('SELECT input_tokens FROM runs WHERE id=?',stored.run_id).input_tokens,19);
+  for(const table of ['persons','conversations','messages','contact_permissions','drafts','approvals','delivery_attempts'])
+    assert.equal(x.h.store.get(`SELECT COUNT(*) n FROM ${table}`).n,0,table);
+});
+
+test('schema keyword diagnostic survives restart without persisting private model output or effects',async t=>{
+  const x=await prepared(t);await request(x);
+  const invalid={...validIntent(),items:validIntent().items.map(item=>({...item,current_intent:PRIVATE_SCHEMA_SENTINEL}))};
+  const outcome=await processScoutAssessment(x.h.service,{decide:async()=>({completed:true,final_response:JSON.stringify(invalid),
+    usage:{input_tokens:17,output_tokens:23}})});
+  assert.equal(outcome.disposition,'withheld');
+  assert.equal(outcome.reason,'SCOUT_QUERY_SCHEMA_INVALID');
+  assert.deepEqual(outcome.diagnostic,{stage:'schema',code:'SCOUT_SCHEMA_INVALID',schema_keywords:['const']});
+  assert.equal(x.h.store.get('SELECT COUNT(*) n FROM scout_query_proposals').n,0);
+  const run=x.h.store.get("SELECT * FROM runs WHERE runtime='hermes-scout-v1'");
+  assert.equal(run.status,'failed');
+  assert.equal(run.input_tokens,17);assert.equal(run.output_tokens,23);
+  assert.equal(JSON.stringify(JSON.parse(run.result_json).diagnostic).includes(PRIVATE_SCHEMA_SENTINEL),false);
+  const presentation=()=>x.h.service.scout.presentation(x.h.service.scout.campaign(x.campaign.id));
+  const first=JSON.stringify(presentation());
+  assert.equal(first.includes(PRIVATE_SCHEMA_SENTINEL),false);
+  assert.deepEqual(presentation().jobs.find(job=>job.id===JSON.parse(run.context_json).job_id).diagnostic,
+    {stage:'schema',code:'SCOUT_SCHEMA_INVALID',schema_keywords:['const']});
+  x.h.restart();
+  const afterRestart=JSON.stringify(presentation());
+  assert.equal(afterRestart.includes(PRIVATE_SCHEMA_SENTINEL),false);
+  assert.deepEqual(presentation().jobs.find(job=>job.id===JSON.parse(run.context_json).job_id).diagnostic,
+    {stage:'schema',code:'SCOUT_SCHEMA_INVALID',schema_keywords:['const']});
+  assert.equal(x.h.store.get('SELECT COUNT(*) n FROM scout_query_proposals').n,0);
   for(const table of ['persons','conversations','messages','contact_permissions','drafts','approvals','delivery_attempts'])
     assert.equal(x.h.store.get(`SELECT COUNT(*) n FROM ${table}`).n,0,table);
 });
@@ -280,7 +323,7 @@ for(const testCase of [
     result:()=>({completed:true,final_response:`\`\`\`json\n${JSON.stringify(validIntent())}\n\`\`\`\nprivate-query-provider-sentinel`})},
   {name:'malformed JSON',reason:'SCOUT_QUERY_OUTPUT_INVALID',diagnostic:{stage:'format',code:'SCOUT_JSON_INVALID'},
     result:()=>({completed:true,final_response:'{broken-json-private-query-provider-sentinel'})},
-  {name:'invalid output schema',reason:'SCOUT_QUERY_SCHEMA_INVALID',diagnostic:{stage:'schema',code:'SCOUT_SCHEMA_INVALID'},
+  {name:'invalid output schema',reason:'SCOUT_QUERY_SCHEMA_INVALID',diagnostic:{stage:'schema',code:'SCOUT_SCHEMA_INVALID',schema_keywords:['additionalProperties']},
     result:()=>({completed:true,final_response:JSON.stringify({...validIntent(),private_field:'private-query-provider-sentinel'})})},
   {name:'incomplete provider failure',reason:'SCOUT_QUERY_MODEL_INCOMPLETE',diagnostic:{stage:'model',code:'SCOUT_MODEL_INCOMPLETE',failure_cause:{
     kind:'provider_error',http_status:429,provider_error_type:'rate_limit',retryable:true,attempt_count:2,child_exit_code:null,timed_out:false,stdout_json_valid:false,

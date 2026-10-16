@@ -46,7 +46,8 @@ test('messageSearch rejects unpinned peer/query/window/limit and malformed nativ
   const valid={channel_id:CHANNEL,access_hash:HASH,username:USERNAME,query:' supplier ',from_date:FROM,until_date:UNTIL,limit:10};
   for(const patch of [
     {channel_id:null},{access_hash:null},{username:null},{username:'bad-name'},{query:'   '},{query:'x'.repeat(201)},
-    {from_date:'2026-09-01T00:00:00.000Z'},{from_date:'not-a-date'},{until_date:'2026-10-16T00:00:00.000Z'},
+    {from_date:'2026-09-01T00:00:00.000Z'},{from_date:'not-a-date'},
+    {from_date:new Date(Date.now()-86400000).toISOString(),until_date:new Date(Date.now()+86400000).toISOString()},
     {until_date:FROM},{limit:0},{limit:101},
   ]) await assert.rejects(rpc.messageSearch({...valid,...patch}));
   assert.equal(calls,0);

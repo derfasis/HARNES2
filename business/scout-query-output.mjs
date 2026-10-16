@@ -6,7 +6,7 @@ import { digest } from './source-ingestion.mjs';
 export const SCOUT_QUERY_CONTRACT=readJson(path.join(ROOT,'contracts/scout-query-intent.schema.json'));
 const validate=new Ajv({strict:true}).compile(SCOUT_QUERY_CONTRACT);
 export function scoutQueryOutput(result,packet){
- const reject=(reason,code='SCOUT_EVIDENCE_INVALID',stage='evidence')=>({output:null,reason,diagnostic:scoutAssessmentDiagnostic({code,stage,...(code==='SCOUT_MODEL_INCOMPLETE'?{failure_cause:result?.failure_cause}:{})})});
+ const reject=(reason,code='SCOUT_EVIDENCE_INVALID',stage='evidence',extra={})=>({output:null,reason,diagnostic:scoutAssessmentDiagnostic({code,stage,...extra,...(code==='SCOUT_MODEL_INCOMPLETE'?{failure_cause:result?.failure_cause}:{})})});
  if(result?.completed!==true||result.error)return reject('SCOUT_QUERY_MODEL_INCOMPLETE','SCOUT_MODEL_INCOMPLETE','model');
  if(result.tool_calls!=null&&(!Array.isArray(result.tool_calls)||result.tool_calls.length)
    ||result.messages!=null&&(!Array.isArray(result.messages)||result.messages.some(m=>m?.role==='tool'
@@ -14,7 +14,7 @@ export function scoutQueryOutput(result,packet){
  if(typeof result.final_response!=='string')return reject('SCOUT_QUERY_OUTPUT_INVALID','SCOUT_OUTPUT_NOT_TEXT','format');
  if(Buffer.byteLength(result.final_response)>32000)return reject('SCOUT_QUERY_OUTPUT_INVALID','SCOUT_OUTPUT_TOO_LARGE','format');
  let output;try{output=JSON.parse(result.final_response);}catch{return reject('SCOUT_QUERY_OUTPUT_INVALID',/^\s*```/.test(result.final_response)?'SCOUT_JSON_MARKDOWN_FENCE':'SCOUT_JSON_INVALID','format');}
- if(!validate(output))return reject('SCOUT_QUERY_SCHEMA_INVALID','SCOUT_SCHEMA_INVALID','schema');
+ if(!validate(output))return reject('SCOUT_QUERY_SCHEMA_INVALID','SCOUT_SCHEMA_INVALID','schema',{schema_keywords:validate.errors.map(e=>e.keyword)});
  const seen=new Set();
  for(const item of output.items){
    const message=packet.messages.find(m=>m.message_id===item.message_id);
