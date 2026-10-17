@@ -111,6 +111,21 @@ test('an oversized page is truncated and says so, rather than silently shortened
   assert.equal(result.originalLength > 1000, true);
 });
 
+test('static contractual text inside a form remains readable while controls, values and scripts are discarded', () => {
+  const page = `<form action="https://example.test/register" onsubmit="send()">
+    <p>2.1. Eine Bestellung von FitLine-Produkten ist nicht erforderlich.</p>
+    <input type="hidden" value="HIDDEN-VALUE"><input value="PERSONAL-VALUE">
+    <select><option>CONTROL-CHOICE</option></select><button>CONTROL-SUBMIT</button>
+    <textarea>CONTROL-PRIVATE</textarea><script>FORBIDDEN-CODE</script>
+    <p>3.1. Verg&uuml;tung: bezahlte Produkte. Kosten tr&auml;gt der Partner.</p>
+  </form><p>After form.</p>`;
+  const { text } = sanitizeHtml(page, 16000);
+  assert.match(text, /2\.1\. Eine Bestellung von FitLine-Produkten ist nicht erforderlich\./);
+  assert.match(text, /Vergütung: bezahlte Produkte\. Kosten trägt der Partner\./);
+  assert.match(text, /After form\./);
+  assert.doesNotMatch(text, /HIDDEN-VALUE|PERSONAL-VALUE|CONTROL-|FORBIDDEN-CODE|send\(\)|https:\/\//);
+});
+
 test('an unclosed script does not turn the rest of the page into its content', () => {
   const { text } = sanitizeHtml('<p>before</p><script>var x = 1;', 16000);
   assert.match(text, /before/);

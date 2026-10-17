@@ -233,7 +233,8 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // Its catalog entry grants no runtime, contact or write authority.
     "partner/capabilities.json": "f063b04ded61312b30a3bbf619774ea110cbc60f",
     "partner/identity.md": "d62383e15fde5fbb78dcff171d58aa6905f97dcb",
-    "partner/knowledge/pm-international.json": "a9fe030d2ed9602149e82062eb904fea4c542a1b",
+    // Source-attributed Germany research catalogue; no country terms in global model context.
+    "partner/knowledge/pm-international.json": "c7b7910a175932c143af96a13717e0f6a8d3e277",
     "partner/profile.json": "4a66a8207b4227be2f688701d0f0b67cbd9b544b",
     "partner/skills/planning/SKILL.md": "9ae06bf66c941713d476b00aefcba3e69d9361fd",
     "partner/skills/recruiting/SKILL.md": "d114f10c86f4deddfcf83d18ca5c3afde3cf0b2f",
