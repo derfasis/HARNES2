@@ -3,6 +3,7 @@ import path from 'node:path';
 import { ROOT, readJson } from './config.mjs';
 import { hash } from './store.mjs';
 import { now, ensure } from './errors.mjs';
+import { loadPartnerKnowledge } from './knowledge.mjs';
 
 export function searchExperience(service, query = '', conversationId = null, limit = 5) {
   const terms = (query.match(/[\p{L}\p{N}]+/gu) ?? []).slice(0,12);
@@ -18,7 +19,7 @@ export function contextFor(service, conversationId = null, task = null) {
   const profile = readJson(path.join(ROOT, 'partner/profile.json'));
   const identity = fs.readFileSync(path.join(ROOT, 'partner/identity.md'), 'utf8');
   const behavioralExamples = fs.readFileSync(path.join(ROOT, 'partner/behavioral_examples.md'), 'utf8');
-  const knowledge = fs.readdirSync(path.join(ROOT, 'partner/knowledge')).filter(x => x.endsWith('.json')).map(x => readJson(path.join(ROOT, 'partner/knowledge', x)));
+  const knowledge = loadPartnerKnowledge();
   const skillName = conversationId ? (service.engagement.managed(conversationId) ? 'engagement' : 'recruiting') : 'planning';
   const skill = fs.readFileSync(path.join(ROOT, 'partner/skills', skillName, 'SKILL.md'), 'utf8');
   const skillVersion = skill.match(/^version:\s*(.+)$/m)?.[1]?.trim() ?? null;

@@ -15,6 +15,7 @@ import { MtprotoTelegramChannel } from './channels/telegram-mtproto.mjs';
 import { BrowserSourceReader, browserPolicy } from './sources/browser-readonly.mjs';
 import { toolDefinitions, callTool } from './tools.mjs';
 import { exportPartner } from './export.mjs';
+import { loadPartnerKnowledge } from './knowledge.mjs';
 import { listCandidates } from './executive-donors.mjs';
 import { AppError, ensure, requiredText } from './errors.mjs';
 import { validateControl } from './control-plane.mjs';
@@ -276,7 +277,7 @@ export async function start({ config = loadConfig(), directory = DATA, deploymen
       if (req.method === 'GET' && url.pathname === '/api/state') return send(200,{...service.snapshot(),
         runtime:runtimeReadiness(config), scheduler:scheduler.status(), telegram:telegram.readiness(),
         capabilities:readJson(path.join(ROOT,'partner/capabilities.json')),
-        knowledge:fs.readdirSync(path.join(ROOT,'partner/knowledge')).filter(f=>f.endsWith('.json')).map(f=>readJson(path.join(ROOT,'partner/knowledge',f))),
+        knowledge:loadPartnerKnowledge({ audience: 'operator' }),
         configuration:{opportunity_automatic:config.opportunity.automatic===true,runtime_enabled:config.runtime.enabled,provider:config.runtime.provider,model:config.runtime.model,base_url:config.runtime.baseUrl, max_runs_per_day:config.runtime.maxRunsPerDay,daily_budget_usd:config.runtime.dailyBudgetUsd,timezone:config.scheduler.timezone,
           audience_enabled:config.audience?.enabled===true,scout_enabled:config.scout?.enabled===true,control_plane_enabled:config.controlPlane?.enabled===true,
           model_endpoint_allowlisted:(config.modelProfiles?.allowedBaseUrls?.length ?? 0)>0,

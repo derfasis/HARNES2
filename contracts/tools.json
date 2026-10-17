@@ -1,7 +1,7 @@
 [
   {
     "name": "partner_get_context",
-    "description": "Read current scoped partner/person context and verified knowledge. Other people's conversations are excluded in a conversation run. Call with exactly {}.",
+    "description": "Read current scoped partner/person context, owner requirements, policy and a research-reference catalogue. These are not automatically verified facts or personal/market terms. Country-specific material requires a separately reviewed reference for this question. Other people's conversations are excluded in a conversation run. Call with exactly {}.",
     "inputSchema": {
       "type": "object",
       "properties": {},
