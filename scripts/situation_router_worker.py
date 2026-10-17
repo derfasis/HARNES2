@@ -176,6 +176,30 @@ def request_budget_policy(envelope):
     return None
 
 
+def query_generation_overrides(envelope):
+    """Ask compatible providers to constrain generation; never repair their output.
+
+    Only the existing scoped Scout query path changes. Its parent freezes and
+    checks this output_contract before dispatch. History assessments and other
+    API modes keep their existing wire contracts. Provider acceptance is still
+    untrusted: the parent's raw JSON/schema/evidence checks remain mandatory.
+    """
+    context = envelope.get("context", {})
+    packet = context.get("packet", {})
+    cfg = envelope.get("model", {})
+    if (packet.get("scout_assessment_request") is None or packet.get("receipt_id") is None
+            or cfg.get("provider") != "custom" or cfg.get("apiMode") != "chat_completions"):
+        return None
+    contract = context.get("output_contract")
+    if not isinstance(contract, dict) or contract.get("type") != "object":
+        raise RuntimeError("Invalid Scout query output contract")
+    # Public pinned-Hermes constructor option; no upstream patch or extra call.
+    return {"extra_body": {"response_format": {
+        "type": "json_schema",
+        "json_schema": {"name": "scout_query_intent", "strict": True, "schema": contract},
+    }}}
+
+
 def main():
     envelope = json.load(sys.stdin)
     run_id = str(envelope["run_id"])
@@ -227,6 +251,7 @@ def main():
             run_budget_seconds=cfg["timeoutSeconds"], session_id=run_id,
             ephemeral_system_prompt=envelope["system_prompt"], checkpoints_enabled=False,
             fallback_model=None, credential_pool=credential_pool,
+            request_overrides=query_generation_overrides(envelope),
         )
         if agent.tools:
             raise RuntimeError("Hermes advertised tools for a no-tool Situation Router run")
