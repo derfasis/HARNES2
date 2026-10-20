@@ -1,0 +1,42 @@
+{
+  "date": "2026-10-20",
+  "canonical_main": "0a374dfb7df7b58c8d17007accdd043ec9265931",
+  "production_code_changed": false,
+  "archive_sha256": "d25ed027d9f9be56e1192a5f422534b149ecbd3db70497ee23e215a3c3d93eff",
+  "archive_bytes": 307118010,
+  "archived_files": 31564,
+  "sqlite_snapshots": 922,
+  "worktrees": 86,
+  "collection_errors": 0,
+  "restore_verification": "PASS",
+  "pause_commands": 22,
+  "scout_campaigns_paused": 17,
+  "audience_goals_paused": 4,
+  "attention_grants_revoked": 1,
+  "post_pause_reopen_integrity": "PASS",
+  "historical_migration_receipts_preserved": true,
+  "canonical_migrations_applied_during_store_initialization": [
+    "020-engagement-reviewed-references.sql",
+    "021-scout-message-queries.sql"
+  ],
+  "offline_focused_tests": {
+    "passed": 17,
+    "failed": 0
+  },
+  "initial_test_setup_failure": "4 fake-model assertions failed before linking existing Python environment; same tests passed after setup, no production change",
+  "build": "PASS",
+  "model_calls": 0,
+  "telegram_calls": 0,
+  "sends": 0,
+  "privacy": "Only curated docs published; raw data and refs stored locally, AES-256-GCM + DPAPI CurrentUser and restricted NTFS ACL. Local same-disk copy, not off-site disaster recovery.",
+  "restore_checks": [
+    "AES-GCM authentication",
+    "ciphertext SHA-256",
+    "ZIP CRC",
+    "31564 restored-file SHA-256 checks",
+    "healthy SQLite quick_check and recorded foreign-key checks",
+    "Git bundle clone and full fsck"
+  ],
+  "database_integrity_non_ok_snapshots": 0,
+  "database_fk_nonzero_snapshots": 0
+}
