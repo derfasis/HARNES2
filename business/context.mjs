@@ -19,7 +19,7 @@ export function contextFor(service, conversationId = null, task = null) {
   const profile = readJson(path.join(ROOT, 'partner/profile.json'));
   const identity = fs.readFileSync(path.join(ROOT, 'partner/identity.md'), 'utf8');
   const behavioralExamples = fs.readFileSync(path.join(ROOT, 'partner/behavioral_examples.md'), 'utf8');
-  const knowledge = loadPartnerKnowledge();
+  const knowledge = loadPartnerKnowledge({ audience: conversationId ? 'model' : 'planning' });
   const skillName = conversationId ? (service.engagement.managed(conversationId) ? 'engagement' : 'recruiting') : 'planning';
   const skill = fs.readFileSync(path.join(ROOT, 'partner/skills', skillName, 'SKILL.md'), 'utf8');
   const skillVersion = skill.match(/^version:\s*(.+)$/m)?.[1]?.trim() ?? null;
