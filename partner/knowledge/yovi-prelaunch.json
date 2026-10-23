@@ -1,0 +1,130 @@
+{
+  "schema": "partner-knowledge-v1",
+  "id": "yovi-prelaunch",
+  "version": "1.0.0",
+  "title": "YOVI: условия из презентаций для подготовки к запуску",
+  "status": "owner_approved_prelaunch",
+  "owner_specification": {
+    "phase": "prelaunch",
+    "status": "approved",
+    "recorded_at": "2026-10-23T17:48:27Z",
+    "review_after": "2026-10-25T00:00:00Z",
+    "owner_decision": "use_supplied_presentations_for_prelaunch_preparation",
+    "sources": [
+      {
+        "id": "yovi-promo-2026-10",
+        "file_name": "YOVI_PROMO (2).pdf",
+        "document_version": "11 slides; owner-supplied copy recorded 2026-10-20",
+        "sha256": "e49d6236916543bb06e752633b2c1b70f71d37ee7fa9a68c78942750c2e835ae"
+      },
+      {
+        "id": "yovi-partner-2026-10",
+        "file_name": "YOVI_PARTNER.pdf",
+        "document_version": "25 slides; owner-supplied copy recorded 2026-10-20",
+        "sha256": "f07b80128690d396b15d1135d1ebad86c351849e36f82b46cbeb812b24248471"
+      },
+      {
+        "id": "yovi-trade-2026-10",
+        "file_name": "YOVI-TRADE-presentation (2).pdf",
+        "document_version": "21 slides; owner-supplied copy recorded 2026-10-20",
+        "sha256": "5e6e426db76529a3fdfe8b8e6e1242c4eb63571a59dc4d514d079e6603a51ca2"
+      }
+    ],
+    "approved_content_sha256": "889c90b42495e353864ca035b8fd9dd2c3c3f1f833b74f941b67705d18144df1"
+  },
+  "facts": [
+    {
+      "id": "promo-virtual-balance",
+      "text": "В презентации заявлены $100 на промо-балансе за регистрацию; сам баланс назван виртуальным и не подлежащим выводу деньгами, он используется для получения YOVI Token.",
+      "kind": "owner_approved_presentation_summary",
+      "source_id": "yovi-promo-2026-10",
+      "section": "PDF page 2",
+      "source": "YOVI_PROMO (2).pdf, стр. PDF 2"
+    },
+    {
+      "id": "promo-free-registration",
+      "text": "На слайде указано, что для регистрации не нужна покупка лицензии и первоначальное вложение; это относится к регистрации и не означает, что все дальнейшие действия бесплатны.",
+      "kind": "owner_approved_presentation_summary",
+      "source_id": "yovi-promo-2026-10",
+      "section": "PDF page 2",
+      "source": "YOVI_PROMO (2).pdf, стр. PDF 2"
+    },
+    {
+      "id": "promo-unlock-license",
+      "text": "Для разблокировки PROMO-токенов презентация указывает лицензию от $100.",
+      "kind": "owner_approved_presentation_summary",
+      "source_id": "yovi-promo-2026-10",
+      "section": "PDF page 8",
+      "source": "YOVI_PROMO (2).pdf, стр. PDF 8"
+    },
+    {
+      "id": "promo-daily-claims",
+      "text": "Промо-стейкинг описан как 100-дневный с ежедневным получением токенов; пропущенные дни, согласно слайду, не переносятся.",
+      "kind": "owner_approved_presentation_summary",
+      "source_id": "yovi-promo-2026-10",
+      "section": "PDF page 4",
+      "source": "YOVI_PROMO (2).pdf, стр. PDF 4"
+    },
+    {
+      "id": "promo-referral-limit",
+      "text": "Слайд рекламирует +$10 PROMO за каждого приглашённого, но прямо ограничивает начисление без лицензии первыми двумя приглашёнными; следующие начисления показаны после активации лицензии.",
+      "kind": "owner_approved_presentation_summary",
+      "source_id": "yovi-promo-2026-10",
+      "section": "PDF page 3",
+      "source": "YOVI_PROMO (2).pdf, стр. PDF 3"
+    },
+    {
+      "id": "partner-license-terms",
+      "text": "YOVI PARTNER описывает активную лицензию сроком 12 месяцев номиналами $50, $100, $250 и $500; повышение лицензии указано как доплата разницы.",
+      "kind": "owner_approved_presentation_summary",
+      "source_id": "yovi-partner-2026-10",
+      "section": "PDF page 4",
+      "source": "YOVI_PARTNER.pdf, стр. PDF 4"
+    },
+    {
+      "id": "promo-price-and-return-limits",
+      "text": "В материалах различаются расчётная цена и рыночная цена; пример с условной рыночной ценой $35 обозначен как сценарий до комиссий, предполагающий возможность разблокировки и продажи. Это не обещание дохода или доступности продажи.",
+      "kind": "owner_approved_presentation_summary",
+      "source_id": "yovi-promo-2026-10",
+      "section": "PDF pages 6, 8",
+      "source": "YOVI_PROMO (2).pdf, стр. PDF 6, 8"
+    },
+    {
+      "id": "promo-conditional-growth",
+      "text": "Слайд с предпродажей 100 000 YOVI по $3 описывает потенциал роста как негарантированный.",
+      "kind": "owner_approved_presentation_summary",
+      "source_id": "yovi-promo-2026-10",
+      "section": "PDF page 7",
+      "source": "YOVI_PROMO (2).pdf, стр. PDF 7"
+    },
+    {
+      "id": "promo-preliminary-window",
+      "text": "На последнем слайде указаны предварительные даты промо-окна 25 октября — 25 ноября 2026 года; также сказано, что для стейкинга требуются Telegram-канал и чат, привязка и проверка аккаунта.",
+      "kind": "owner_approved_presentation_summary",
+      "source_id": "yovi-promo-2026-10",
+      "section": "PDF page 11",
+      "source": "YOVI_PROMO (2).pdf, стр. PDF 11"
+    },
+    {
+      "id": "trade-presentation-scope",
+      "text": "YOVI TRADE описан в презентации как технология, связывающая независимые пользовательские счета и передающая торговые действия; это рекламное описание, а не подтверждение работающего сервиса, конкретного брокера, условий вывода или результатов торговли.",
+      "kind": "owner_approved_presentation_summary",
+      "source_id": "yovi-trade-2026-10",
+      "section": "PDF pages 15, 21",
+      "source": "YOVI-TRADE-presentation (2).pdf, стр. PDF 15, 21"
+    }
+  ],
+  "missing": [
+    "Официальный сайт, оператор и юридическое лицо YOVI не установлены этим материалом.",
+    "Полные действующие правила участия, комиссии, доступность вывода и порядок продажи токенов не установлены презентациями.",
+    "Фактическая работа YOVI Trade, брокер/биржа, фактические результаты и безопасность не подтверждены этими презентациями.",
+    "Текущая доступность и окончательные даты промо-окна требуют подтверждения владельцем или официальным опубликованным документом."
+  ],
+  "boundaries": [
+    "Это одобренная владельцем основа для подготовки к предпродажному этапу, а не независимая проверка заявлений презентаций.",
+    "Не обещать доходность, прибыль, рост цены, вывод средств или доступность продажи; неизвестные условия оставлять неизвестными.",
+    "Одобрение материала для подготовки не является разрешением на внешний контакт, регистрацию, покупку, отправку сообщения или включение runtime.",
+    "Сохранять различие между бесплатной регистрацией и лицензией, требуемой для разблокировки PROMO-токенов.",
+    "Не приписывать YOVI какое-либо одноимённое юридическое лицо или официальный сайт без отдельного подтверждения."
+  ]
+}
