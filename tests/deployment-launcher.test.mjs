@@ -6,12 +6,25 @@ import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import net from 'node:net';
+import { get } from 'node:http';
 import { fileURLToPath } from 'node:url';
 
 const SOURCE_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const supported = process.platform === 'win32';
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+// PowerShell's synchronous calls can outlast the server's idle keep-alive
+// timeout while this process cannot handle socket-close events. Probe each
+// lifecycle boundary on a fresh connection, with no retries: a dead or wrong
+// server must still fail the status and identity assertions below.
+const probeHealth = async origin => {
+  const response = await new Promise((resolve,reject) => {
+    get(`${origin}/health`, { agent:false }, resolve).once('error',reject);
+  });
+  const chunks = [];
+  for await (const chunk of response) chunks.push(chunk);
+  return { status:response.statusCode, json:async () => JSON.parse(Buffer.concat(chunks).toString('utf8')) };
+};
 
 async function fixture(t) {
   const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'deployment-launcher-')));
@@ -101,7 +114,7 @@ test('PowerShell managed launcher verifies identity, refuses forged receipts, an
   f.setCleanup(async () => {
     if (!fs.existsSync(f.receiptPath)) return;
     let health;
-    try { health = await (await fetch(`${f.origin(first)}/health`)).json(); } catch { return; }
+    try { health = await (await probeHealth(f.origin(first))).json(); } catch { return; }
     if (health?.release?.pid !== first.pid || health?.release?.instance_id !== first.instance_id
       || health?.release?.deployment_id !== f.profile.id) return;
     f.writeReceipt(first);
@@ -121,7 +134,7 @@ test('PowerShell managed launcher verifies identity, refuses forged receipts, an
   const inspectedFingerprint = JSON.parse(inspect.stdout).identity?.profile_fingerprint;
   assert.match(inspectedFingerprint,/^[a-f0-9]{64}$/,'read-only CLI inspection returns the selected profile fingerprint');
   assert.equal(first.profile_fingerprint,inspectedFingerprint,'running receipt is bound to this exact profile');
-  const healthResponse = await fetch(`${f.origin(first)}/health`);
+  const healthResponse = await probeHealth(f.origin(first));
   assert.equal(healthResponse.status,200);
   const health = await healthResponse.json();
   assert.equal(health.release.instance_id,first.instance_id); assert.equal(health.release.pid,first.pid);
@@ -134,7 +147,7 @@ test('PowerShell managed launcher verifies identity, refuses forged receipts, an
   assert.match(repeatStart.stdout,/Already running/);
   assert.deepEqual(f.receipt(),first,'repeat launch reuses the verified instance and receipt');
   const assertOriginalOwner = async () => {
-    const response = await fetch(`${f.origin(first)}/health`);
+    const response = await probeHealth(f.origin(first));
     assert.equal(response.status,200);
     const current = await response.json();
     assert.equal(current.release.pid,first.pid); assert.equal(current.release.instance_id,first.instance_id);
@@ -166,14 +179,14 @@ test('PowerShell managed launcher verifies identity, refuses forged receipts, an
   const instanceStop = f.invoke('Stop');
   assert.notEqual(instanceStop.status,0,'stop refuses a forged instance nonce');
   assert.match(`${instanceStop.stdout}\n${instanceStop.stderr}`,/DEPLOYMENT_INSTANCE_MISMATCH/);
-  assert.equal((await fetch(`${f.origin(first)}/health`)).status,200,'mismatch does not terminate the healthy owner');
+  assert.equal((await probeHealth(f.origin(first))).status,200,'mismatch does not terminate the healthy owner');
 
   const mismatchedPort = { ...first, port:first.port === 65535 ? 65534 : first.port+1 };
   f.writeReceipt(mismatchedPort);
   const portStop = f.invoke('Stop');
   assert.notEqual(portStop.status,0,'stop refuses a receipt whose port is not the owned server');
   assert.match(`${portStop.stdout}\n${portStop.stderr}`,/DEPLOYMENT_INSTANCE_(?:MISMATCH|HEALTH_UNVERIFIED)/);
-  assert.equal((await fetch(`${f.origin(first)}/health`)).status,200,'port mismatch leaves the known server alive');
+  assert.equal((await probeHealth(f.origin(first))).status,200,'port mismatch leaves the known server alive');
 
   f.writeReceipt(first);
   const stop = f.invoke('Stop');
@@ -186,7 +199,7 @@ test('PowerShell managed launcher verifies identity, refuses forged receipts, an
   },'stop drains and persists a durable marker',12_000);
   const marker = JSON.parse(fs.readFileSync(f.markerPath,'utf8'));
   assert.equal(marker.instance_id,first.instance_id); assert.equal(marker.stop_reason,'operator_stop');
-  await assert.rejects(fetch(`${f.origin(first)}/health`));
+  await assert.rejects(probeHealth(f.origin(first)));
 
   const restart = f.invoke('Start');
   assert.notEqual(restart.status,0,'the same stopped activation cannot be rearmed');
