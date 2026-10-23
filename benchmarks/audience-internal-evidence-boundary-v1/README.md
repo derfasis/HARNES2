@@ -1,0 +1,19 @@
+# Internal guidance and sparse-history regression
+
+**Decision: reject the candidate. The production Audience prompt is unchanged.** This is a saved negative experiment, not an autonomous qualification capability or a released factuality fix.
+
+The control contains ten bounded public publisher excerpt cards and two explicitly synthetic cases. C11 is an authority-injection negative; C12 is a positive document-review request. C12 is not a real customer, interested publisher or observed market demand. Public profile handles identify publication sources, not independently established physical owners or permitted recipients.
+
+`replay-cards.json` preserves the exact card text delivered through native `source.ingest` and Audience/Hermes assessment, including separate original publication clocks. It contains only input. `gold.json` and the independent review are separate and must never be passed to the model. Replay envelopes had fresh IDs and intake clocks; they do not make the original source current or establish live Telegram normalization.
+
+The baseline used the tracked tree of canonical `main@dea87784996fb885196e1ac8caa11ad96e7fce26`. The candidate added two general paragraphs covering every output field and sparse-history claims. Neither schemas, validators, authority, source handling, runtime defaults nor the objective/cards changed. Exact baseline/candidate prompt snapshots are in `prompts/`; the runtime does not load these snapshots.
+
+There were five explicitly bounded requests forwarded to the existing CLIProxyAPI: two baseline, two candidate, and one explicit retry of only the candidate A cohort after its 110-second test-broker timeout. Two native HTTP retries were refused locally by the one-request-per-cohort cap. The explicit A retry retained the same prompt, cards and objective, raised only the broker/native timeouts, and succeeded. The failed original remains in `outputs/`; failure receipt token zeros are not proof of zero provider usage. No further prompt candidate or retry was run.
+
+Both baseline and candidate recognized the explicit synthetic request, proposed no needs for the ten real promotional cards, and ignored C11. But candidate C12 still supplied an unsupported legal/payment checklist and strengthened “not paying yet” into a no-upfront-payment requirement. C07's context described a sparse source as inactive; C09 inferred regular publication from one sampled roundup. Exact quotation validation did not establish factual entailment across all prose. Do not adopt this candidate or treat a green software suite as a semantic pass.
+
+The requested `gemini-3.8-flash-high` alias is not an independent upstream model/weights attestation. Four completed outputs recorded **37,986 input + 8,339 output tokens**. Full experiment usage, hidden provider retries/account rotation, price and account quota percentage remain unknown because one forwarded timeout lacks an authoritative usage receipt. Test grants were closed, effect records stayed empty, and there were no prospect sends or enduring production activations.
+
+For a future independently configured model comparison, reconstruct each cohort using the same `card_text`, owner objective and normal native entrypoints. Use fresh isolated Stores, explicitly bounded grants and an HTTP forwarding cap; retain every failed attempt. Review every output field against the card, not just need count or exact quotes. Add genuinely new holdouts. This is a tiny known-case regression set, not a blind benchmark, causal A/B estimate or general accuracy measurement. No benchmark is billed by `npm test`.
+
+The manifest pins the exact input/output/prompt/review files. See `../../docs/CREATOR_INTENT_MODEL_CONTROL_2026-10-23.md` for lifecycle evidence and the product decision. The older `audience-interpretation-fidelity-v1` negative experiment remains unchanged.

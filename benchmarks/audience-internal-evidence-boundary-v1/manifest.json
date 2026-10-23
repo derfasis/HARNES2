@@ -1,0 +1,76 @@
+{
+  "decision": "CANDIDATE_REJECTED_CANONICAL_PRODUCTION_PROMPT_UNCHANGED",
+  "canonical_main": "dea87784996fb885196e1ac8caa11ad96e7fce26",
+  "experiment_forwarded_requests": 5,
+  "completed_outputs": 4,
+  "transport_failed_requests": 1,
+  "locally_denied_retries": 2,
+  "completed_worker_usage": {
+    "input_tokens": 37986,
+    "output_tokens": 8339,
+    "total_tokens": 46325
+  },
+  "experiment_total_usage": "unknown because one forwarded timeout has no authoritative usage receipt",
+  "monetary_cost": "unknown",
+  "profile": "Requested gemini-3.8-flash-high alias; not an independent identity/weights attestation.",
+  "no_prospect_sends": true,
+  "no_production_flag_changes": true,
+  "semantic_result": "Request/promo separation passes this known-case set; unsupported internal guidance and sparse-history overclaims remain. No general factuality PASS.",
+  "files": [
+    {
+      "path": "gold.json",
+      "bytes": 1546,
+      "sha256": "930efe7936c4bb9356c5829980e24172a75303f19b48dbf1a49376b00a8b7560"
+    },
+    {
+      "path": "independent-comparison-review.json",
+      "bytes": 12478,
+      "sha256": "3638db83d63731c7637e548177846165c15df59aa87032e336d164dab49dd22f"
+    },
+    {
+      "path": "outputs/baseline-A.json",
+      "bytes": 34341,
+      "sha256": "7683586a19c1e738fd990290ffd13207d539506cbcc4f2b76bec5d961cbcb92d"
+    },
+    {
+      "path": "outputs/baseline-B.json",
+      "bytes": 14861,
+      "sha256": "e934fab3873c7175bae3441c0a3ed659c1a525cb6bee29cc996cb1b25d8917a4"
+    },
+    {
+      "path": "outputs/candidate-A-timeout.json",
+      "bytes": 3689,
+      "sha256": "8ed1831915a271f5834ee0541fb1ec8c6c0d242a07c129f4f83aafd0b8a81288"
+    },
+    {
+      "path": "outputs/candidate-A-transport-retry.json",
+      "bytes": 35689,
+      "sha256": "dd0e149d54bbdc7efc556f82e71ab5dbd1040619514bee7978e903ca8363f859"
+    },
+    {
+      "path": "outputs/candidate-B.json",
+      "bytes": 17444,
+      "sha256": "8cb0b8a58446d19f288503e26dc19558cf6c3c5719a091ca66e958795421edae"
+    },
+    {
+      "path": "prompts/baseline.md",
+      "bytes": 11577,
+      "sha256": "47317adf1a0bf87a389fa4b0d174c8ca1d43dd5ec12852e61c58b39c7c84a3e5"
+    },
+    {
+      "path": "prompts/candidate.md",
+      "bytes": 13024,
+      "sha256": "6699c2198a3fd0558c01174855a5bab73909142ad2f4f422b8c563910f1eb20d"
+    },
+    {
+      "path": "README.md",
+      "bytes": 3861,
+      "sha256": "33a04c6fc7a51d02b6e29cc750997142a0b1d1a96f98847c790385d1230650c0"
+    },
+    {
+      "path": "replay-cards.json",
+      "bytes": 15469,
+      "sha256": "9c3fe9bc93b64b87623b2fb4700cb113bb78981fcfff936676383d7a1ff1cfac"
+    }
+  ]
+}

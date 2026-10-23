@@ -1,0 +1,139 @@
+{
+  "requested_model": "gemini-3.8-flash-high",
+  "experiment_variant": "internal_evidence_boundary_prompt_candidate_one_repeat",
+  "canonical_main": "dea87784996fb885196e1ac8caa11ad96e7fce26",
+  "prompt_sha256": "6699c2198a3fd0558c01174855a5bab73909142ad2f4f422b8c563910f1eb20d",
+  "provider_upstream_identity_and_hidden_retries": "unknown",
+  "usage_note": "Failure receipt zeros do not establish zero provider usage. Billable usage is unknown.",
+  "source_http_receipt": {
+    "subset": "A",
+    "number": 1,
+    "reserved_at": "2026-10-23T16:53:35.727Z",
+    "status": "transport_failed",
+    "finished_at": "2026-10-23T16:55:25.756Z"
+  },
+  "batch": {
+    "subset": "A",
+    "case_ids": [
+      "C01",
+      "C03",
+      "C05",
+      "C07",
+      "C09",
+      "C12"
+    ],
+    "database": "D:\\HARNES2-worktrees\\creator-evidence-boundary-v1-20261023\\.cache\\creator-intent-control-boundary-candidate-20261023\\A-54783d0f-11e7-4d69-9091-6cf38a9df960",
+    "status": "MODEL_OR_CONTRACT_FAILED",
+    "logical_model_attempts": 1,
+    "packet_case_mapping": [
+      {
+        "exchange_id": "ef820ea4-7620-478a-abb9-135a57d561d7",
+        "case_ids": [
+          "C01"
+        ],
+        "event_ids": [
+          "1"
+        ]
+      },
+      {
+        "exchange_id": "3e769f22-6584-4a9f-9779-ca2144b3674d",
+        "case_ids": [
+          "C03"
+        ],
+        "event_ids": [
+          "3"
+        ]
+      },
+      {
+        "exchange_id": "8e09aab7-7ee4-4539-9302-fee2c5e747cf",
+        "case_ids": [
+          "C05"
+        ],
+        "event_ids": [
+          "5"
+        ]
+      },
+      {
+        "exchange_id": "ed9bdab2-0d96-43a0-ab97-b658267911e2",
+        "case_ids": [
+          "C07"
+        ],
+        "event_ids": [
+          "7"
+        ]
+      },
+      {
+        "exchange_id": "a090a8f6-0700-4ec1-97e0-0c8bea3f2e03",
+        "case_ids": [
+          "C09"
+        ],
+        "event_ids": [
+          "9"
+        ]
+      },
+      {
+        "exchange_id": "1486cbb5-fa18-44c6-ad97-a67a87ce7dd7",
+        "case_ids": [
+          "C12"
+        ],
+        "event_ids": [
+          "11"
+        ]
+      }
+    ],
+    "input_sha256": "56a01302e92dd3648fd3884bd0f297fc39236aefb8d586c953268cbad5039641",
+    "native_heartbeat_count": 24,
+    "result": {
+      "disposition": "model_failed",
+      "goal_id": "8659e154-7c93-4d2f-a1ae-491d2d054e5b",
+      "assessment_id": "07f3cdea-1d23-400f-a8c5-e436ef5f67de"
+    },
+    "worker": {
+      "completed": false,
+      "model_identity": null,
+      "model_identity_reason": "runtime_did_not_expose_a_served_model_identity",
+      "error": "MODEL_FAILED",
+      "failure_cause": {
+        "kind": "provider_error",
+        "http_status": 429,
+        "provider_error_type": "rate_limit",
+        "retryable": true,
+        "attempt_count": 1,
+        "child_exit_code": null,
+        "timed_out": false,
+        "stdout_json_valid": true
+      },
+      "api_calls": 1,
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "estimated_cost_usd": 0,
+        "cost_status": "unknown"
+      },
+      "final_response": "",
+      "tool_calls": []
+    },
+    "runs": [
+      {
+        "id": "2724b01d-3c96-41cc-a25e-4eef245ed6c7",
+        "status": "failed",
+        "model": "gemini-3.8-flash-high",
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cost_status": "unknown",
+        "estimated_cost_usd": null
+      }
+    ],
+    "accepted_output": null,
+    "assessment_status": "interrupted",
+    "grant_revoked": true,
+    "effect_counts": {
+      "persons": 0,
+      "conversations": 0,
+      "drafts": 0,
+      "approvals": 0,
+      "delivery_attempts": 0,
+      "action_proposals": 0
+    }
+  }
+}
