@@ -93,7 +93,7 @@ test('schema-18 catalogue imports without Scout scoped requests; schema-20 trans
   assert.equal(runtimeCalls, 1);
 
   const old18 = exportPartner(x.h.store);
-  old18.migrations = old18.migrations.slice(0, 18);
+  for (const table of ['channel_posts','channel_post_versions','channel_post_attempts','channel_post_starts']) delete old18.tables[table];old18.migrations = old18.migrations.slice(0, 18);
   for (const table of REFERENCE_TABLES) delete old18.tables[table];
   for (const table of SCOUT_QUERY_TABLES) delete old18.tables[table];
   delete old18.tables.scout_model_requests;
@@ -101,7 +101,7 @@ test('schema-18 catalogue imports without Scout scoped requests; schema-20 trans
   const imported18 = importBundle(t, x.h, old18, 'scout-transfer-schema18');
   const oldStore = new Store(path.join(imported18.destination, 'data'));
   try {
-    assert.equal(oldStore.all('SELECT * FROM schema_migrations').length, 21);
+    assert.equal(oldStore.all('SELECT * FROM schema_migrations').length, 22);
     assert.equal(oldStore.get('SELECT COUNT(*) n FROM scout_model_requests').n, 0);
     assert.equal(oldStore.get('SELECT COUNT(*) n FROM scout_message_queries').n, 0);
     assert.equal(oldStore.get('SELECT COUNT(*) n FROM scout_query_receipts').n, 0);
@@ -110,7 +110,7 @@ test('schema-18 catalogue imports without Scout scoped requests; schema-20 trans
   } finally { oldStore.close(); }
 
   const current20 = exportPartner(x.h.store);
-  current20.migrations = current20.migrations.slice(0, 20);
+  for (const table of ['channel_posts','channel_post_versions','channel_post_attempts','channel_post_starts']) delete current20.tables[table];current20.migrations = current20.migrations.slice(0, 20);
   for (const table of SCOUT_QUERY_TABLES) delete current20.tables[table];
   current20.tables_sha256 = hash(JSON.stringify(current20.tables));
   assert.equal(current20.migrations.length, 20);

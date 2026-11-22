@@ -65,7 +65,7 @@ function importBundle(t, h, destinationName, { migrationCount = 12 } = {}) {
     for (const table of [...WORK_TABLES, ...CONTROL_TABLES]) delete bundle.tables[table];
   }
   if (migrationCount < 17) {
-    bundle.migrations = bundle.migrations.slice(0, migrationCount);
+    for (const table of ['channel_posts','channel_post_versions','channel_post_attempts','channel_post_starts']) delete bundle.tables[table];bundle.migrations = bundle.migrations.slice(0, migrationCount);
     bundle.tables_sha256 = hash(JSON.stringify(bundle.tables));
   }
   const source = path.join(h.directory, `${destinationName}.json`);
@@ -163,7 +163,7 @@ test('schema-9 bundle remains a supported positive control with Outcome transfer
   assert.equal(Object.keys(bundle.tables).some(table => [...WORK_TABLES, ...CONTROL_TABLES].includes(table)), false);
   const store = new Store(path.join(destination, 'data'));
   try {
-    assert.equal(store.all('SELECT * FROM schema_migrations').length, 21);
+    assert.equal(store.all('SELECT * FROM schema_migrations').length, 22);
     assert.equal(store.get('SELECT COUNT(*) n FROM work_cases').n, 0);
     assert.equal(store.get('SELECT COUNT(*) n FROM control_tickets').n, 0);
     assert.deepEqual(store.all('PRAGMA foreign_key_check'), []);
@@ -177,7 +177,7 @@ test('schema-10 historical bundle has work/control state but excludes later Scou
   assert.equal(Object.hasOwn(bundle.tables,'work_cases'),true);
   const store=new Store(path.join(destination,'data'));
   try{
-    assert.equal(store.all('SELECT * FROM schema_migrations').length,21);
+    assert.equal(store.all('SELECT * FROM schema_migrations').length,22);
     assert.equal(store.get('SELECT COUNT(*) n FROM work_cases WHERE id=?',caseId).n,1);
     assert.equal(store.get('SELECT COUNT(*) n FROM scout_campaigns').n,0);
     assert.deepEqual(store.all('PRAGMA foreign_key_check'),[]);

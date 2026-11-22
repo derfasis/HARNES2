@@ -141,7 +141,7 @@ function managedObservation(h, cid, label, offsetHours) {
 }
 
 function alterAs008(bundle, { withoutCoverage = false } = {}) {
-  bundle.migrations = bundle.migrations.slice(0, 8);
+  for (const table of ['channel_posts','channel_post_versions','channel_post_attempts','channel_post_starts']) delete bundle.tables[table];bundle.migrations = bundle.migrations.slice(0, 8);
   for (const table of REFERENCE_TABLES) delete bundle.tables[table];
   delete bundle.tables.scout_model_requests;
   delete bundle.tables.source_observation_epochs;

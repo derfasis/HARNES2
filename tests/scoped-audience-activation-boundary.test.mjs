@@ -109,7 +109,7 @@ test('schema-21 transfer preserves model and attempt history but revokes all sco
   const h = setup(t), { profile, granted, goal } = await grant(t, h);
   assert.equal((await processAudienceAssessment(h.service, fakeRuntime)).disposition, 'proposal_created');
   const bundle = exportPartner(h.store);
-  assert.equal(bundle.migrations.length, 21);
+  assert.equal(bundle.migrations.length, 22);
   assert.equal(bundle.tables.audience_attention_attempts.length, 1);
   assert.equal(bundle.tables.model_profiles[0].definition_hash, profile.definition_hash);
   const restored = importBundle(t, h, bundle);
@@ -129,7 +129,7 @@ test('actual historical schema-13 catalogue imports with no invented profile or 
   const h = setup(t);
   await h.open({ source_ids: [SOURCE] });
   const bundle = exportPartner(h.store);
-  bundle.migrations = bundle.migrations.slice(0, 13);
+  for (const table of ['channel_posts','channel_post_versions','channel_post_attempts','channel_post_starts']) delete bundle.tables[table];bundle.migrations = bundle.migrations.slice(0, 13);
   for (const table of SCOUT_QUERY_TABLES) delete bundle.tables[table];
   for (const table of REFERENCE_TABLES) delete bundle.tables[table];
   delete bundle.tables.scout_model_requests;
@@ -143,7 +143,7 @@ test('actual historical schema-13 catalogue imports with no invented profile or 
   bundle.tables_sha256 = hash(JSON.stringify(bundle.tables));
   const restored = importBundle(t, h, bundle);
   try {
-    assert.equal(restored.get('SELECT COUNT(*) n FROM schema_migrations').n, 21);
+    assert.equal(restored.get('SELECT COUNT(*) n FROM schema_migrations').n, 22);
     assert.equal(restored.get('SELECT COUNT(*) n FROM model_profiles').n, 0);
     assert.equal(restored.get('SELECT COUNT(*) n FROM audience_attention_models').n, 0);
     assert.equal(new BusinessService(restored, h.config).attention.hasScopedGrant(), false);

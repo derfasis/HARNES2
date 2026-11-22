@@ -1,33 +1,35 @@
-# YOVI prelaunch knowledge v1
+# YOVI prelaunch knowledge v2.0.0
 
-The owner accepts the supplied YOVI presentations as the working terms for preparation before launch. An official website is not a prerequisite for that preparation. This increment makes those terms available through the existing knowledge loader and dashboard; it does not switch the active offer or start a campaign.
+The owner accepts the supplied YOVI presentations and dashboard as the working terms for preparation before launch. An official website is not a prerequisite for that preparation. The profile and default opportunity offer now select `yovi-prelaunch` v2.0.0; this does not start a campaign or authorize contact.
 
 ## Source and approval boundary
 
-`partner/knowledge/yovi-prelaunch.json` contains ten attributed summaries. Page references are one-based PDF pages, not the number printed on a slide. The original documents stay outside Git; their byte hashes identify the copies reviewed on 23 October 2026.
+`partner/knowledge/yovi-prelaunch.json` contains 29 attributed summaries recorded at `2026-11-22T09:00:00.000Z`. Page references are one-based PDF pages, not the number printed on a slide. The original documents stay outside Git; their byte hashes identify the November 2026 copies. The presentation deck is catalogued but no terms were extracted from it.
 
 | Owner-supplied document | SHA-256 |
 | --- | --- |
-| YOVI_PROMO (2).pdf | `e49d6236916543bb06e752633b2c1b70f71d37ee7fa9a68c78942750c2e835ae` |
-| YOVI_PARTNER.pdf | `f07b80128690d396b15d1135d1ebad86c351849e36f82b46cbeb812b24248471` |
-| YOVI-TRADE-presentation (2).pdf | `5e6e426db76529a3fdfe8b8e6e1242c4eb63571a59dc4d514d079e6603a51ca2` |
+| yovi-dashboard-2026-11-22.png | `a640135e6bd081ac89b6140d84e2869208c074ff65bc75fa629291325995b570` |
+| YOVI-promo.pdf | `f226bd1ba07d78cb604e582e842293c13f42e192b99c799b19ac70376b667228` |
+| YOVI-partner.pdf | `11a4a3d95c2a349e8f33b2d0f0f6f555d4b0036b0e19233280fa9ce60696c757` |
+| YOVI-token.pdf | `ed64f43cd7b2838a0f97ac3252126f7af3fce0f75b45224418d1bb237a3d79b1` |
+| YOVI-presentation.pdf | `3130d70c8acd61bc5694b63e0dfecb58e8fd391b197c5bc185da7fd40d0e2d70` |
 
 The projection marks each summary `owner_approved_presentation_summary_not_external_verification`. Acceptance for planning does not establish current service availability, payouts, a recipient's interest, contact permission, or authority to act. Unspecified conditions remain unknown. In particular, lack of independent observation of service operation does not prove that the service is not operating.
 
 `approved_content_sha256` binds the asset ID, version, review deadline, source descriptors, and fact array. It detects inconsistent edits; it is not a signature, authorization service, or a check of remote documents. `recorded_at` is validated but is not included in this digest. A person who can edit the repository can recompute it. Reviewers must check revisions against the supplied documents.
 
-The current maintenance deadline is `2026-10-25T00:00:00Z`; it is not a launch timestamp or evidence of availability. At that instant, the summaries are withheld until a new reviewed revision is checked in. Do not renew a deadline automatically. Future timestamps, invalid calendars, review intervals exceeding seven days, revoked specifications, malformed source/fact links, mixed official-reference assets, and inconsistent digests also withhold the body.
+The current maintenance deadline is `2026-11-28T00:00:00Z`; it is not a launch timestamp or evidence of availability. Before recorded_at and at or after that deadline, the summaries are withheld. Do not renew a deadline automatically. Future timestamps, invalid calendars, review intervals exceeding seven days, revoked specifications, malformed source/fact links, mixed official-reference assets, and inconsistent digests also withhold the body.
 
 ## Existing paths used
 
 - No-conversation `contextFor` and `partner_get_context` receive the current summaries for internal planning.
 - Conversation contexts receive catalogue metadata only: no YOVI fact text or source descriptors. Preparing YOVI does not inject its conditions into existing private conversations.
 - The operator's **Память и опыт → Знания и источники** panel displays the summaries, page locators, unknowns, and owner-approved prelaunch label.
-- PM country references and the existing reviewed-reference attachment contract are unchanged. `partner/profile.json` still selects PM International. Audience, Scout, and Executive model packets were not extended to consume this pack.
+- PM country references and the existing reviewed-reference attachment contract are unchanged. `partner/profile.json` and the default opportunity offer select YOVI. Audience, Scout, and Executive model packets were not extended to consume this pack.
 
 There is no new schema migration, durable approval workflow, scheduling loop, runtime profile, contact record, send path, or upstream Hermes change. Runtime, Telegram, model billing, and live sending defaults are unchanged. The JSON pack is reviewed repository configuration; it is not a durable recipient-specific approval.
 
-## Verification and practical limits
+## Historical verification and practical limits (October revision)
 
 On the canonical `dea87784996fb885196e1ac8caa11ad96e7fce26` base, local verification passed: **1791 Node tests, 41 Python credential-isolation tests, build, and `git diff --check`**. Seven new tests cover projection isolation, malformed and expired approvals, source/fact edits, source links and duplicate IDs, healthy sibling preservation, and the actual planning/private context tool paths. UI inspection used a temporary store with model, scheduler, Telegram, and sending disabled.
 
@@ -39,7 +41,7 @@ The evidence directory is `YOVI_RESEARCH/YOVI_PRELAUNCH_KNOWLEDGE_2026-10-23/` i
 
 The feature is ready for owner-reviewed preparation. Autonomous financial explanations, candidate qualification, and sending are not established by this verification. The next useful product check is one reviewed proposal grounded in an actual publisher's own referral activity, keeping interest and the purpose of its published contact route separate.
 
-## Source extraction revision 1.1.0
+## Historical source extraction revision 1.1.0 (superseded by v2.0.0)
 
 The first ten summaries did not cover most of the 25-page Partner presentation. Revision 1.1.0 contains twenty summaries after visual review of all Partner pages: paid-license participation, two personally invited licensed partners for Binary activation, smaller-branch rates and cap, rank thresholds and monthly qualification, Matching tiers, token-denominated Partner/YOVI bonuses, payout denominations, and the staking table's stated limits. It also adds the Trade deck's description of the publisher/partner role. These are the supplied presentation's terms for preparation, not evidence of actual payouts or product availability.
 

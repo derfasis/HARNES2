@@ -126,6 +126,15 @@ export function validateOutcomes(config) {
   }
   return config;
 }
+export function validateChannelCycle(config) {
+  const cycle = config.telegram?.channelCycle;
+  if (!cycle || typeof cycle.enabled !== 'boolean'
+    || typeof cycle.channelChatId !== 'string' || !/^(?:|-[1-9]\d*)$/.test(cycle.channelChatId)
+    || typeof cycle.botUsername !== 'string' || !/^(?:|[A-Za-z][A-Za-z0-9_]{4,31})$/.test(cycle.botUsername)
+    || !Number.isInteger(cycle.maxPostsPerDay) || cycle.maxPostsPerDay < 1 || cycle.maxPostsPerDay > 3)
+    throw new Error('Invalid telegram.channelCycle');
+  return cycle;
+}
 export function loadConfig({ file = path.join(ROOT, 'config/local.json'), bytes } = {}) {
   if (typeof file !== 'string' || !path.isAbsolute(file)) throw new Error('Configuration file must be an absolute path');
   const local = bytes === undefined ? (fs.existsSync(file) ? readJson(file) : {}) : JSON.parse(Buffer.from(bytes).toString('utf8').replace(/^\uFEFF/, ''));
@@ -145,6 +154,7 @@ export function loadConfig({ file = path.join(ROOT, 'config/local.json'), bytes 
     if (value !== null && (typeof value !== 'number' || !Number.isFinite(value) || value < 0)) throw new Error(`Invalid ${name}`);
   }
   if (!Array.isArray(cfg.telegram.allowedChatIds) || cfg.telegram.allowedChatIds.some(id => !/^-?\d+$/.test(String(id)))) throw new Error('Invalid allowedChatIds');
+  validateChannelCycle(cfg);
   if (!['bot_api', 'mtproto'].includes(cfg.telegram.transport)) throw new Error('Invalid Telegram transport');
   if (cfg.runtime.adapter !== 'hermes') throw new Error('Only the Hermes adapter is implemented.');
   if (cfg.runtime.baseUrl) {

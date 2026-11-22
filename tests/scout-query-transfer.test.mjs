@@ -23,7 +23,7 @@ function importBundle(t, store, bundle, name) {
 
 function oldSchema20(bundle) {
   const old = structuredClone(bundle);
-  old.migrations = old.migrations.slice(0, 20);
+  for (const table of ['channel_posts','channel_post_versions','channel_post_attempts','channel_post_starts']) delete old.tables[table];old.migrations = old.migrations.slice(0, 20);
   for (const table of ['scout_message_queries', 'scout_query_receipts', 'scout_query_proposals']) delete old.tables[table];
   old.tables_sha256 = hash(JSON.stringify(old.tables));
   return old;
@@ -87,7 +87,7 @@ test('schema-20 bundles retain their frozen catalogue and import into the curren
   const imported = importBundle(t, store, bundle, 'scout-query-transfer-v20');
   const target = new Store(path.join(imported.destination, 'data'));
   try {
-    assert.equal(target.all('SELECT * FROM schema_migrations').length, 21, 'the new store applies its current migrations');
+    assert.equal(target.all('SELECT * FROM schema_migrations').length, 22, 'the new store applies its current migrations');
     assert.equal(target.get('SELECT COUNT(*) AS n FROM scout_message_queries').n, 0);
     assert.equal(target.get('SELECT COUNT(*) AS n FROM scout_query_receipts').n, 0);
     assert.equal(target.get('SELECT COUNT(*) AS n FROM scout_query_proposals').n, 0);
@@ -101,7 +101,7 @@ test('schema-21 export transfers query receipts as history and stales proposed o
   t.after(() => { store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
   const expected = addQueryHistory(store);
   const bundle = exportPartner(store);
-  assert.equal(bundle.migrations.length, 21);
+  assert.equal(bundle.migrations.length, 22);
   assert.ok(bundle.tables.scout_message_queries.some(row => row.id === expected.query_id));
   assert.ok(bundle.tables.scout_query_receipts.some(row => row.id === expected.receipt_id));
   assert.deepEqual(bundle.tables.scout_query_proposals.map(row => row.status).sort(), ['approved', 'proposed']);

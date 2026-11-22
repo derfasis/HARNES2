@@ -53,6 +53,7 @@ export class TelegramChannel {
             source: `telegram:${account}:${chatId}:${message.message_id}`,
             ...(occurredAt ? { occurred_at: occurredAt, time_basis: 'source' } : {})
           }, `telegram-update:v2:${this.service.config.partnerId}:${account}:${update.update_id}`, {kind:'channel'});
+          await this.service.exclusive(() => this.service.channelCycle.attribute(conv.id, message.text));
         }
         // Advance only after the event is durably processed; replay is idempotent.
         this.service.store.run('INSERT INTO channel_offsets VALUES(?,?,?) ON CONFLICT(channel,account_id) DO UPDATE SET cursor=excluded.cursor', 'telegram', account, String(update.update_id + 1));

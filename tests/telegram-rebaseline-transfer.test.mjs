@@ -68,7 +68,7 @@ const updateTableChecksum = bundle => { bundle.tables_sha256 = hash(JSON.stringi
 
 test('schema-21 export/import retains a committed cutover chain and does not restore active checkpoint authority', async t => {
   const h = await harness(t), { authorization, epoch } = await committedEpoch(h), bundle = exportPartner(h.store);
-  assert.equal(bundle.migrations.length, 21);
+  assert.equal(bundle.migrations.length, 22);
   assert.ok(bundle.excluded.includes('transferable Telegram observation-rebaseline authority'));
   assert.deepEqual(bundle.tables.source_observation_epochs, h.store.all('SELECT * FROM source_observation_epochs ORDER BY source_ref,generation'));
   assert.equal(bundle.tables.source_observation_epochs.length, 2);
@@ -98,7 +98,7 @@ test('schema-21 export/import retains a committed cutover chain and does not res
 test('schema-16 catalogue remains exact and upgrades to schema 21 without synthesizing a Telegram epoch', async t => {
   const h = await harness(t);
   const bundle = exportPartner(h.store);
-  bundle.migrations = bundle.migrations.slice(0, 16);
+  for (const table of ['channel_posts','channel_post_versions','channel_post_attempts','channel_post_starts']) delete bundle.tables[table];bundle.migrations = bundle.migrations.slice(0, 16);
   for (const table of SCOUT_QUERY_TABLES) delete bundle.tables[table];
   for (const table of REFERENCE_TABLES) delete bundle.tables[table];
   delete bundle.tables.scout_model_requests;
@@ -109,7 +109,7 @@ test('schema-16 catalogue remains exact and upgrades to schema 21 without synthe
   assert.equal(result.status, 0, result.stderr);
   const restored = new Store(path.join(destination, 'data'));
   try {
-    assert.equal(restored.get('SELECT COUNT(*) n FROM schema_migrations').n, 21);
+    assert.equal(restored.get('SELECT COUNT(*) n FROM schema_migrations').n, 22);
     assert.equal(restored.get('SELECT COUNT(*) n FROM source_observation_epochs').n, 0);
     assert.deepEqual(restored.all('PRAGMA foreign_key_check'), []);
   } finally { restored.close(); }
@@ -119,7 +119,7 @@ test('schema-16 downgrade cannot strip committed schema-17 epoch markers and che
   const h = await harness(t);
   await committedEpoch(h);
   const forged = exportPartner(h.store);
-  forged.migrations = forged.migrations.slice(0, 16);
+  for (const table of ['channel_posts','channel_post_versions','channel_post_attempts','channel_post_starts']) delete forged.tables[table];forged.migrations = forged.migrations.slice(0, 16);
   for (const table of SCOUT_QUERY_TABLES) delete forged.tables[table];
   for (const table of REFERENCE_TABLES) delete forged.tables[table];
   delete forged.tables.scout_model_requests;
@@ -153,7 +153,7 @@ test('pending rebaseline authority is durably revoked on import and cannot be re
 
 test('schema-16 downgrade cannot preserve an unresolved schema-17 request as active authority', async t => {
   const h = await harness(t), authorization = await pendingAuthorization(h), forged = exportPartner(h.store);
-  forged.migrations = forged.migrations.slice(0, 16);
+  for (const table of ['channel_posts','channel_post_versions','channel_post_attempts','channel_post_starts']) delete forged.tables[table];forged.migrations = forged.migrations.slice(0, 16);
   for (const table of SCOUT_QUERY_TABLES) delete forged.tables[table];
   for (const table of REFERENCE_TABLES) delete forged.tables[table];
   delete forged.tables.scout_model_requests;

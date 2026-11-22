@@ -156,6 +156,21 @@ test('a bad YOVI pack does not suppress a healthy sibling pack in the loader', a
   assert.equal(loaded[1].facts[0].text, 'Independent healthy fixture.');
 });
 
+test('checked-in YOVI v2 pack exposes 29 planning facts only within its approval window', () => {
+  const load = at => loadPartnerKnowledge({ at, audience: 'planning' }).find(pack => pack.id === 'yovi-prelaunch');
+  const recorded = Date.parse('2026-11-22T09:00:00.000Z');
+  const review = Date.parse('2026-11-28T00:00:00Z');
+  const current = load(Date.now());
+  assert.equal(current.facts.length, Date.now() >= recorded && Date.now() < review ? 29 : 0);
+  for (const at of [recorded, review - 1]) {
+    const pack = load(at);
+    assert.equal(pack.version, '2.0.0');
+    assert.equal(pack.facts.length, 29);
+    assert.equal(pack.owner_specification.sources.length, 5);
+  }
+  for (const at of [recorded - 1, review, review + 1]) assert.deepEqual(load(at).facts, []);
+});
+
 test('no-conversation planning context includes approved owner summaries; a conversation model context does not', async () => {
   let writes = 0;
   const service = {
@@ -167,18 +182,19 @@ test('no-conversation planning context includes approved owner summaries; a conv
     store: { all: () => [], run: () => { writes += 1; } },
   };
   const previousNow = Date.now;
-  Date.now = () => Date.parse('2026-10-24T00:00:00Z');
+  Date.now = () => Date.parse('2026-11-22T09:00:00.000Z');
   try {
     const planning = contextFor(service);
     const planningPack = planning.knowledge.find(pack => pack.id === 'yovi-prelaunch');
     assert.ok(planningPack, 'the real owner-approved pack is available to internal planning');
-    assert.ok(planningPack.facts.length > 0);
+    assert.equal(planningPack.facts.length, 29);
+    assert.equal(planning.partner.activeOffer, 'yovi-prelaunch');
     assert.equal(planningPack.epistemic_status, 'owner_approved_presentation_summary_not_external_verification');
     assert.deepEqual(compactPromptContext(planning).knowledge, planning.knowledge,
       'prompt compaction preserves planning facts and their provenance');
 
     const viaTool = await callTool(service, { kind: 'agent' }, 'partner_get_context', {}, 'fixture-request');
-    assert.ok(viaTool.knowledge.find(pack => pack.id === 'yovi-prelaunch').facts.length > 0,
+    assert.equal(viaTool.knowledge.find(pack => pack.id === 'yovi-prelaunch').facts.length, 29,
       'the actual context tool exposes the pack to internal planning');
     assert.equal('contact_permission' in viaTool, false);
     assert.equal('contact_permissions' in viaTool, false);

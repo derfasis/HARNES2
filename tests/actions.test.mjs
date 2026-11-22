@@ -277,7 +277,7 @@ for (const legacy of [false,true]) test(`${legacy ? 'v6' : 'v7'} transfer cannot
     for (const table of [...ACTION_TABLES, ...OUTCOME_TABLES, ...WORK_TABLES, ...CONTROL_TABLES, ...SCOUT_TABLES, ...AUDIENCE_TABLES]) delete bundle.tables[table];
     delete bundle.tables.audience_first_contact_heads;
     for (const row of bundle.tables.messages) { delete row.occurred_at; delete row.time_basis; }
-    bundle.migrations = bundle.migrations.slice(0,6); bundle.tables_sha256 = hash(JSON.stringify(bundle.tables));
+    for (const table of ['channel_posts','channel_post_versions','channel_post_attempts','channel_post_starts']) delete bundle.tables[table];bundle.migrations = bundle.migrations.slice(0,6); bundle.tables_sha256 = hash(JSON.stringify(bundle.tables));
   }
   const source = path.join(h.directory, 'export.json'), destination = path.join(ROOT, 'exports', `actions-${id()}`);
   fs.writeFileSync(source, JSON.stringify(bundle));

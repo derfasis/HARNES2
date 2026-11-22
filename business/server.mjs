@@ -4,7 +4,7 @@ import path from 'node:path';
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import Ajv from 'ajv';
-import { loadConfig, checkAutomaticPrerequisite, validateAllowedSourceRefs, validateTelegramSources, validateBrowserSources, validateOutcomes, ROOT, DATA, readJson, runtimeReadiness } from './config.mjs';
+import { loadConfig, checkAutomaticPrerequisite, validateAllowedSourceRefs, validateTelegramSources, validateBrowserSources, validateOutcomes, validateChannelCycle, ROOT, DATA, readJson, runtimeReadiness } from './config.mjs';
 import { Store } from './store.mjs';
 import { BusinessService } from './service.mjs';
 import { invalidateRevokedDiscoverySources } from './discovery.mjs';
@@ -125,6 +125,7 @@ export async function start({ config = loadConfig(), directory = DATA, deploymen
   // so it bypasses `loadConfig` entirely. Every other layer therefore re-checks here, or a
   // misconfigured outcome window reaches a running service having never been validated.
   validateOutcomes(config);
+  validateChannelCycle(config);
   const store = new Store(directory), service = new BusinessService(store,config);
   service.deployment = deployment?.activation ?? null;
   ensure(service.partner(), 'partnerId не совпадает с профилем', 500);
@@ -327,6 +328,15 @@ export async function start({ config = loadConfig(), directory = DATA, deploymen
       }
       if (req.method === 'POST' && url.pathname === '/api/deliver') {
         const body = await readBody(req); return send(200,await telegram.sendApproved(requiredText(body.draft_id,'draft_id',100)));
+      }
+      if (req.method === 'GET' && url.pathname === '/api/channel-posts') return send(200, { posts: service.channelCycle.list() });
+      if (req.method === 'POST' && url.pathname === '/api/channel-posts/deliver') {
+        const body = await readBody(req);
+        return send(200, await service.channelCycle.send(requiredText(body.post_id, 'post_id', 100), telegram));
+      }
+      if (req.method === 'POST' && ['/api/channel-posts/create', '/api/channel-posts/edit', '/api/channel-posts/approve'].includes(url.pathname)) {
+        const body = await readBody(req);
+        return send(200, await service.command(`channel_post.${url.pathname.split('/').at(-1)}`, body.payload, body.request_id));
       }
       if (req.method === 'POST' && url.pathname === '/api/scheduler/wake') {
         service.deployment?.assertModelAllowed();

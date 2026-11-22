@@ -54,13 +54,13 @@ function stageImport(t, h, bundle, label) {
 }
 function historicalV20(bundle) {
   for (const table of SCOUT_QUERY_TABLES) delete bundle.tables[table];
-  bundle.migrations = bundle.migrations.slice(0, 20);
+  for (const table of ['channel_posts','channel_post_versions','channel_post_attempts','channel_post_starts']) delete bundle.tables[table];bundle.migrations = bundle.migrations.slice(0, 20);
   return freezeBundle(bundle);
 }
 function historicalV19(bundle) {
   historicalV20(bundle);
   for (const table of REFERENCE_TABLES) delete bundle.tables[table];
-  bundle.migrations = bundle.migrations.slice(0, 19);
+  for (const table of ['channel_posts','channel_post_versions','channel_post_attempts','channel_post_starts']) delete bundle.tables[table];bundle.migrations = bundle.migrations.slice(0, 19);
   return freezeBundle(bundle);
 }
 
@@ -68,13 +68,13 @@ test('schema-19 catalogue stays exact and imports without the appended reference
   const h = workspaceHarness(t);
   const bundle = historicalV19(exportPartner(h.store));
   assert.equal(bundle.migrations.length, 19);
-  assert.deepEqual(Object.keys(bundle.tables).sort(), TABLES.filter(table => !REFERENCE_TABLES.includes(table)&&!SCOUT_QUERY_TABLES.includes(table)).sort());
+  assert.deepEqual(Object.keys(bundle.tables).sort(), TABLES.filter(table => !table.startsWith('channel_post')&&!REFERENCE_TABLES.includes(table)&&!SCOUT_QUERY_TABLES.includes(table)).sort());
   const { destination, child } = stageImport(t, h, bundle, 'reviewed-reference-v19-transfer');
   assert.equal(child.status, 0, child.stderr);
   const restored = new Store(path.join(destination, 'data'));
   try {
     assert.equal(restored.get('SELECT COUNT(*) n FROM engagement_references').n, 0);
-    assert.equal(restored.all('SELECT * FROM schema_migrations').length, 21,
+    assert.equal(restored.all('SELECT * FROM schema_migrations').length, 22,
       'staging upgrades the schema-19 bundle through the current schema');
     assert.deepEqual(restored.all('PRAGMA foreign_key_check'), []);
   } finally { restored.close(); }
@@ -84,7 +84,7 @@ test('schema-20 transfer keeps reference history and provenance but revokes ever
   const h = workspaceHarness(t), fixture = await preparedReference(h);
   const bundle = historicalV20(exportPartner(h.store));
   assert.equal(bundle.migrations.length, 20);
-  assert.deepEqual(Object.keys(bundle.tables).sort(), TABLES.filter(table=>!SCOUT_QUERY_TABLES.includes(table)).sort());
+  assert.deepEqual(Object.keys(bundle.tables).sort(), TABLES.filter(table=>!table.startsWith('channel_post')&&!SCOUT_QUERY_TABLES.includes(table)).sort());
   const original = bundle.tables.engagement_references.find(row => row.id === fixture.referenceId);
   assert.equal(original.status, 'active');
   const { destination, child } = stageImport(t, h, bundle, 'reviewed-reference-v20-transfer');

@@ -1,4 +1,5 @@
 import { id, hash } from './store.mjs';
+import { ChannelCycle, CHANNEL_POST_COMMANDS } from './channel-cycle.mjs';
 import { AppError, ensure, requiredText, dateTime, now } from './errors.mjs';
 
 import { captureOpportunity, consumeOpportunity, opportunityCapture, OPPORTUNITY_TASK } from './opportunity-consumer.mjs';
@@ -38,6 +39,7 @@ import { discoveryCommand, discoveryDecisionQueue, discoveryDetail, discoveryPre
 const OUTCOMES = new Set(OUTCOME_KINDS);
 export class BusinessService {
   constructor(store, config) { this.store = store; this.config = config; this.tail = Promise.resolve(); this.telegramAccountId = null; this.engagement = new EngagementLoop(this); this.continuity = new ContinuityLoop(this); this.executive = new ExecutiveLoop(this); this.actions = new ActionLoop(this); this.outcomes = new OutcomeLoop(this); this.control = new ControlPlane(this); this.work = new WorkCore(this); this.references = new EngagementReferences(this); this.scout = new SourceScout(this); this.audience = new AudienceLoop(this); this.modelProfiles = new ModelProfiles(this); this.attention = new AudienceAttention(this); this.followup = new AudienceFollowup(this); this.discoveryApply = ensureDiscoveryApplied; this.reconcileDiscovery = () => reconcileDiscoveryPending(this, 50); }
+  get channelCycle() { return new ChannelCycle(this); }
   exclusive(fn) { const job = this.tail.then(fn); this.tail = job.catch(() => {}); return job; }
   partner() { return this.store.get('SELECT * FROM partners WHERE id=?', this.config.partnerId); }
   person(personId) {
@@ -116,6 +118,7 @@ export class BusinessService {
   }
   execute(action, p, requestId, actor) {
     requiredText(requestId, 'request_id', 150);
+    if (CHANNEL_POST_COMMANDS.has(action)) ensure(actor.kind === 'operator' || actor.kind === 'agent' && action === 'channel_post.create', 'Operator required', 403);
     ensure(p && typeof p === 'object' && !Array.isArray(p), 'payload должен быть объектом');
     // Check audience ownership before looking up a receipt. A reused receipt must not
     // disclose the result of an operator-only operation to an agent or channel caller.
@@ -152,7 +155,7 @@ export class BusinessService {
     if (action === 'audience.attention_grant') this.attention.assertGrantRequest(p);
     if (action === 'audience.followup_request') this.followup.assertRequest(p);
     if (previous) { ensure(previous.fingerprint === fingerprint, 'request_id использован для другой операции', 409); return JSON.parse(previous.result_json); }
-    const agentActions = new Set(['draft.create','fact.propose','lesson.propose','task.propose','capability.propose', ...ENGAGEMENT_AGENT_ACTIONS]);
+    const agentActions = new Set(['channel_post.create','draft.create','fact.propose','lesson.propose','task.propose','capability.propose', ...ENGAGEMENT_AGENT_ACTIONS]);
     ensure((actor.kind === 'operator' && action !== 'discovery.observe')
       || (actor.kind === 'system' && action === 'discovery.observe')
       || (actor.kind === 'agent' && agentActions.has(action))
@@ -165,7 +168,9 @@ export class BusinessService {
       ensure(!['fact.propose','task.propose','lesson.propose','capability.propose'].includes(action),'Use engagement-scoped proposals',403);
     }
     let result;
-    if (MODEL_PROFILE_COMMANDS.has(action)) {
+    if (CHANNEL_POST_COMMANDS.has(action)) {
+      result = this.channelCycle.command(action, p, actor);
+    } else if (MODEL_PROFILE_COMMANDS.has(action)) {
       result = action === 'model.profile_create' ? this.modelProfiles.create(p) : this.modelProfiles.revoke(p);
     } else if (SCOUT_COMMANDS.has(action)) {
       result = this.scout.command(action, p, actor);

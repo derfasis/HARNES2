@@ -260,7 +260,7 @@ test('research and attempts export/restore; legacy schema-5 bundle has empty res
       data.tables.partner_turns = [];
       data.tables.events = data.tables.events.filter(e => !e.kind.startsWith('executive.') && !['continuity.captured','continuity.attention'].includes(e.kind));
       data.tables.command_receipts = [];
-      data.migrations = data.migrations.slice(0, 5); data.tables_sha256 = hash(JSON.stringify(data.tables));
+      for (const table of ['channel_posts','channel_post_versions','channel_post_attempts','channel_post_starts']) delete data.tables[table];data.migrations = data.migrations.slice(0, 5); data.tables_sha256 = hash(JSON.stringify(data.tables));
     }
     const file = path.join(h.directory, `bundle-${legacy}.json`); fs.writeFileSync(file, JSON.stringify(data));
     const destination = path.join(ROOT, 'exports', `executive-test-${id()}`); t.after(() => fs.rmSync(destination, { recursive: true, force: true }));
@@ -392,7 +392,7 @@ test('real schema-5 database upgrades in place without changing existing source 
   const before = db.prepare('SELECT * FROM events').all(); db.close();
   const migrated = new Store(directory);
   try {
-    assert.equal(migrated.all('SELECT * FROM schema_migrations').length, 21);
+    assert.equal(migrated.all('SELECT * FROM schema_migrations').length, 22);
     assert.deepEqual(migrated.all('SELECT * FROM events'), before);
     assert.equal(migrated.get('SELECT mission FROM partners').mission, 'Keep this mission');
     assert.equal(migrated.get('SELECT COUNT(*) n FROM research_intents').n, 0);

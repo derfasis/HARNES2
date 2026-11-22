@@ -1,5 +1,19 @@
 [
   {
+    "name": "partner_propose_channel_post",
+    "description": "Create a pending channel-publication draft for operator review only, never approve or send. Supply a UUID v4 post_id and text containing https://t.me/<configuredBotUsername>?start=post_<post_id>. Requires a configured single-channel destination. Not available in private conversations.",
+    "planningOnly": true,
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "post_id": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$" },
+        "text": { "type": "string", "minLength": 1, "maxLength": 4096 }
+      },
+      "required": ["post_id", "text"],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "partner_get_context",
     "description": "Read current scoped partner/person context, owner requirements, policy and a research-reference catalogue. These are not automatically verified facts or personal/market terms. Country-specific material requires a separately reviewed reference for this question. Other people's conversations are excluded in a conversation run. Call with exactly {}.",
     "inputSchema": {
