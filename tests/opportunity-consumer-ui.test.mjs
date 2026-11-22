@@ -108,7 +108,9 @@ test('default runtime, Telegram and liveSending stay false and sources stay clos
   assert.equal(config.telegram.liveSending, false);
   assert.equal(config.opportunity.automatic,false);
   assert.deepEqual(config.opportunity.authorBindings,[]);
-  assert.deepEqual(config.opportunity.allowedSourceRefs, []); assert.equal(config.opportunity.activeOffer, null);
+  assert.deepEqual(config.opportunity.allowedSourceRefs, []);
+  assert.equal(config.opportunity.activeOffer.id, 'yovi-prelaunch');
+  assert.equal(config.opportunity.activeOffer.version, '2.0.0');
 });
 
 test('pinned text blob checks accept CRLF checkouts but reject content changes', () => {
@@ -181,7 +183,7 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // Reviewed reference v1 appends its durable read-admission table only. Old
     // migrations, checksum guards, recovery and source/transport pins stay fixed.
     // Reference admission/freshness/corruption/transfer kills prove the extension.
-    "business/store.mjs": "9ecb35924beaffbe7ed87ef74a8c257abfe17331",
+    "business/store.mjs": "eb0e152e84666ace81a10ca8a7fd32a17d22576e",
     "adapters/hermes/credentials.py": "2797bd89081eaf4a950178cec3d637015ee8f45f",
     "adapters/hermes/runner.py": "e631237829d9b7a4521799b4a19c4c500b33f5aa",
     // Deliberate v0 extension: existing worker, no-tool envelope tested in opportunity-runtime.test.mjs.
@@ -204,7 +206,7 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // Outcome completion projects provider time and versions message-record
     // identities by partner. Delivery gates remain unchanged; real stub adapter
     // races and crash/receipt replay are in outcome-timing/redteam-kill tests.
-    "business/channels/telegram.mjs": "cec1264c2c5d1b08e1cf0099fbf09460623ac80a",
+    "business/channels/telegram.mjs": "d0e5b4c0f880fa53e038ac78d6132f388b1c1207",
     // Reviewed R8 extension: the channel now bootstraps read-only public sources over the client
     // it already owns, and releases them without disconnecting that client. No send path changed;
     // sendApproved still requires liveSending and is untouched.
@@ -237,7 +239,7 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     "partner/identity.md": "d62383e15fde5fbb78dcff171d58aa6905f97dcb",
     // Source-attributed Germany research catalogue; no country terms in global model context.
     "partner/knowledge/pm-international.json": "c7b7910a175932c143af96a13717e0f6a8d3e277",
-    "partner/profile.json": "4a66a8207b4227be2f688701d0f0b67cbd9b544b",
+    "partner/profile.json": "9896dbc8d24cb2d3b81c79e04b3bbdc37a148c04",
     "partner/skills/planning/SKILL.md": "9ae06bf66c941713d476b00aefcba3e69d9361fd",
     "partner/skills/recruiting/SKILL.md": "d114f10c86f4deddfcf83d18ca5c3afde3cf0b2f",
     "scripts/conversation-benchmark.mjs": "e5cfb920f67623e0a990d70642c4ec156703ed3a",

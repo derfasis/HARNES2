@@ -37,7 +37,7 @@ test('schema-21 transfer preserves audience work scope while revoking its author
   assert.ok(opened.case_id);
 
   const bundle = exportPartner(h.store), file = path.join(h.directory, 'audience-transfer.json');
-  assert.equal(bundle.migrations.length, 21);
+  assert.equal(bundle.migrations.length, 22);
   assert.equal(bundle.tables.audience_needs.find(row => row.id === need.id).status, 'accepted');
   assert.equal(bundle.tables.audience_work_links.find(row => row.thread_id === work.thread_id).need_id, need.id);
   fs.writeFileSync(file, JSON.stringify(bundle), { flag: 'wx' });
@@ -79,7 +79,7 @@ test('schema-17 first-contact proposal imports with an empty review-head table a
     channel_reason:'The public question names a concrete missing first step.'};
   const proposed=await h.command('audience.propose',{assessment_id:assessment.id,output});
   const bundle=exportPartner(h.store);
-  bundle.migrations=bundle.migrations.slice(0,17);
+  for (const table of ['channel_posts','channel_post_versions','channel_post_attempts','channel_post_starts']) delete bundle.tables[table];bundle.migrations=bundle.migrations.slice(0,17);
   for (const table of SCOUT_QUERY_TABLES) delete bundle.tables[table];
   for (const table of REFERENCE_TABLES) delete bundle.tables[table];
   delete bundle.tables.scout_model_requests;
@@ -96,7 +96,7 @@ test('schema-17 first-contact proposal imports with an empty review-head table a
   const restored=new Store(path.join(destination,'data'));
   let imported;
   try {
-    assert.equal(restored.get('SELECT COUNT(*) n FROM schema_migrations').n,21);
+    assert.equal(restored.get('SELECT COUNT(*) n FROM schema_migrations').n,22);
     assert.equal(restored.get('SELECT COUNT(*) n FROM audience_first_contact_heads').n,0);
     assert.equal(restored.get("SELECT COUNT(*) n FROM events WHERE kind='audience.review_first_contact'").n,0);
     imported=new (await import('../business/service.mjs')).BusinessService(restored,h.config);

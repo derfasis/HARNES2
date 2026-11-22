@@ -31,7 +31,9 @@ const migrationCount = Array.isArray(bundle.migrations) ? bundle.migrations.leng
 const TELEGRAM_SOURCE_EPOCH_TABLES = ['source_observation_epochs'];
 // Migration 021 adds query evidence at the end of TABLES. Keep every older
 // catalogue frozen so a historical bundle cannot gain tables from today's Store.
-const preQueryTables = TABLES.filter(table => !SCOUT_QUERY_TABLES.includes(table));
+const channelCycleTables = ['channel_posts', 'channel_post_versions', 'channel_post_attempts', 'channel_post_starts'];
+const preChannelCycleTables = TABLES.filter(table => !channelCycleTables.includes(table));
+const preQueryTables = preChannelCycleTables.filter(table => !SCOUT_QUERY_TABLES.includes(table));
 const preReferenceTables = preQueryTables.filter(table => !REFERENCE_TABLES.includes(table));
 const preScopedScoutTables = preReferenceTables.filter(table => table !== 'scout_model_requests');
 const priorTables = preScopedScoutTables.filter(table => !AUDIENCE_FIRST_CONTACT_TABLES.includes(table));
@@ -63,7 +65,8 @@ const inputCatalogues = new Map([
   [18, preScopedScoutTables],
   [19, preReferenceTables],
   [20, preQueryTables],
-  [21, TABLES],
+  [21, preChannelCycleTables],
+  [22, TABLES],
 ]);
 const inputTables = inputCatalogues.get(migrationCount);
 if (!inputTables) throw new Error('Migration version differs');
@@ -247,6 +250,7 @@ function sanitizeTransferredPrivateState(store) {
   // and stale only drafts that could still be approved or sent; keep delivery truth intact.
   store.run('UPDATE conversations SET revision=revision+1');
   store.run("UPDATE drafts SET status='stale' WHERE status IN ('pending','approved')");
+  store.run("UPDATE channel_posts SET approved_version=NULL,status='pending' WHERE status IN ('pending','approved')");
 }
 
 function sanitizeTransferredWorkspace(store, partnerId) {

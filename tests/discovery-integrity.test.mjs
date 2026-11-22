@@ -911,7 +911,7 @@ test('v3 bundle from a clean database imports into the current schema with empty
   for (const table of [...DISCOVERY_TABLES, ...CONTINUITY_TABLES, ...EXECUTIVE_TABLES, ...ACTION_TABLES, ...OUTCOME_TABLES, ...WORK_TABLES, ...CONTROL_TABLES, ...SCOUT_TABLES, ...AUDIENCE_TABLES]) delete v3.tables[table];
   delete v3.tables.audience_first_contact_heads;
   for (const row of v3.tables.messages) { delete row.occurred_at; delete row.time_basis; }
-  v3.migrations = v3.migrations.slice(0, 3);
+  for (const table of ['channel_posts','channel_post_versions','channel_post_attempts','channel_post_starts']) delete v3.tables[table];v3.migrations = v3.migrations.slice(0, 3);
   v3.tables_sha256 = hash(JSON.stringify(v3.tables));
   const file = path.join(directory, 'v3.json'); fs.writeFileSync(file, JSON.stringify(v3));
   const destination = path.join(ROOT, 'exports', `discovery-integrity-${id()}`);

@@ -84,7 +84,7 @@ async function secondEpoch(h, goalId) {
 test('schema-21 export and real staging import retain epoch history while revoking authority and replay', async t => {
   const h = audienceHarness(t), renewed = await renewedWatch(h), oldModel = renewed.modelAuthority;
   const bundle = exportPartner(h.store);
-  assert.equal(bundle.migrations.length, 21);
+  assert.equal(bundle.migrations.length, 22);
   assert.ok(bundle.excluded.includes('transferable audience source-watch authority'));
   assert.ok(Object.hasOwn(bundle.tables, 'audience_watch_epochs'));
   assert.deepEqual(bundle.tables.audience_watch_epochs, h.store.all('SELECT * FROM audience_watch_epochs ORDER BY goal_id,source_ref,generation'));
@@ -115,7 +115,7 @@ test('schema-21 export and real staging import retain epoch history while revoki
 test('actual schema-15 catalogue preserves a legacy watch and upgrades through migration 21', async t => {
   const h = audienceHarness(t), { goal, watch: legacySourceWatch } = await legacyWatch(h);
   const bundle = exportPartner(h.store);
-  bundle.migrations = bundle.migrations.slice(0, 15);
+  for (const table of ['channel_posts','channel_post_versions','channel_post_attempts','channel_post_starts']) delete bundle.tables[table];bundle.migrations = bundle.migrations.slice(0, 15);
   for (const table of SCOUT_QUERY_TABLES) delete bundle.tables[table];
   for (const table of REFERENCE_TABLES) delete bundle.tables[table];
   delete bundle.tables.scout_model_requests;
@@ -128,7 +128,7 @@ test('actual schema-15 catalogue preserves a legacy watch and upgrades through m
   assert.equal(result.status, 0, result.stderr);
   const restored = new Store(path.join(destination, 'data'));
   try {
-    assert.equal(restored.get('SELECT COUNT(*) n FROM schema_migrations').n, 21);
+    assert.equal(restored.get('SELECT COUNT(*) n FROM schema_migrations').n, 22);
     assert.equal(restored.get('SELECT COUNT(*) n FROM audience_watch_epochs').n, 0);
     const importedWatch = restored.get('SELECT * FROM audience_watches WHERE goal_id=? AND source_ref=?', goal.goal_id, SOURCE);
     assert.equal(importedWatch.status, 'revoked');

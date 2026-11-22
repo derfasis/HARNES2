@@ -533,7 +533,7 @@ test('transfer retires grants and pending retry requests without losing historic
   // A valid pre-013 export still has its historical v12 table catalogue even though
   // the current database also has later attention and follow-up tables.
   const legacy = structuredClone(bundle);
-  legacy.migrations = legacy.migrations.slice(0, 12);
+  for (const table of ['channel_posts','channel_post_versions','channel_post_attempts','channel_post_starts']) delete legacy.tables[table];legacy.migrations = legacy.migrations.slice(0, 12);
   for (const table of SCOUT_QUERY_TABLES) delete legacy.tables[table];
   for (const table of REFERENCE_TABLES) delete legacy.tables[table];
   delete legacy.tables.scout_model_requests;
@@ -558,7 +558,7 @@ test('transfer retires grants and pending retry requests without losing historic
   try {
     assert.equal(restoredLegacy.get('SELECT COUNT(*) n FROM audience_attention_grants').n, 0);
     assert.equal(restoredLegacy.get('SELECT COUNT(*) n FROM audience_attention_attempts').n, 0);
-    assert.equal(restoredLegacy.get('SELECT COUNT(*) n FROM schema_migrations').n, 21,
+    assert.equal(restoredLegacy.get('SELECT COUNT(*) n FROM schema_migrations').n, 22,
       'a pre-013 bundle is restored into the current schema without inventing authority');
   } finally { restoredLegacy.close(); }
 });

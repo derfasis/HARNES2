@@ -48,6 +48,7 @@ export function migrationChecksumMatches(version, recordedChecksum, currentCheck
     && (pinned.published.has(recordedChecksum) || pinned.historical.has(recordedChecksum));
 }
 export const TABLES = ['partners','persons','channel_identities','conversations','messages','facts','tasks','runs','drafts','draft_versions','approvals','delivery_attempts','outcome_events','lessons','capability_proposals','skill_versions','events','command_receipts','channel_offsets','tool_calls',...ENGAGEMENT_TABLES,...DISCOVERY_TABLES,...CONTINUITY_TABLES,...EXECUTIVE_TABLES,...ACTION_TABLES,...OUTCOME_TABLES,...WORK_TABLES,...CONTROL_TABLES,...SCOUT_TABLES,...AUDIENCE_TABLES,...MODEL_PROFILE_TABLES,...AUDIENCE_FOLLOWUP_TABLES,'source_observation_epochs',...REFERENCE_TABLES];
+TABLES.push('channel_posts', 'channel_post_versions', 'channel_post_attempts', 'channel_post_starts');
 export class Store {
   constructor(directory = DATA) {
     this.directory = path.resolve(directory);
@@ -102,6 +103,8 @@ export class Store {
       this.run("UPDATE channel_offsets SET cursor=json_set(cursor,'$.phase','catching_up','$.confirmed_at',NULL,'$.reason','PROCESS_RESTART') WHERE channel='telegram-source-v0' AND json_extract(cursor,'$.reason') IS NOT 'INTEGRITY_RECONCILIATION_REQUIRED'");
       this.run("UPDATE delivery_attempts SET status='delivery_unknown',error='Service restarted during delivery',finished_at=? WHERE status='sending'", now());
       this.run("UPDATE drafts SET status='delivery_unknown' WHERE status='sending'");
+      this.run("UPDATE channel_post_attempts SET status='delivery_unknown',error='Service restarted during delivery',finished_at=? WHERE status='sending'", now());
+      this.run("UPDATE channel_posts SET status='delivery_unknown' WHERE status='sending'");
       this.run("UPDATE tasks SET status='interrupted' WHERE status='running'");
       this.run("UPDATE runs SET status='interrupted',error='Service restarted; explicit retry required',finished_at=? WHERE status='running'", now());
     });
