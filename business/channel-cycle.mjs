@@ -1,7 +1,7 @@
 import { id } from './store.mjs';
 import { ensure, requiredText, now } from './errors.mjs';
 import { validateChannelCycle } from './config.mjs';
-import { channelPostLink, channelPostPayload, parseStartPayload } from './telegram-attribution.mjs';
+import { channelPostLink, channelPostPayload, containsChannelPostLink, parseStartPayload } from './telegram-attribution.mjs';
 
 export const CHANNEL_POST_COMMANDS = new Set(['channel_post.create', 'channel_post.edit', 'channel_post.approve']);
 export class ChannelCycle {
@@ -23,7 +23,7 @@ export class ChannelCycle {
     ensure(account && account === this.s.telegramAccount() && account === row.account_id, 'Channel bot account changed', 409);
     ensure(cfg.channelChatId && cfg.channelChatId === row.channel_chat_id && cfg.botUsername === row.bot_username,
       'Channel destination changed', 409);
-    ensure(row.text.includes(channelPostLink(row.bot_username, row.id)), 'Post must contain its own deep link');
+    ensure(containsChannelPostLink(row.text, row.bot_username, row.id), 'Post must contain its own deep link');
     return cfg;
   }
   command(action, p, actor) {
@@ -34,7 +34,7 @@ export class ChannelCycle {
       ensure(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(postId), 'post_id must be a UUID v4');
       ensure(cfg.channelChatId && cfg.botUsername, 'Configure channel destination before drafting', 409);
       const text = requiredText(p.text, 'text', 4096);
-      ensure(text.includes(channelPostLink(cfg.botUsername, postId)), 'Post must contain its own deep link');
+      ensure(containsChannelPostLink(text, cfg.botUsername, postId), 'Post must contain its own deep link');
       this.db.run(`INSERT INTO channel_posts(id,partner_id,account_id,channel_chat_id,bot_username,payload,created_at)
         VALUES(?,?,?,?,?,?,?)`, postId, this.s.config.partnerId, this.s.telegramAccount(), cfg.channelChatId,
       cfg.botUsername, channelPostPayload(postId), now());
@@ -46,7 +46,7 @@ export class ChannelCycle {
     ensure(p.version === row.current_version, 'Channel post version changed', 409);
     if (action === 'channel_post.edit') {
       const text = requiredText(p.text, 'text', 4096);
-      ensure(text.includes(channelPostLink(row.bot_username, row.id)), 'Post must contain its own deep link');
+      ensure(containsChannelPostLink(text, row.bot_username, row.id), 'Post must contain its own deep link');
       this.db.run('INSERT INTO channel_post_versions VALUES(?,?,?,?,?)', row.id, row.current_version + 1, text, actor.kind, now());
       this.db.run("UPDATE channel_posts SET current_version=current_version+1,approved_version=NULL,status='pending' WHERE id=?", row.id);
     } else {

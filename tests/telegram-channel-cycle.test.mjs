@@ -7,7 +7,7 @@ import { Store, id } from '../business/store.mjs';
 import { BusinessService } from '../business/service.mjs';
 import { readJson, ROOT, loadConfig, validateChannelCycle } from '../business/config.mjs';
 import { TelegramChannel } from '../business/channels/telegram.mjs';
-import { channelPostLink, channelPostPayload, parseStartPayload } from '../business/telegram-attribution.mjs';
+import { channelPostLink, channelPostPayload, containsChannelPostLink, parseStartPayload } from '../business/telegram-attribution.mjs';
 import { exportPartner } from '../business/export.mjs';
 import { spawnSync } from 'node:child_process';
 import { start } from '../business/server.mjs';
@@ -183,4 +183,12 @@ test('channel post routes require operator authentication', async t => {
   const session = await (await fetch(`${origin}/api/session`)).json();
   const response = await fetch(`${origin}/api/channel-posts`, { headers: { 'x-partner-token': session.token } });
   assert.deepEqual(await response.json(), { posts: [] });
+});
+
+test('a deep link extended with extra payload characters is not the post link', () => {
+  const link = channelPostLink('yovi_partner_bot', 'abc');
+  assert.equal(containsChannelPostLink(`Читать: ${link}`, 'yovi_partner_bot', 'abc'), true);
+  assert.equal(containsChannelPostLink(`${link}.`, 'yovi_partner_bot', 'abc'), true);
+  assert.equal(containsChannelPostLink(`${link}_preview`, 'yovi_partner_bot', 'abc'), false);
+  assert.equal(containsChannelPostLink(`${link}-x ${link}`, 'yovi_partner_bot', 'abc'), true);
 });
