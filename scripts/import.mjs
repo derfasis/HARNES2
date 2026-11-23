@@ -19,6 +19,7 @@ import { validateWatchEpochs } from '../business/audience-source-renewal.mjs';
 import { finishTelegramRebaseline, validateSourceObservationEpochs } from '../business/source-observation-epochs.mjs';
 import { BusinessService } from '../business/service.mjs';
 import { digest } from '../business/source-ingestion.mjs';
+import { validateNotebookImport } from '../business/notebook.mjs';
 
 const [source,destinationArg] = process.argv.slice(2);
 if (!source || !destinationArg) throw new Error('Usage: npm run import -- export.json exports/restore-new');
@@ -86,6 +87,9 @@ for (const asset of bundle.assets) {
   assetPaths.add(asset.path);
 }
 if (!assetPaths.has('partner/profile.json')) throw new Error('Missing partner profile');
+// Bundles made before the notebook existed simply have none. A notebook that is present must be
+// whole and readable before anything is staged: a memory this version cannot parse is refused.
+const notebookFiles = bundle.notebook === undefined ? [] : validateNotebookImport(bundle.notebook);
 for (const table of inputTables) if (!Array.isArray(bundle.tables[table])) throw new Error(`Invalid rows for ${table}`);
 
 function validateTransferredReferences(tables) {
@@ -461,6 +465,10 @@ try {
   for (const asset of bundle.assets) {
     const file = path.join(destination,asset.path);
     fs.mkdirSync(path.dirname(file),{recursive:true}); fs.writeFileSync(file,asset.content,{flag:'wx'});
+  }
+  for (const file of notebookFiles) {
+    const target = path.join(destination,'data','notebook',file.path);
+    fs.mkdirSync(path.dirname(target),{recursive:true}); fs.writeFileSync(target,file.content,{flag:'wx'});
   }
   // Preserve the original interrupted/sending state until the next service startup recovers it.
   fs.writeFileSync(path.join(destination,'RESTORE-INFO.json'),JSON.stringify({source:path.resolve(source),exported_at:bundle.exported_at,created_at:new Date().toISOString(),status:'staged_not_activated'},null,2));

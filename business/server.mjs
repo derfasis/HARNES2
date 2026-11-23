@@ -25,6 +25,7 @@ import { RuntimeActivation, workspaceIdentity, assertSafeConfig, assertActivatio
 const publicFiles = new Map([['/', ['index.html','text/html; charset=utf-8']], ['/app.js',['app.js','text/javascript; charset=utf-8']], ['/research.js',['research.js','text/javascript; charset=utf-8']], ['/actions.js',['actions.js','text/javascript; charset=utf-8']], ['/outcomes.js',['outcomes.js','text/javascript; charset=utf-8']], ['/workspace.js',['workspace.js','text/javascript; charset=utf-8']], ['/scout.js',['scout.js','text/javascript; charset=utf-8']], ['/scout-queries.js',['scout-queries.js','text/javascript; charset=utf-8']], ['/audience.js',['audience.js','text/javascript; charset=utf-8']], ['/styles.css',['styles.css','text/css; charset=utf-8']], ['/favicon.svg',['favicon.svg','image/svg+xml']]]);
 const validateCommand = new Ajv().compile(readJson(path.join(ROOT,'contracts/command.schema.json')));
 publicFiles.set('/readiness.js',['readiness.js','text/javascript; charset=utf-8']);
+publicFiles.set('/notebook.js',['notebook.js','text/javascript; charset=utf-8']);
 const tokenEquals = (a,b) => typeof a === 'string' && Buffer.byteLength(a) === Buffer.byteLength(b) && timingSafeEqual(Buffer.from(a),Buffer.from(b));
 async function readBody(req) {
   ensure(req.headers['content-type']?.split(';')[0] === 'application/json', 'Ожидается application/json', 415);
@@ -217,6 +218,12 @@ export async function start({ config = loadConfig(), directory = DATA, deploymen
       if (req.method === 'GET' && url.pathname.startsWith('/api/scout/campaigns/')) {
         ensure(/^\/api\/scout\/campaigns\/[a-f0-9-]{36}$/.test(url.pathname)&&[...url.searchParams].length===0,'Invalid scout campaign',400);
         return send(200,service.scout.presentation(service.scout.campaign(url.pathname.split('/').at(-1))));
+      }
+      // The partner's own notebook, read straight from its Markdown files. Reading changes
+      // nothing; the owner's objections and stops go through /api/commands like every command.
+      if (req.method === 'GET' && url.pathname === '/api/notebook') {
+        ensure([...url.searchParams].length === 0, 'Invalid notebook query', 400);
+        return send(200, service.notebook.snapshot());
       }
       if (req.method === 'GET' && url.pathname === '/api/workspace') {
         const options = discoveryQueryOptions(url);

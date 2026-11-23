@@ -179,6 +179,13 @@ export function loadConfig({ file = path.join(ROOT, 'config/local.json'), bytes 
     || !Number.isInteger(cfg.actions.maxModelRunsPerDay) || cfg.actions.maxModelRunsPerDay < 1 || cfg.actions.maxModelRunsPerDay > 30)
     throw new Error('Invalid actions configuration');
   if (typeof cfg.discovery?.enabled !== 'boolean') throw new Error('Invalid discovery.enabled');
+  // The notebook is the partner's own memory: no billing, no contact, no send. It is on by default
+  // and has exactly one switch, so a misspelt key cannot silently leave it half configured.
+  if (!cfg.notebook || Object.keys(cfg.notebook).some(key => key !== 'enabled') || typeof cfg.notebook.enabled !== 'boolean') throw new Error('Invalid notebook configuration');
+  // How many of his own desk tasks the partner may schedule per day without the owner's review.
+  // Zero restores the old behaviour: every task the partner proposes waits for the owner.
+  if (!cfg.autonomy || Object.keys(cfg.autonomy).some(key => key !== 'maxOwnTasksPerDay') || !Number.isInteger(cfg.autonomy.maxOwnTasksPerDay)
+    || cfg.autonomy.maxOwnTasksPerDay < 0 || cfg.autonomy.maxOwnTasksPerDay > 20) throw new Error('Invalid autonomy configuration');
   if (typeof cfg.opportunity?.automatic !== 'boolean') throw new Error('Invalid opportunity.automatic');
   validateAllowedSourceRefs(cfg);
   validateTelegramSources(cfg);

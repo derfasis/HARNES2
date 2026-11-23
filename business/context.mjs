@@ -25,6 +25,16 @@ export function contextFor(service, conversationId = null, task = null) {
   const skillVersion = skill.match(/^version:\s*(.+)$/m)?.[1]?.trim() ?? null;
   const skills = [{ name: skillName, content: skill, ...(skillVersion ? { version: skillVersion } : {}), sha256: hash(skill) },
     ...service.store.all("SELECT name,version,content,sha256 FROM skill_versions WHERE status='approved' ORDER BY name").slice(0,10)];
+  // The partner's own notebook rides with the skills: it is procedural memory he wrote himself.
+  // Rules and stops reach every run; the guide and the working shelves only his general runs.
+  const notebook = service.notebook?.digest({ conversation: Boolean(conversationId) }) ?? null;
+  if (notebook) {
+    if (!conversationId) {
+      const guide = fs.readFileSync(path.join(ROOT, 'partner/skills/notebook/SKILL.md'), 'utf8');
+      skills.push({ name: 'partner-notebook-guide', content: guide, version: guide.match(/^version:\s*(.+)$/m)?.[1]?.trim() ?? '1.0.0', sha256: hash(guide) });
+    }
+    skills.push({ name: 'partner-notebook', content: notebook.content, sha256: hash(notebook.content) });
+  }
   const context = { schema_version: 1, generated_at: now(), partner: { ...profile, ...service.partner() }, identity, identity_sha256: hash(identity),
     behavioral_examples: behavioralExamples, behavioral_examples_sha256: hash(behavioralExamples), knowledge,
     knowledge_sha256: hash(JSON.stringify(knowledge)), skills, task,
