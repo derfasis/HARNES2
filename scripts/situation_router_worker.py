@@ -238,7 +238,9 @@ def main():
     with contextlib.redirect_stdout(sys.stderr), (budget.install() if budget else contextlib.nullcontext()):
         from run_agent import AIAgent
         from credentials import runtime_credentials
+        from prompt_scope import omit_host_environment
 
+        omit_host_environment()
         cfg = envelope["model"]
         api_key, credential_pool = runtime_credentials(cfg["baseUrl"])
         agent = AIAgent(
