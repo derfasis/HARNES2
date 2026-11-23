@@ -31,13 +31,14 @@ import { ModelProfiles } from './model-profiles.mjs';
 import { MODEL_PROFILE_COMMANDS } from './model-profile-tables.mjs';
 import { AUDIENCE_ACTIONS } from './audience-tables.mjs';
 import { effectiveSourceConfig } from './scout-policy.mjs';
+import { PartnerNotebook, NOTEBOOK_ACTIONS, NOTEBOOK_AGENT_ACTIONS, NOTEBOOK_WAKE_PREFIX } from './notebook.mjs';
 import { discoveryCommand, discoveryDecisionQueue, discoveryDetail, discoveryPresentationDetail, discoveryReasonStates, ensureDiscoveryApplied, hasDiscoveryPending, invalidateDiscoveryOffers, markDiscoveryPending, reconcileDiscoveryPending, recordDiscoveryFailure, staleMaterialEvidence, DISCOVERY_ACTIONS, DISCOVERY_REVIEW_TASK } from './discovery.mjs';
 
 // One list, shared with the feedback loop: a candidate may only ever be promoted to a kind the
 // manual path would also have accepted, or promotion becomes a way around that refusal.
 const OUTCOMES = new Set(OUTCOME_KINDS);
 export class BusinessService {
-  constructor(store, config) { this.store = store; this.config = config; this.tail = Promise.resolve(); this.telegramAccountId = null; this.engagement = new EngagementLoop(this); this.continuity = new ContinuityLoop(this); this.executive = new ExecutiveLoop(this); this.actions = new ActionLoop(this); this.outcomes = new OutcomeLoop(this); this.control = new ControlPlane(this); this.work = new WorkCore(this); this.references = new EngagementReferences(this); this.scout = new SourceScout(this); this.audience = new AudienceLoop(this); this.modelProfiles = new ModelProfiles(this); this.attention = new AudienceAttention(this); this.followup = new AudienceFollowup(this); this.discoveryApply = ensureDiscoveryApplied; this.reconcileDiscovery = () => reconcileDiscoveryPending(this, 50); }
+  constructor(store, config) { this.store = store; this.config = config; this.tail = Promise.resolve(); this.telegramAccountId = null; this.engagement = new EngagementLoop(this); this.continuity = new ContinuityLoop(this); this.executive = new ExecutiveLoop(this); this.actions = new ActionLoop(this); this.outcomes = new OutcomeLoop(this); this.control = new ControlPlane(this); this.work = new WorkCore(this); this.references = new EngagementReferences(this); this.scout = new SourceScout(this); this.audience = new AudienceLoop(this); this.modelProfiles = new ModelProfiles(this); this.attention = new AudienceAttention(this); this.followup = new AudienceFollowup(this); this.notebook = new PartnerNotebook(this); this.discoveryApply = ensureDiscoveryApplied; this.reconcileDiscovery = () => reconcileDiscoveryPending(this, 50); }
   exclusive(fn) { const job = this.tail.then(fn); this.tail = job.catch(() => {}); return job; }
   partner() { return this.store.get('SELECT * FROM partners WHERE id=?', this.config.partnerId); }
   person(personId) {
@@ -125,6 +126,9 @@ export class BusinessService {
     if (REFERENCE_COMMANDS.has(action)) ensure(actor?.kind === 'operator', 'REFERENCE_OPERATOR_REQUIRED', 403, 'REFERENCE_OPERATOR_REQUIRED');
     if (SCOUT_COMMANDS.has(action)) ensure(actor.kind === 'operator', 'SCOUT_OPERATOR_REQUIRED', 403, 'SCOUT_OPERATOR_REQUIRED');
     if (['source.rebaseline','source.rebaseline_cancel'].includes(action)) ensure(actor?.kind === 'operator', 'TELEGRAM_REBASELINE_OPERATOR_REQUIRED', 403, 'TELEGRAM_REBASELINE_OPERATOR_REQUIRED');
+    // Who may write the notebook is decided before a receipt can answer: the partner's own pages
+    // are his, the owner's objections are the owner's, and a replay must not blur the two.
+    if (NOTEBOOK_ACTIONS.has(action)) this.notebook.assertActor(action, actor);
     if (actor.kind === 'agent' && (this.config.controlPlane?.enabled === true || this.control.ticket(actor.runId))) {
       const ticket = this.control.require(actor.runId, { plane: 'private' });
       const run = this.store.get('SELECT * FROM runs WHERE id=? AND partner_id=?', actor.runId, this.config.partnerId);
@@ -152,7 +156,7 @@ export class BusinessService {
     if (action === 'audience.attention_grant') this.attention.assertGrantRequest(p);
     if (action === 'audience.followup_request') this.followup.assertRequest(p);
     if (previous) { ensure(previous.fingerprint === fingerprint, 'request_id использован для другой операции', 409); return JSON.parse(previous.result_json); }
-    const agentActions = new Set(['draft.create','fact.propose','lesson.propose','task.propose','capability.propose', ...ENGAGEMENT_AGENT_ACTIONS]);
+    const agentActions = new Set(['draft.create','fact.propose','lesson.propose','task.propose','capability.propose', ...ENGAGEMENT_AGENT_ACTIONS, ...NOTEBOOK_AGENT_ACTIONS]);
     ensure((actor.kind === 'operator' && action !== 'discovery.observe')
       || (actor.kind === 'system' && action === 'discovery.observe')
       || (actor.kind === 'agent' && agentActions.has(action))
@@ -164,8 +168,13 @@ export class BusinessService {
     if(actor.kind==='agent' && conversationId && this.engagement.managed(conversationId)) {
       ensure(!['fact.propose','task.propose','lesson.propose','capability.propose'].includes(action),'Use engagement-scoped proposals',403);
     }
+    // The partner's own "never again" is checked by code on his moves and outgoing texts, so a
+    // new model or a forgetful run cannot step on a rake the notebook already names.
+    this.notebook.guard(action, p, actor);
     let result;
-    if (MODEL_PROFILE_COMMANDS.has(action)) {
+    if (NOTEBOOK_ACTIONS.has(action)) {
+      result = this.notebook.command(action, p, requestId, actor);
+    } else if (MODEL_PROFILE_COMMANDS.has(action)) {
       result = action === 'model.profile_create' ? this.modelProfiles.create(p) : this.modelProfiles.revoke(p);
     } else if (SCOUT_COMMANDS.has(action)) {
       result = this.scout.command(action, p, actor);
@@ -368,7 +377,7 @@ export class BusinessService {
       case 'task.propose': {
         if (actor.conversationId) ensure(conversationId === actor.conversationId, 'Задача вне области разговора', 403);
         if (conversationId && actor.kind === 'agent') this.assertRunFresh(actor, conversationId);
-        result = this.addTask(p, actor.kind, actor.kind === 'agent' ? 'proposed' : 'pending'); break;
+        result = this.addTask(p, actor.kind, actor.kind === 'agent' && !this.ownWork(p, actor, conversationId) ? 'proposed' : 'pending'); break;
       }
       case 'task.approve':
       case 'task.cancel':
@@ -470,10 +479,40 @@ export class BusinessService {
     if (kind === DISCOVERY_REVIEW_TASK) ensure(author === 'system' && status === 'proposed', 'Discovery review создаётся только assessment-системой', 403);
     if (key?.startsWith('opportunity:')) ensure(kind === OPPORTUNITY_TASK && author === 'system' && status === 'proposed', 'Зарезервированный ключ consumer', 403);
     if (key?.startsWith('discovery-review:')) ensure(kind === DISCOVERY_REVIEW_TASK && author === 'system' && status === 'proposed', 'Зарезервированный ключ discovery review', 403);
+    if (key?.startsWith(NOTEBOOK_WAKE_PREFIX)) ensure(kind === 'review' && author === 'system' && status === 'pending', 'Зарезервированный ключ тетради партнёра', 403);
     if (key) { const old = this.store.get('SELECT * FROM tasks WHERE dedupe_key=?', key); if (old) return { task_id: old.id, duplicate: true }; }
     if (kind === 'follow_up') { ensure(convId, 'Для follow-up нужен разговор'); requiredText(p.evidence, 'Основание follow-up', 2000); }
     this.store.run('INSERT INTO tasks(id,partner_id,conversation_id,kind,title,instructions,due_at,status,evidence,dedupe_key,author,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)', taskId, this.config.partnerId, convId, kind, requiredText(p.title, 'Задача', 200), requiredText(p.instructions, 'Цель действия', 6000), due, status, String(p.evidence ?? '').slice(0,2000), key, author, now());
     return { task_id: taskId, status };
+  }
+  // The partner plans his own desk work. A general research, planning or review task touches no
+  // person and sends nothing, so it is scheduled without waiting for the owner. It still runs
+  // inside the owner's run and cost limits, and it is a daily allowance, not a right: a chain of
+  // self-made tasks must not be able to spend the whole day's runs. Beyond the allowance the task
+  // is kept and waits for the owner, as does anything tied to a conversation and any tool token
+  // that is not a real run of the partner.
+  ownWork(p, actor, conversationId) {
+    const perDay = this.config.autonomy?.maxOwnTasksPerDay ?? 0;
+    if (!perDay || conversationId || !actor.runId || !['research', 'planning', 'review'].includes(p.kind ?? 'research')) return false;
+    const run = this.store.get('SELECT status,conversation_id FROM runs WHERE id=? AND partner_id=?', actor.runId, this.config.partnerId);
+    if (run?.status !== 'running' || run.conversation_id) return false;
+    return this.store.get("SELECT COUNT(*) AS n FROM tasks WHERE partner_id=? AND author='agent' AND conversation_id IS NULL AND status<>'proposed' AND created_at>=?",
+      this.config.partnerId, new Date(Date.now() - 86400000).toISOString()).n < perDay;
+  }
+  // The notebook wakes the partner by itself: a check that has come due, or an owner's note he
+  // has not answered. Nobody approves these tasks. Looking at what came of his own move and
+  // answering his partner are his work, and they run inside the ordinary run and cost limits.
+  // One wake-up waits at a time, so the notebook cannot crowd out replies to people; and one
+  // occasion wakes him at most twice, so a run that failed gets a second chance and no more.
+  notebookChecks() {
+    if (this.store.get("SELECT id FROM tasks WHERE partner_id=? AND status IN ('pending','running') AND dedupe_key LIKE ?", this.config.partnerId, `${NOTEBOOK_WAKE_PREFIX}%`)) return 0;
+    for (const wake of this.notebook.wakeups()) {
+      for (const attempt of [1, 2]) {
+        const added = this.addTask({ kind: 'review', title: wake.title, instructions: wake.instructions, due_at: now(), dedupe_key: `${wake.key}#${attempt}` }, 'system', 'pending');
+        if (!added.duplicate) return 1;
+      }
+    }
+    return 0;
   }
   assertRunFresh(actor, conversationId) {
     if (!actor.runId) return;

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { ROOT } from './config.mjs';
 import { TABLES, hash } from './store.mjs';
 import { now } from './errors.mjs';
+import { exportNotebook } from './notebook.mjs';
 
 export function exportPartner(store) {
   const assets = [];
@@ -22,6 +23,9 @@ export function exportPartner(store) {
     return { format: 'digital-ai-partner', schema_version: 1, exported_at: now(),
       migrations: store.all('SELECT * FROM schema_migrations ORDER BY version'),
       tables, assets, tables_sha256: hash(JSON.stringify(tables)),
+      // The partner's own notebook lives beside the database as Markdown. It is his experience,
+      // not an authority: it travels whole, and the destination reads it like any other memory.
+      notebook: exportNotebook(store.directory),
       excluded: ['secrets', 'runtime caches', 'virtual environment', 'upstream checkout', 'browser sessions', 'action artifact bytes', 'transferable action authority', 'transferable audience attention authority', 'transferable audience source-watch authority', 'transferable model profile activation', 'transferable need follow-up authority', 'transferable Telegram observation-rebaseline authority', 'transferable Scout model request authority', 'transferable private reference-reading authority'] };
   });
 }

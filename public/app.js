@@ -14,7 +14,7 @@ let reviewFilter='pending',reviewOffset=0,reviewDetail=null;
 let referenceView={engagementId:null,items:[],unavailable:[],materials:[],questionMessageId:null,offerId:null,error:''},referenceRequest=0;
 let renderActivationCard = () => '';
 const pending = new Map();
-let researchView = null, actionsView = null, outcomesView = null, workspaceView = null, scoutView = null, audienceView = null;
+let researchView = null, actionsView = null, outcomesView = null, workspaceView = null, scoutView = null, audienceView = null, notebookView = null;
 async function api(route,body) {
   const response = await fetch(route,{method:body === undefined?'GET':'POST',headers:{'x-partner-token':token,...(body===undefined?{}:{'Content-Type':'application/json'})},...(body===undefined?{}:{body:JSON.stringify(body)})});
   const data = await response.json(); if(!response.ok) throw new Error(data.error ?? 'Операция не завершена'); return data;
@@ -53,6 +53,10 @@ async function refresh() {
     scoutView ??= (await import('./scout.js')).createScoutView({ api, command, esc, modal, refresh, openAudienceGoal });
     await scoutView.load();
   }
+  if(tab==='notebook'){
+    notebookView ??= (await import('./notebook.js')).createNotebookView({ api, command, esc, panel, button, empty, field, modal });
+    await notebookView.load();
+  }
   if(tab==='audience'){
     audienceView ??= (await import('./audience.js')).createAudienceView({ api, command, esc, panel, button, empty, field, modal, refresh, notify });
     await audienceView.load();
@@ -87,9 +91,9 @@ async function loadEngagementReferences(engagementId){
   }
 }
 function render(){
-  const titles={overview:'Обзор',people:'Люди и диалоги',tasks:'Задачи',discovery:'Discovery',research:'Исследования',actions:'Действия',outcomes:'Результаты',scout:'Источники',workspace:'Partner Workspace',audience:'Audience Intelligence',experience:'Память и опыт',capabilities:'Способности',runs:'История работы',settings:'Подключения'};
+  const titles={overview:'Обзор',people:'Люди и диалоги',tasks:'Задачи',discovery:'Discovery',research:'Исследования',actions:'Действия',outcomes:'Результаты',scout:'Источники',workspace:'Partner Workspace',audience:'Audience Intelligence',experience:'Память и опыт',notebook:'Тетрадь партнёра',capabilities:'Способности',runs:'История работы',settings:'Подключения'};
   $('#page-title').textContent=titles[tab];document.querySelectorAll('[data-tab]').forEach(x=>x.classList.toggle('active',x.dataset.tab===tab));
-  $('#content').innerHTML=({overview:overview,people:people,tasks:tasks,discovery:discoveryTab,research:()=>researchView.render(),actions:()=>actionsView.render(),outcomes:()=>outcomesView.render(),scout:()=>scoutView.render(),workspace:()=>workspaceView.render(),audience:()=>audienceView.render(),experience:experience,capabilities:capabilities,runs:runs,settings:settings}[tab])();
+  $('#content').innerHTML=({overview:overview,people:people,tasks:tasks,discovery:discoveryTab,research:()=>researchView.render(),actions:()=>actionsView.render(),outcomes:()=>outcomesView.render(),scout:()=>scoutView.render(),workspace:()=>workspaceView.render(),audience:()=>audienceView.render(),experience:experience,notebook:()=>notebookView.render(),capabilities:capabilities,runs:runs,settings:settings}[tab])();
   if(tab==='workspace')workspaceView.hydrate($('#content'));
 }
 function overview(){
@@ -377,6 +381,7 @@ async function act(action,itemId,extra){
     if(action==='workspace-wake-local'){render();notify('Локальная очередь обработана.');}
     return;
   }
+  if(action.startsWith('notebook-')){await notebookView.act(action,itemId);return;}
   if(action.startsWith('action-')){await actionsView.act(action,itemId);return;}
   if(action.startsWith('research-')){await researchView.act(action,itemId);return;}
   if(action.startsWith('outcome-')){await outcomesView.act(action,itemId);render();return;}

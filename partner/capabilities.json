@@ -1,6 +1,7 @@
 [
   { "id": "business", "name": "Люди, диалоги и задачи", "version": "1.0.0", "status": "available", "effect": "internal_proposal", "implementation": "business/tools.mjs" },
   { "id": "experience", "name": "Память и рассмотренный опыт", "version": "1.0.0", "status": "available", "effect": "read_and_propose", "implementation": "business/context.mjs" },
+  { "id": "notebook", "name": "Собственная тетрадь опыта: правила, журнал, стоп-лист", "version": "1.0.0", "status": "available", "effect": "internal_memory", "implementation": "business/notebook.mjs" },
   { "id": "telegram", "name": "Telegram Bot API / MTProto", "version": "1.1.0", "status": "needs_configuration", "effect": "external_write", "implementation": "business/channels/telegram.mjs,business/channels/telegram-mtproto.mjs" },
   { "id": "research", "name": "Исследование источников", "version": "1.0.0", "status": "available_manual_sources", "effect": "read", "implementation": "business/service.mjs" },
   { "id": "browser", "name": "Чтение разрешённых публичных веб-страниц", "version": "1.0.0", "status": "needs_configuration", "effect": "read_only", "implementation": "business/sources/browser-readonly.mjs" },

@@ -233,8 +233,16 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     "partner/behavioral_examples.md": "467282e6705e951f0376ae9cb712a6ebb57bab38",
     // Metadata correction: Browser v0 already implements an allowlisted read-only web reader.
     // Its catalog entry grants no runtime, contact or write authority.
-    "partner/capabilities.json": "f063b04ded61312b30a3bbf619774ea110cbc60f",
-    "partner/identity.md": "d62383e15fde5fbb78dcff171d58aa6905f97dcb",
+    // Partner Notebook v1 adds one advisory catalogue entry for the partner's own Markdown
+    // notebook. It grants no runtime, contact, spending or write authority outside data/notebook.
+    "partner/capabilities.json": "4eac06f998fcae29a534b14ce8606ec50e98213c",
+    // Partner Notebook v1, an explicit owner decision of 23 November 2026: the partner is a
+    // partner, not an assistant, and may disagree with the owner on the merits. The conversation
+    // guidance is unchanged; the first sentence names the role and a closing section states the
+    // relationship and the three things that stay with the owner (spending, new venues, income
+    // and offer-term promises). Those boundaries are enforced by the existing approval, send and
+    // permission gates, not by this text. Behaviour: tests/partner-notebook.test.mjs.
+    "partner/identity.md": "9c2fc51199a9b8e749c9ef09555ada8af014bf61",
     // Source-attributed Germany research catalogue; no country terms in global model context.
     "partner/knowledge/pm-international.json": "c7b7910a175932c143af96a13717e0f6a8d3e277",
     "partner/profile.json": "4a66a8207b4227be2f688701d0f0b67cbd9b544b",

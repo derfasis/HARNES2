@@ -8,11 +8,14 @@ import { id } from './store.mjs';
 const definitions = readJson(path.join(ROOT, 'contracts/tools.json'));
 const ajv = new Ajv({ strict: true, allowUnionTypes: true });
 const validators = new Map(definitions.map(d => [d.name, ajv.compile(d.inputSchema)]));
-const actions = { partner_record_belief:'belief.record', partner_commit_decision:'decision.commit', partner_propose_episode_lesson:'learning.propose', partner_propose_draft: 'draft.create', partner_propose_fact: 'fact.propose', partner_propose_task: 'task.propose', partner_propose_lesson: 'lesson.propose', partner_propose_capability: 'capability.propose' };
+const actions = { partner_record_belief:'belief.record', partner_commit_decision:'decision.commit', partner_propose_episode_lesson:'learning.propose', partner_propose_draft: 'draft.create', partner_propose_fact: 'fact.propose', partner_propose_task: 'task.propose', partner_propose_lesson: 'lesson.propose', partner_propose_capability: 'capability.propose',
+  partner_notebook_expect: 'notebook.expect', partner_notebook_result: 'notebook.result', partner_notebook_rule: 'notebook.rule',
+  partner_notebook_never: 'notebook.never', partner_notebook_note: 'notebook.note', partner_notebook_answer: 'notebook.answer' };
 function validationSummary(errors = []) {
   return errors.slice(0,3).map(error => `${error.instancePath || '/'} (${error.keyword})`).join(', ') || '/ (invalid_schema)';
 }
-export function toolDefinitions(scope) { return definitions.filter(d => (!d.conversationOnly || scope.conversationId) && (!d.engagementOnly || scope.engagementId) && !(scope.engagementId && ['partner_propose_draft','partner_propose_fact','partner_propose_task','partner_propose_lesson','partner_propose_capability'].includes(d.name))).map(({ conversationOnly, engagementOnly, ...d }) => d); }
+// generalOnly: the notebook is kept in the partner's own runs, never from inside a private conversation.
+export function toolDefinitions(scope) { return definitions.filter(d => (!d.conversationOnly || scope.conversationId) && (!d.generalOnly || !scope.conversationId) && (!d.engagementOnly || scope.engagementId) && !(scope.engagementId && ['partner_propose_draft','partner_propose_fact','partner_propose_task','partner_propose_lesson','partner_propose_capability'].includes(d.name))).map(({ conversationOnly, engagementOnly, generalOnly, ...d }) => d); }
 export async function callTool(service, scope, name, args, requestId) {
   const managed=scope.conversationId && service.engagement.current(scope.conversationId);
   if (managed) scope={...scope,engagementId:managed.id};

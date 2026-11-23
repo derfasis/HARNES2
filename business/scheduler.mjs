@@ -458,6 +458,7 @@ export class Scheduler {
         this.lastReason = count.unknown ? 'Стоимость предыдущего запуска неизвестна. Укажите тарифы и разберите расходы перед продолжением.' : 'Достигнут дневной порог учтённых расходов'; return;
       }
       await this.ensurePlanningTask();
+      await this.service.exclusive(() => this.service.store.transaction(() => this.service.notebookChecks()));
       const prepared = await this.service.exclusive(() => this.service.store.transaction(() => {
         const task = this.service.store.get("SELECT * FROM tasks WHERE partner_id=? AND status='pending' AND kind NOT IN ('opportunity_review','discovery_review','owner_action') AND due_at<=? ORDER BY due_at,created_at LIMIT 1", cfg.partnerId, now());
         if (!task) return null;

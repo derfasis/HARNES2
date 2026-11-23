@@ -95,7 +95,7 @@
   },
   {
     "name": "partner_propose_task",
-    "description": "Propose a future task with purpose and evidence. Follow-ups require a conversation and source of agreement. The owner approves before scheduling.",
+    "description": "Schedule a future task with purpose and evidence. Your own general research, planning or review task (no conversation) goes straight to work, a few per day, within the owner's run limits; beyond that it waits for the owner. A task inside a conversation always waits for the owner's review, and a follow-up requires a conversation and source of agreement.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -542,6 +542,297 @@
         "text",
         "applicability",
         "outcome_ids"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "partner_notebook_expect",
+    "generalOnly": true,
+    "description": "Before a move of your own, write in your journal what you are about to do, what you expect to happen and when you will check. No approval is needed, and the check time wakes you by itself: do not propose a separate task for it. A move that matches your stop-list is refused.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 120
+        },
+        "move": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 600
+        },
+        "expectation": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 600
+        },
+        "basis": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 400
+        },
+        "check_at": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 40,
+          "description": "ISO timestamp with explicit timezone, in the future (at most 90 days)"
+        }
+      },
+      "required": [
+        "title",
+        "move",
+        "expectation",
+        "check_at"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "partner_notebook_result",
+    "generalOnly": true,
+    "description": "Record what actually happened for a journal entry, in a later run than the one that opened it: an outcome comes from outside and cannot exist yet in the same run. verdict: matched, missed or unknown. If it is not known yet, pass verdict unknown with recheck_at to look again later (at most 3 times). A missed expectation is the moment to change a rule or add a stop yourself.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "entry_id": {
+          "type": "string",
+          "pattern": "^J-[0-9]{4,6}$"
+        },
+        "result": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 800
+        },
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "matched",
+            "missed",
+            "unknown"
+          ]
+        },
+        "lesson": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 600
+        },
+        "recheck_at": {
+          "type": "string",
+          "minLength": 10,
+          "maxLength": 40,
+          "description": "ISO timestamp with explicit timezone; only with verdict unknown"
+        }
+      },
+      "required": [
+        "entry_id",
+        "result",
+        "verdict"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "partner_notebook_rule",
+    "generalOnly": true,
+    "description": "Write or change one of your own working rules. add: title, text, applies_to, optional evidence (journal J-…, reading L-… or owner note N-… ids). confirm: rule_id plus a new closed journal entry in evidence. revise: rule_id, the changed fields and a reason. retire: rule_id and a reason. One observation makes a hypothesis; two journal entries closed with a real outcome (matched or missed) make it confirmed. Rules are about methods, never about a named person.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "op": {
+          "type": "string",
+          "enum": [
+            "add",
+            "revise",
+            "confirm",
+            "retire"
+          ]
+        },
+        "rule_id": {
+          "type": "string",
+          "pattern": "^R-[0-9]{4,6}$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 120
+        },
+        "text": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 600
+        },
+        "applies_to": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 240
+        },
+        "evidence": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": "string",
+            "pattern": "^[JLN]-[0-9]{4,6}$"
+          }
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 400
+        }
+      },
+      "required": [
+        "op"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "partner_notebook_never",
+    "generalOnly": true,
+    "description": "Your stop-list: a move or wording you will not repeat. add: title, reason and 1-5 short literal signs (phrases or venue names); code then refuses your later drafts, tasks and planned moves that contain a sign. retire: stop_id and a reason, to lift your own stop when your experience changed. Stops set by the owner cannot be lifted by you.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "op": {
+          "type": "string",
+          "enum": [
+            "add",
+            "retire"
+          ]
+        },
+        "stop_id": {
+          "type": "string",
+          "pattern": "^S-[0-9]{4,6}$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 120
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 400
+        },
+        "patterns": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 5,
+          "items": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 80
+          }
+        },
+        "applies_to": {
+          "type": "string",
+          "enum": [
+            "move",
+            "message",
+            "any"
+          ]
+        },
+        "evidence": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": "string",
+            "pattern": "^[JLN]-[0-9]{4,6}$"
+          }
+        }
+      },
+      "required": [
+        "op"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "partner_notebook_note",
+    "generalOnly": true,
+    "description": "Keep what you read or were advised (a book, a forum, another AI) as untested material with its source. add: title, source, text, optional to_test. tried: note_id and the journal_id where you tried it. discard: note_id and a reason. A reading is not your rule until you have tried it yourself.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "op": {
+          "type": "string",
+          "enum": [
+            "add",
+            "tried",
+            "discard"
+          ]
+        },
+        "note_id": {
+          "type": "string",
+          "pattern": "^L-[0-9]{4,6}$"
+        },
+        "title": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 120
+        },
+        "source": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 200
+        },
+        "text": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 1200
+        },
+        "to_test": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 400
+        },
+        "journal_id": {
+          "type": "string",
+          "pattern": "^J-[0-9]{4,6}$"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 400
+        }
+      },
+      "required": [
+        "op"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "partner_notebook_answer",
+    "generalOnly": true,
+    "description": "Answer an owner's objection written in your notebook. stance: agree, partly or disagree, with your reasoning. Disagreeing is allowed: then keep your rule and say why.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "note_id": {
+          "type": "string",
+          "pattern": "^N-[0-9]{4,6}$"
+        },
+        "stance": {
+          "type": "string",
+          "enum": [
+            "agree",
+            "partly",
+            "disagree"
+          ]
+        },
+        "answer": {
+          "type": "string",
+          "minLength": 3,
+          "maxLength": 1000
+        }
+      },
+      "required": [
+        "note_id",
+        "stance",
+        "answer"
       ],
       "additionalProperties": false
     }

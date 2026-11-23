@@ -108,5 +108,11 @@
     "maxCandidates": 30,
     "maxModelRunsPerDay": 5,
     "auditMaxAgeSeconds": 86400
+  },
+  "notebook": {
+    "enabled": true
+  },
+  "autonomy": {
+    "maxOwnTasksPerDay": 3
   }
 }

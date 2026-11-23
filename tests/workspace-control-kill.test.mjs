@@ -54,7 +54,10 @@ test('service agent writes require the exact current ticket id', async t => {
     await assert.rejects(h.command('task.propose', payload, id(), actor), { code: 'CONTROL_TICKET_SCOPE_MISMATCH' });
     await assert.rejects(h.command('task.propose', payload, id(), { ...actor, controlTicketId: 'wrong-ticket' }), { code: 'CONTROL_TICKET_SCOPE_MISMATCH' });
     const result = await h.command('task.propose', payload, id(), { ...actor, controlTicketId: ticketId });
-    assert.equal(result.status, 'proposed');
+    // Since Partner Notebook v1 a general research task from the partner's own running run is his
+    // own desk work and is scheduled at once (tests/partner-notebook.test.mjs covers the bounds).
+    // What this test proves is unchanged: only the exact current ticket may write at all.
+    assert.equal(result.status, 'pending');
     assert.equal(h.store.get('SELECT COUNT(*) n FROM tasks WHERE title=?', payload.title).n, 1,
       'the matching ticket still permits a valid scoped command');
   });
