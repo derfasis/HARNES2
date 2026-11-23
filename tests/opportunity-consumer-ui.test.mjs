@@ -157,7 +157,12 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // The real worker plus loopback provider proves one generation POST (test_scout_request_budget.py).
     // Scoped query generation now forwards the frozen schema via Hermes request_overrides.
     // Actual worker/HTTP tests prove exact wire format, no repair/fallback, and unchanged history mode.
-    "scripts/situation_router_worker.py": "69b10ce14dbf3e229a022822524af8609be0250c",
+    // Prompt scope (owner decision, 23 November 2026: Hermes must run through the local proxy).
+    // The worker now leaves Hermes' host/terminal environment block out of the system prompt: the
+    // partner has no terminal, and the provider on that route rejected every request carrying the
+    // block's marker. Tools, credentials, budgets and every send path are unchanged. The request a
+    // provider actually receives is asserted in tests/test_prompt_scope.py.
+    "scripts/situation_router_worker.py": "05936a7161480ecb4fef6556bb70e63a3de3adcf",
     // Reviewed extension: invalidate read-only source checkpoints on process recovery.
     // textBlobHash normalizes CRLF, so this is the LF-normalized R7 blob hash.
     // Continuity adds export tables and recovers its running turns as interrupted.
@@ -183,7 +188,12 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // Reference admission/freshness/corruption/transfer kills prove the extension.
     "business/store.mjs": "9ecb35924beaffbe7ed87ef74a8c257abfe17331",
     "adapters/hermes/credentials.py": "2797bd89081eaf4a950178cec3d637015ee8f45f",
-    "adapters/hermes/runner.py": "e631237829d9b7a4521799b4a19c4c500b33f5aa",
+    // Prompt scope (owner decision, 23 November 2026: Hermes must run through the local proxy).
+    // The worker now leaves Hermes' host/terminal environment block out of the system prompt: the
+    // partner has no terminal, and the provider on that route rejected every request carrying the
+    // block's marker. Tools, credentials, budgets and every send path are unchanged. The request a
+    // provider actually receives is asserted in tests/test_prompt_scope.py.
+    "adapters/hermes/runner.py": "50645c4456b9174e5fffef1e31f46a094d3e3924",
     // Deliberate v0 extension: existing worker, no-tool envelope tested in opportunity-runtime.test.mjs.
     // Retry-budget extension: decision envelope raises maxIterations 1->2 so the pinned
     // Hermes empty-response ladder can actually re-enter the loop after an empty response.
@@ -242,7 +252,7 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     // relationship and the three things that stay with the owner (spending, new venues, income
     // and offer-term promises). Those boundaries are enforced by the existing approval, send and
     // permission gates, not by this text. Behaviour: tests/partner-notebook.test.mjs.
-    "partner/identity.md": "9c2fc51199a9b8e749c9ef09555ada8af014bf61",
+    "partner/identity.md": "5d66ae3eb7eb2a5b39e0f8409f93b949a7672f83",
     // Source-attributed Germany research catalogue; no country terms in global model context.
     "partner/knowledge/pm-international.json": "c7b7910a175932c143af96a13717e0f6a8d3e277",
     "partner/profile.json": "4a66a8207b4227be2f688701d0f0b67cbd9b544b",
@@ -250,7 +260,12 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     "partner/skills/recruiting/SKILL.md": "d114f10c86f4deddfcf83d18ca5c3afde3cf0b2f",
     "scripts/conversation-benchmark.mjs": "e5cfb920f67623e0a990d70642c4ec156703ed3a",
     "scripts/conversation-multiturn-benchmark.mjs": "f1f19be9db4547f9b5f9ffb03755697f6cd80397",
-    "scripts/conversation_benchmark_worker.py": "a451187beec05ccddfca2417eb159b4821c15dc0"
+    // Prompt scope (owner decision, 23 November 2026: Hermes must run through the local proxy).
+    // The worker now leaves Hermes' host/terminal environment block out of the system prompt: the
+    // partner has no terminal, and the provider on that route rejected every request carrying the
+    // block's marker. Tools, credentials, budgets and every send path are unchanged. The request a
+    // provider actually receives is asserted in tests/test_prompt_scope.py.
+    "scripts/conversation_benchmark_worker.py": "9985de0ad9809f2d06ce1b8430fe4a9f4760f15d"
 };
   for (const [name, expected] of Object.entries(pinned)) {
     assert.equal(textBlobHash(read(name)), expected, name);

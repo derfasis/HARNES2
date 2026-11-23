@@ -77,6 +77,9 @@ def main():
         from toolsets import create_custom_toolset
         from tools.registry import registry
         from credentials import runtime_credentials
+        from prompt_scope import omit_host_environment
+
+        omit_host_environment()
 
         context = envelope["context"]
         model_context = compact_prompt_context(context)

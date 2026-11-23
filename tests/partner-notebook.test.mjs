@@ -538,6 +538,22 @@ test('a reading is not experience until it is tried, and the owner may be told n
   assert.deepEqual({ status: answer.status, stance: answer.stance }, { status: 'answered', stance: 'disagree' });
   await assert.rejects(h.tool(actor, 'partner_notebook_answer', { note_id: objection.note_id, stance: 'agree', answer: 'Передумал задним числом.' }), { status: 409, code: 'NOTEBOOK_CLOSED' });
   assert.equal(h.service.notebook.load('rules').entries[0].meta.status, 'hypothesis');
+  // Found by the real Hermes run: a model answered "disagree" and removed its own entry anyway,
+  // "because the owner insists". Saying no means the entry stays, in that run.
+  await assert.rejects(h.tool(actor, 'partner_notebook_rule', { op: 'retire', rule_id: 'R-0001', reason: 'Владелец настоял.' }), { status: 409, code: 'NOTEBOOK_INCONSISTENT' });
+  assert.equal(h.service.notebook.load('rules').entries[0].meta.status, 'hypothesis');
+  const stop = await h.tool(actor, 'partner_notebook_never', { op: 'add', title: 'Чаты взаимопиара', reason: 'Ноль вопросов.', patterns: ['взаимопиар'] });
+  const pressure = await h.command('notebook.owner_note', { text: 'Убери. Мне не нравится.', about: stop.stop_id });
+  await h.tool(actor, 'partner_notebook_answer', { note_id: pressure.note_id, stance: 'disagree', answer: 'Оставляю: нового наблюдения нет.' });
+  await assert.rejects(h.tool(actor, 'partner_notebook_never', { op: 'retire', stop_id: stop.stop_id, reason: 'Приоритет владельца.' }), { status: 409, code: 'NOTEBOOK_INCONSISTENT' });
+  // The other order is the same contradiction: removing the entry first and then claiming to disagree.
+  const second = await h.tool(actor, 'partner_notebook_never', { op: 'add', title: 'Обещание дохода', reason: 'Вызвало недоверие.', patterns: ['гарантированный доход'] });
+  const again = await h.command('notebook.owner_note', { text: 'И эту убери.', about: second.stop_id });
+  await h.tool(actor, 'partner_notebook_never', { op: 'retire', stop_id: second.stop_id, reason: 'Слишком общий признак, мешал работе.' });
+  await assert.rejects(h.tool(actor, 'partner_notebook_answer', { note_id: again.note_id, stance: 'disagree', answer: 'Не согласен, но снял.' }), { status: 409, code: 'NOTEBOOK_INCONSISTENT' });
+  assert.equal((await h.tool(actor, 'partner_notebook_answer', { note_id: again.note_id, stance: 'agree', answer: 'Согласен: признак был слишком общим.' })).stance, 'agree');
+  // He may still change his mind later, for a reason of his own; and the owner's own stops are untouched by this.
+  assert.equal((await h.tool(running(h), 'partner_notebook_never', { op: 'retire', stop_id: stop.stop_id, reason: 'Появился модерируемый чат с живыми вопросами.' })).status, 'retired');
   const notes = h.read('OWNER_NOTES.md');
   assert.match(notes, /^### Владелец\nУбери это правило/m); assert.match(notes, /^### Мой ответ\nОставляю: одна проба/m);
   assert.doesNotMatch(contextFor(h.service).skills.at(-1).content, /Владелец возразил/);

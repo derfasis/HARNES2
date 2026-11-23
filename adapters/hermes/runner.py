@@ -85,7 +85,9 @@ def main():
         from tools.registry import registry
         from toolsets import create_custom_toolset
         from credentials import runtime_credentials
+        from prompt_scope import omit_host_environment
 
+        omit_host_environment()
         allowed = {tool["name"] for tool in envelope["tools"]}
         for tool in envelope["tools"]:
             def handler(args, _name=tool["name"], **kwargs):

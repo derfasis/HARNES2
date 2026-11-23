@@ -262,6 +262,14 @@ export class PartnerNotebook {
         refuse('Тетрадь — про приёмы, не про людей. Убери имя контакта и опиши ситуацию в общем виде.', 'NOTEBOOK_PERSONAL_DATA', 400);
     }
   }
+  // Saying "I disagree" and removing the entry anyway is yielding, not answering. In the run
+  // where the partner told the owner no about an entry, that entry stays. He may still change
+  // his mind in a later run, for a reason of his own.
+  assertStands(entry, actor) {
+    const yielded = this.load('notes').entries.some(note => note.meta.about === entry.id && note.meta.stance === 'disagree' && note.meta.answer_run_id === actor.runId);
+    ensure(!yielded, 'Ты только что ответил владельцу «не согласен» про эту запись. Не согласен — оставь её. Если передумал по существу, реши это в другом запуске и назови причину.', 409, 'NOTEBOOK_INCONSISTENT');
+    entry.meta.retired_run_id = actor.runId;
+  }
   future(value, label) {
     const at = dateTime(value), delta = Date.parse(at) - Date.now();
     ensure(delta > 0 && delta <= MAX_HORIZON_DAYS * DAY, `${label}: момент в будущем, не дальше ${MAX_HORIZON_DAYS} дней`, 400, 'NOTEBOOK_INVALID');
@@ -341,7 +349,7 @@ export class PartnerNotebook {
         if (entry.meta.last_request_id === requestId) return summary(entry);
         ensure(entry.meta.status !== 'retired', 'Это правило уже снято. Запиши новое, если передумал.', 409, 'NOTEBOOK_RETIRED');
         entry.meta.last_request_id = requestId; entry.meta.updated_at = at;
-        if (p.op === 'retire') { entry.fields.retired_reason = clean(p.reason, 'Почему снял', 400); entry.meta.status = 'retired'; }
+        if (p.op === 'retire') { this.assertStands(entry, actor); entry.fields.retired_reason = clean(p.reason, 'Почему снял', 400); entry.meta.status = 'retired'; }
         else if (p.op === 'confirm') {
           const fresh = this.evidence(p.evidence).lived.filter(id => !entry.meta.evidence.includes(id));
           ensure(fresh.length > 0, 'Подтверждение — это новая закрытая запись журнала, которой в основании правила ещё нет', 409, 'NOTEBOOK_NO_NEW_EVIDENCE');
@@ -379,6 +387,7 @@ export class PartnerNotebook {
         ensure(entry.meta.author === author, owner ? 'Это запись самого партнёра. Возразите ему заметкой — снять её может только он.'
           : 'Этот запрет поставил владелец. Снять его может только владелец; несогласие запиши ответом на его заметку.', 403, owner ? 'NOTEBOOK_PARTNER_ENTRY' : 'NOTEBOOK_OWNER_LOCK');
         ensure(entry.meta.status === 'active', 'Эта запись уже снята', 409, 'NOTEBOOK_RETIRED');
+        if (!owner) this.assertStands(entry, actor);
         entry.fields.retired_reason = clean(p.reason, 'Почему снял', 400, { optional: owner }) || 'Снято владельцем.';
         Object.assign(entry.meta, { status: 'retired', updated_at: at, last_request_id: requestId });
         return { stop_id: entry.id, status: 'retired', file_sha256: this.save('stops', doc) };
@@ -424,8 +433,11 @@ export class PartnerNotebook {
         if (entry.meta.last_request_id === requestId) return { note_id: entry.id, status: entry.meta.status, stance: entry.meta.stance };
         ensure(entry.meta.status === 'open', 'На эту заметку уже есть ответ', 409, 'NOTEBOOK_CLOSED');
         ensure(['agree', 'partly', 'disagree'].includes(p.stance), 'Позиция: agree, partly или disagree', 400, 'NOTEBOOK_INVALID');
+        const prefix = ENTRY_ID.exec(entry.meta.about ?? '')?.[1];
+        const target = prefix && prefix !== 'N' ? this.load(SECTION_BY_PREFIX[prefix]).entries.find(item => item.id === entry.meta.about) : null;
+        ensure(!(p.stance === 'disagree' && target?.meta.retired_run_id === actor.runId), 'Ты уже снял эту запись в этом запуске — это согласие. Ответь честно: agree или partly.', 409, 'NOTEBOOK_INCONSISTENT');
         entry.fields.answer = clean(p.answer, 'Ответ', 1000);
-        Object.assign(entry.meta, { status: 'answered', stance: p.stance, answered_at: at, last_request_id: requestId });
+        Object.assign(entry.meta, { status: 'answered', stance: p.stance, answered_at: at, answer_run_id: actor.runId, last_request_id: requestId });
         return { note_id: entry.id, status: 'answered', stance: p.stance, file_sha256: this.save('notes', doc) };
       }
       default: throw new AppError('Неизвестная команда тетради', 400);
