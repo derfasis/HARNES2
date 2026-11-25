@@ -21,7 +21,7 @@ def call_api(route, payload=None):
     connection = json.loads((ROOT / "data/runtime/mcp-connection.json").read_text(encoding="utf-8"))
     headers = {"Authorization": "Bearer " + connection["token"], "Content-Type": "application/json"}
     request = urllib.request.Request(connection["url"] + route, data=json.dumps(payload).encode() if payload is not None else None, headers=headers)
-    with urllib.request.urlopen(request, timeout=30) as response:
+    with urllib.request.urlopen(request, timeout=75) as response:
         return json.loads(response.read())
 
 

@@ -15,7 +15,6 @@ import { MtprotoTelegramChannel } from './channels/telegram-mtproto.mjs';
 import { BrowserSourceReader, browserPolicy } from './sources/browser-readonly.mjs';
 import { toolDefinitions, callTool } from './tools.mjs';
 import { exportPartner } from './export.mjs';
-import { OwnerChat } from './owner-chat.mjs';
 import { loadPartnerKnowledge } from './knowledge.mjs';
 import { listCandidates } from './executive-donors.mjs';
 import { AppError, ensure, requiredText } from './errors.mjs';
@@ -148,8 +147,6 @@ export async function start({ config = loadConfig(), directory = DATA, deploymen
   let telegramReaders = [];
   const composeReaders = () => { scheduler.sourceReaders = [...telegramReaders, ...browserReaders]; };
   const scheduler = new Scheduler(service,runtime,telegram,[]);
-  // The owner's private bot. It talks to one chat only and never to contacts.
-  const ownerChat = new OwnerChat(service);
   telegram.onSourcesReady = readers => { telegramReaders = readers ?? []; composeReaders(); };
   composeReaders();
   let shuttingDown = false, servicePort = config.server.port;
@@ -172,13 +169,21 @@ export async function start({ config = loadConfig(), directory = DATA, deploymen
       if (req.method === 'GET' && url.pathname === '/api/session') return send(200,{token:operatorToken});
       if (url.pathname.startsWith('/internal/')) {
         const bearer = req.headers.authorization?.replace(/^Bearer /,'');
-        const scope = tokenEquals(bearer,mcpToken) ? {kind:'agent',conversationId:null} : runTokens.get(bearer);
+        // The connection token belongs to the owner's chat gateway (Hermes, adapters/hermes/gateway).
+        const scope = tokenEquals(bearer,mcpToken) ? {kind:'agent',conversationId:null,ownerChat:true} : runTokens.get(bearer);
         ensure(scope && (!scope.expiresAt || scope.expiresAt > Date.now()), 'Недействительный токен инструмента', 403);
         if (req.method === 'GET' && url.pathname === '/internal/tools') return send(200,{tools:toolDefinitions(scope)});
         if (req.method === 'POST' && url.pathname === '/internal/tools/call') {
           const body = await readBody(req);
           requiredText(body.request_id,'request_id',150); requiredText(body.name,'name',100);
           return send(200,await callTool(service,scope,body.name,body.arguments ?? {},body.request_id));
+        }
+        if (req.method === 'POST' && url.pathname === '/internal/chat/turn') {
+          // Only the gateway opens and closes chat turns; a desk run's token cannot.
+          ensure(scope.ownerChat === true, 'Ход в чате открывает только шлюз владельца', 403, 'OWNER_CHAT_GATEWAY_ONLY');
+          const body = await readBody(req);
+          ensure(['begin','end'].includes(body.op), 'op: begin или end');
+          return send(200, body.op === 'begin' ? await service.ownerChat.begin(body) : await service.ownerChat.end(body));
         }
         return send(404,{error:'not found'});
       }
@@ -292,7 +297,7 @@ export async function start({ config = loadConfig(), directory = DATA, deploymen
           audience_enabled:config.audience?.enabled===true,scout_enabled:config.scout?.enabled===true,control_plane_enabled:config.controlPlane?.enabled===true,
           model_endpoint_allowlisted:(config.modelProfiles?.allowedBaseUrls?.length ?? 0)>0,
           public_source_configured:(config.opportunity.telegramSources.length + config.opportunity.browserSources.length + service.scout.monitorAuthorityPolicies().length)>0},
-        release,activation:service.deployment?.summary() ?? null,owner_chat:ownerChat.status() });
+        release,activation:service.deployment?.summary() ?? null,owner_chat:service.ownerChat.status() });
       // Outside the discovery block on purpose: a route nested inside another route's prefix
       // is unreachable, and these two paths are not discovery routes at all.
       if (url.pathname === '/api/outcomes') {
@@ -409,7 +414,9 @@ export async function start({ config = loadConfig(), directory = DATA, deploymen
   let closing = null, activationTimer = null;
   const close = (reason = 'operator_stop') => {
     if (closing) return closing;
-    shuttingDown=true; scheduler.stop(); ownerChat.stop();
+    // An open chat turn is closed first: its run is recorded as interrupted while the store is
+    // still there, and a write waiting for the desk stops waiting.
+    shuttingDown=true; scheduler.stop(); const chatClosed = service.ownerChat.close();
     if (activationTimer) clearTimeout(activationTimer);
     service.deployment?.stop(reason);
     service.control.close();
@@ -426,7 +433,7 @@ export async function start({ config = loadConfig(), directory = DATA, deploymen
     // committing to it, which is how a run ends as `interrupted` with the receipt half-written.
     // Both loops are drained here, and the store is closed after both are quiet.
     while (scheduler.busy || scheduler.reasonBusy || scheduler.privateBusy || scheduler.workBusy || scheduler.scoutRuntime.busy || scheduler.scoutReasonBusy || scheduler.actionRuntime.busy || telegram.polling || telegram.sourceReconcile) await new Promise(resolve=>setTimeout(resolve,50));
-    await closed; await telegram.stop();
+    await closed; await telegram.stop(); await chatClosed;
     try { persistIdentity('stopped'); }
     finally { service.control.releaseProcess(); store.close(); }
     })();
@@ -443,7 +450,6 @@ export async function start({ config = loadConfig(), directory = DATA, deploymen
     activationTimer.unref();
   }
   scheduler.start(); telegram.start();
-  if (ownerChat.enabled) ownerChat.start();
   console.log(`Digital AI Partner: http://127.0.0.1:${servicePort}`);
   console.log(`Hermes ${runtimeReadiness(config).ready ? 'enabled' : 'waiting for model configuration'}; Telegram ${config.telegram.enabled ? 'enabled' : 'disabled'}.`);
   // The scheduler and the channel are returned so the wiring itself can be tested: a test that

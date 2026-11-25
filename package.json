@@ -20,6 +20,10 @@
     "export": "node --env-file-if-exists=.env scripts/export.mjs",
     "import": "node --env-file-if-exists=.env scripts/import.mjs",
     "mcp": ".venv\\Scripts\\python.exe adapters/mcp/server.py",
+    "chat:setup": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/partner-chat.ps1 -Action Setup",
+    "chat:start": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/partner-chat.ps1 -Action Start",
+    "chat:stop": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/partner-chat.ps1 -Action Stop",
+    "chat:status": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/partner-chat.ps1 -Action Status",
     "test:engagement": "node --test tests/engagement.test.mjs tests/engagement-ui.test.mjs",
     "test:engagement:isolated": "node scripts/test-engagement-isolated.mjs"
   },

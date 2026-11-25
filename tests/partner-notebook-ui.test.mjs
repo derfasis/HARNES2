@@ -130,7 +130,7 @@ test('the dashboard serves the tab and the API keeps the two authors apart over 
   const mcp = readJson(path.join(directory, 'runtime/mcp-connection.json'));
   const internal = await fetch(`${origin}/internal/tools/call`, { method: 'POST', headers: { Authorization: `Bearer ${mcp.token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ request_id: id(), name: 'partner_notebook_rule', arguments: { op: 'add', title: 'Подложное', text: 'Правило без запуска.', applies_to: 'Всегда.' } }) });
-  assert.equal(internal.status, 403); assert.equal((await internal.json()).code, 'NOTEBOOK_RUN_REQUIRED');
+  assert.equal(internal.status, 403); assert.equal((await internal.json()).code, 'OWNER_CHAT_TURN_REQUIRED');
 
   const after = await read();
   assert.deepEqual(after.sections.stops.entries.map(entry => [entry.id, entry.meta.author]), [['S-0001', 'owner']]);
