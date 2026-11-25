@@ -1,210 +1,295 @@
 {
   "schema": "partner-knowledge-v1",
   "id": "yovi-prelaunch",
-  "version": "1.1.0",
-  "title": "YOVI: условия из презентаций для подготовки к запуску",
+  "version": "2.0.0",
+  "title": "YOVI: условия из презентаций и кабинета (ноябрь 2026)",
   "status": "owner_approved_prelaunch",
   "owner_specification": {
     "phase": "prelaunch",
     "status": "approved",
-    "recorded_at": "2026-10-23T20:40:46.002Z",
-    "review_after": "2026-10-25T00:00:00Z",
+    "recorded_at": "2026-11-22T09:00:00.000Z",
+    "review_after": "2026-11-28T00:00:00Z",
     "owner_decision": "use_supplied_presentations_for_prelaunch_preparation",
     "sources": [
       {
-        "id": "yovi-promo-2026-10",
-        "file_name": "YOVI_PROMO (2).pdf",
-        "document_version": "11 slides; owner-supplied copy recorded 2026-10-20",
-        "sha256": "e49d6236916543bb06e752633b2c1b70f71d37ee7fa9a68c78942750c2e835ae"
+        "id": "yovi-dashboard-2026-11-22",
+        "file_name": "yovi-dashboard-2026-11-22.png",
+        "document_version": "Скриншот кабинета YOVI, предоставлен владельцем 2026-11-22",
+        "sha256": "a640135e6bd081ac89b6140d84e2869208c074ff65bc75fa629291325995b570"
       },
       {
-        "id": "yovi-partner-2026-10",
-        "file_name": "YOVI_PARTNER.pdf",
-        "document_version": "25 slides; owner-supplied copy recorded 2026-10-20",
-        "sha256": "f07b80128690d396b15d1135d1ebad86c351849e36f82b46cbeb812b24248471"
+        "id": "yovi-promo-2026-11",
+        "file_name": "YOVI-promo.pdf",
+        "document_version": "11 слайдов; копия владельца от 2026-11-22",
+        "sha256": "f226bd1ba07d78cb604e582e842293c13f42e192b99c799b19ac70376b667228"
       },
       {
-        "id": "yovi-trade-2026-10",
-        "file_name": "YOVI-TRADE-presentation (2).pdf",
-        "document_version": "21 slides; owner-supplied copy recorded 2026-10-20",
-        "sha256": "5e6e426db76529a3fdfe8b8e6e1242c4eb63571a59dc4d514d079e6603a51ca2"
+        "id": "yovi-partner-2026-11",
+        "file_name": "YOVI-partner.pdf",
+        "document_version": "26 слайдов; копия владельца от 2026-11-22",
+        "sha256": "11a4a3d95c2a349e8f33b2d0f0f6f555d4b0036b0e19233280fa9ce60696c757"
+      },
+      {
+        "id": "yovi-token-2026-11",
+        "file_name": "YOVI-token.pdf",
+        "document_version": "29 слайдов; копия владельца от 2026-11-22",
+        "sha256": "ed64f43cd7b2838a0f97ac3252126f7af3fce0f75b45224418d1bb237a3d79b1"
+      },
+      {
+        "id": "yovi-presentation-2026-11",
+        "file_name": "YOVI-presentation.pdf",
+        "document_version": "19 слайдов; копия владельца от 2026-11-22; условия из неё не извлекались",
+        "sha256": "3130d70c8acd61bc5694b63e0dfecb58e8fd391b197c5bc185da7fd40d0e2d70"
       }
     ],
-    "approved_content_sha256": "294ede425f0ab38546b6afbf52d9f23d5ab82fdc984954fcea454891cfad5ad6"
+    "approved_content_sha256": "f874fb4a0682ba4b3cc07bb0f309a27fef14a86908fdf0fdd99b0f0aeff1fb79"
   },
   "facts": [
     {
-      "id": "promo-virtual-balance",
-      "text": "В презентации заявлены $100 на промо-балансе за регистрацию; сам баланс назван виртуальным и не подлежащим выводу деньгами, он используется для получения YOVI Token.",
+      "id": "dashboard-promo-window",
+      "text": "В кабинете на 2026-11-22 указано: промо идёт до 28 ноября 2026 года; осталось 36 605 мест. Это новее даты 25 ноября из презентации PROMO; часовой пояс окончания не указан.",
       "kind": "owner_approved_presentation_summary",
-      "source_id": "yovi-promo-2026-10",
-      "section": "PDF page 2",
-      "source": "YOVI_PROMO (2).pdf, стр. PDF 2"
+      "source_id": "yovi-dashboard-2026-11-22",
+      "section": "Кабинет",
+      "source": "yovi-dashboard-2026-11-22.png, Кабинет"
+    },
+    {
+      "id": "dashboard-promo-terms",
+      "text": "В кабинете указано: $100 промо-долларов за регистрацию и $10 промо-долларов за каждого приглашённого после верификации. Промо-доллары названы не обычными деньгами, их нельзя вывести напрямую; реферальный бонус начисляется после выполнения условий промо.",
+      "kind": "owner_approved_presentation_summary",
+      "source_id": "yovi-dashboard-2026-11-22",
+      "section": "Кабинет",
+      "source": "yovi-dashboard-2026-11-22.png, Кабинет"
+    },
+    {
+      "id": "dashboard-presale",
+      "text": "В кабинете указан пресейл монеты YOVI по фиксированной цене $3.00 за монету (отмечено: это не расчётная цена сайта $1.27 и не рыночная цена); оплата с основного баланса; нужен активный пакет от $100; показано «1,000 YOVI still available».",
+      "kind": "owner_approved_presentation_summary",
+      "source_id": "yovi-dashboard-2026-11-22",
+      "section": "Кабинет",
+      "source": "yovi-dashboard-2026-11-22.png, Кабинет"
+    },
+    {
+      "id": "dashboard-presale-progress",
+      "text": "На 2026-11-22 в кабинете показано: распределено 14 671 из 100 000 монет пресейла, осталось 85 329. Монеты можно отправить в стейкинг.",
+      "kind": "owner_approved_presentation_summary",
+      "source_id": "yovi-dashboard-2026-11-22",
+      "section": "Кабинет",
+      "source": "yovi-dashboard-2026-11-22.png, Кабинет"
     },
     {
       "id": "promo-free-registration",
-      "text": "На слайде указано, что для регистрации не нужна покупка лицензии и первоначальное вложение; это относится к регистрации и не означает, что все дальнейшие действия бесплатны.",
+      "text": "В презентации заявлены $100 на виртуальном промо-балансе за регистрацию без покупки лицензии и без стартовых вложений. Баланс нельзя вывести деньгами; он используется для получения YOVI Token.",
       "kind": "owner_approved_presentation_summary",
-      "source_id": "yovi-promo-2026-10",
+      "source_id": "yovi-promo-2026-11",
       "section": "PDF page 2",
-      "source": "YOVI_PROMO (2).pdf, стр. PDF 2"
+      "source": "YOVI-promo.pdf, PDF page 2"
     },
     {
-      "id": "promo-unlock-license",
-      "text": "Для разблокировки PROMO-токенов презентация указывает лицензию от $100.",
+      "id": "promo-referral",
+      "text": "Заявлено +$10 PROMO за каждого нового участника. Без лицензии начисляется только за первых двух друзей, дальше — после активации лицензии.",
       "kind": "owner_approved_presentation_summary",
-      "source_id": "yovi-promo-2026-10",
-      "section": "PDF page 8",
-      "source": "YOVI_PROMO (2).pdf, стр. PDF 8"
-    },
-    {
-      "id": "promo-daily-claims",
-      "text": "Промо-стейкинг описан как 100-дневный с ежедневным получением токенов; пропущенные дни, согласно слайду, не переносятся.",
-      "kind": "owner_approved_presentation_summary",
-      "source_id": "yovi-promo-2026-10",
-      "section": "PDF page 4",
-      "source": "YOVI_PROMO (2).pdf, стр. PDF 4"
-    },
-    {
-      "id": "promo-referral-limit",
-      "text": "Слайд рекламирует +$10 PROMO за каждого приглашённого, но прямо ограничивает начисление без лицензии первыми двумя приглашёнными; следующие начисления показаны после активации лицензии.",
-      "kind": "owner_approved_presentation_summary",
-      "source_id": "yovi-promo-2026-10",
+      "source_id": "yovi-promo-2026-11",
       "section": "PDF page 3",
-      "source": "YOVI_PROMO (2).pdf, стр. PDF 3"
+      "source": "YOVI-promo.pdf, PDF page 3"
     },
     {
-      "id": "partner-license-terms",
-      "text": "Для участия в YOVI PARTNER презентация требует активную лицензию сроком 12 месяцев номиналами $50, $100, $250 и $500; повышение лицензии указано как доплата разницы. Это внутренняя партнёрская лицензия, не утверждение о государственном разрешении на финансовую деятельность.",
+      "id": "promo-staking",
+      "text": "Промо-стейкинг 100 дней: $100 промо → 0,1 YOVI в день → 10 YOVI; $200 → 20; $500 → 50; $1000 → 100. Забирать нужно ежедневно, пропущенные дни не переносятся.",
       "kind": "owner_approved_presentation_summary",
-      "source_id": "yovi-partner-2026-10",
+      "source_id": "yovi-promo-2026-11",
       "section": "PDF page 4",
-      "source": "YOVI_PARTNER.pdf, стр. PDF 4"
+      "source": "YOVI-promo.pdf, PDF page 4"
     },
     {
-      "id": "promo-price-and-return-limits",
-      "text": "В материалах различаются расчётная цена и рыночная цена; пример с условной рыночной ценой $35 обозначен как сценарий до комиссий, предполагающий возможность разблокировки и продажи. Это не обещание дохода или доступности продажи.",
+      "id": "promo-scenarios",
+      "text": "Слайд со сценариями 10 YOVI × $35/$50/$70 = $350/$500/$700 сам помечен как «не прогноз и не гарантия». Использовать его как ожидаемый доход нельзя.",
       "kind": "owner_approved_presentation_summary",
-      "source_id": "yovi-promo-2026-10",
-      "section": "PDF pages 6, 8",
-      "source": "YOVI_PROMO (2).pdf, стр. PDF 6, 8"
+      "source_id": "yovi-promo-2026-11",
+      "section": "PDF page 5",
+      "source": "YOVI-promo.pdf, PDF page 5"
     },
     {
-      "id": "promo-conditional-growth",
-      "text": "Слайд с предпродажей 100 000 YOVI по $3 описывает потенциал роста как негарантированный.",
+      "id": "promo-reference-price",
+      "text": "Заявлено: расчётная цена на сайте стартует с $1 и растёт на 1% в день, по формуле ≈ $37,78 через 365 дней; она отличается от биржевой цены, а выкупы не гарантируют цену продажи.",
       "kind": "owner_approved_presentation_summary",
-      "source_id": "yovi-promo-2026-10",
-      "section": "PDF page 7",
-      "source": "YOVI_PROMO (2).pdf, стр. PDF 7"
+      "source_id": "yovi-promo-2026-11",
+      "section": "PDF page 6",
+      "source": "YOVI-promo.pdf, PDF page 6"
     },
     {
-      "id": "promo-preliminary-window",
-      "text": "На последнем слайде указаны предварительные даты промо-окна 25 октября — 25 ноября 2026 года; также сказано, что для стейкинга требуются Telegram-канал и чат, привязка и проверка аккаунта.",
+      "id": "promo-license-unlock",
+      "text": "Для разблокировки PROMO-токенов нужна лицензия от $100. Лицензия также открывает Partner Bonus и YOVI Bonus (в YOVI TOKEN) и Binary Bonus (в USDT); выплаты зависят от структуры, активности и условий плана.",
       "kind": "owner_approved_presentation_summary",
-      "source_id": "yovi-promo-2026-10",
+      "source_id": "yovi-promo-2026-11",
+      "section": "PDF pages 8-9",
+      "source": "YOVI-promo.pdf, PDF pages 8-9"
+    },
+    {
+      "id": "promo-yovi-bonus-placement",
+      "text": "Заявлено, что YOVI BONUS возможен без личных приглашений, но размещение в структуре не гарантируется.",
+      "kind": "owner_approved_presentation_summary",
+      "source_id": "yovi-promo-2026-11",
+      "section": "PDF page 10",
+      "source": "YOVI-promo.pdf, PDF page 10"
+    },
+    {
+      "id": "promo-old-dates",
+      "text": "В презентации PROMO стоят ориентировочные даты 25 октября — 25 ноября 2026; для стейкинга нужны Telegram-канал и чат, привязка аккаунта и верификация. Текущая дата окончания берётся из кабинета (28 ноября).",
+      "kind": "owner_approved_presentation_summary",
+      "source_id": "yovi-promo-2026-11",
       "section": "PDF page 11",
-      "source": "YOVI_PROMO (2).pdf, стр. PDF 11"
+      "source": "YOVI-promo.pdf, PDF page 11"
     },
     {
-      "id": "trade-presentation-scope",
-      "text": "YOVI TRADE описан в презентации как технология, связывающая независимые пользовательские счета и передающая торговые действия; это рекламное описание, а не подтверждение работающего сервиса, конкретного брокера, условий вывода или результатов торговли.",
+      "id": "partner-licenses",
+      "text": "Для участия нужна активная лицензия на 12 месяцев: $50, $100, $250 или $500; апгрейд в любой момент с доплатой разницы.",
       "kind": "owner_approved_presentation_summary",
-      "source_id": "yovi-trade-2026-10",
-      "section": "PDF pages 15, 21",
-      "source": "YOVI-TRADE-presentation (2).pdf, стр. PDF 15, 21"
+      "source_id": "yovi-partner-2026-11",
+      "section": "PDF page 4",
+      "source": "YOVI-partner.pdf, PDF page 4"
     },
     {
-      "id": "partner-binary-activation",
-      "text": "Для активации Binary Bonus презентация требует лично пригласить двух партнёров: одного в левую и одного в правую ветку; оба должны иметь активную лицензию.",
+      "id": "partner-binary",
+      "text": "Binary Bonus активируется после двух личных партнёров с активной лицензией (один слева, один справа) и считается от объёма меньшей ветки: 5%/7%/10%/12% для лицензий $50/$100/$250/$500, выплата в USDT, максимум $50 000 в месяц (стр. 10).",
       "kind": "owner_approved_presentation_summary",
-      "source_id": "yovi-partner-2026-10",
-      "section": "PDF pages 5",
-      "source": "YOVI_PARTNER.pdf, стр. PDF 5"
+      "source_id": "yovi-partner-2026-11",
+      "section": "PDF pages 5-6",
+      "source": "YOVI-partner.pdf, PDF pages 5-6"
     },
     {
-      "id": "partner-binary-rates-limit",
-      "text": "Binary Bonus считается от объёма меньшей ветки. Таблица по лицензии: $50 — 5%, $100 — 7%, $250 — 10%, $500 — 12%. PDF 10 задаёт максимум Binary Bonus $50 000 в месяц, PDF 18 относит его к выплатам в USDT. Это заявленные ставки и предел, не прогноз личного дохода и не доказательство выплат.",
+      "id": "partner-ranks",
+      "text": "Ранг по объёму меньшей ветки и минимальной лицензии: START $1 000/$50; BUILDER $3 000/$100; LEADER $10 000/$250; PRO $25 000/$250; MASTER $50 000/$500; ELITE $100 000/$500. Ранг можно получить сразу при выполнении условий.",
       "kind": "owner_approved_presentation_summary",
-      "source_id": "yovi-partner-2026-10",
-      "section": "PDF pages 6, 10, 18",
-      "source": "YOVI_PARTNER.pdf, стр. PDF 6, 10, 18"
-    },
-    {
-      "id": "partner-rank-qualification",
-      "text": "Таблица рангов задаёт объём меньшей ветки / минимальную лицензию: START — $1 000 / $50; BUILDER — $3 000 / $100; LEADER — $10 000 / $250; PRO — $25 000 / $250; MASTER — $50 000 / $500; ELITE — $100 000 / $500. По PDF 8 ранг можно получить сразу при выполнении условий без последовательного прохождения предыдущих рангов.",
-      "kind": "owner_approved_presentation_summary",
-      "source_id": "yovi-partner-2026-10",
-      "section": "PDF pages 7, 8",
-      "source": "YOVI_PARTNER.pdf, стр. PDF 7, 8"
+      "source_id": "yovi-partner-2026-11",
+      "section": "PDF pages 7-8",
+      "source": "YOVI-partner.pdf, PDF pages 7-8"
     },
     {
       "id": "partner-rank-bonus",
-      "text": "Rank Bonus на слайде — ежемесячная премия в USDT при подтверждении квалификации: START $80; BUILDER $250; LEADER $800; PRO $1 500; MASTER $4 000; ELITE $9 000. Если квалификация за месяц не подтверждена, премия за этот месяц не начисляется, ранее достигнутый статус сохраняется. Таблица не доказывает фактические выплаты.",
+      "text": "Ежемесячный Rank Bonus при подтверждении ранга: $80/$250/$800/$1 500/$4 000/$9 000 USDT от START до ELITE; без подтверждения бонуса за месяц нет, достигнутый статус сохраняется.",
       "kind": "owner_approved_presentation_summary",
-      "source_id": "yovi-partner-2026-10",
-      "section": "PDF pages 9",
-      "source": "YOVI_PARTNER.pdf, стр. PDF 9"
+      "source_id": "yovi-partner-2026-11",
+      "section": "PDF page 9",
+      "source": "YOVI-partner.pdf, PDF page 9"
     },
     {
-      "id": "partner-matching-bonus",
-      "text": "Matching Bonus описан как доля Binary Bonus команды с выплатой в USDT. Ставки по открытым уровням: START 5%; BUILDER 8/5%; LEADER 8/5/3%; PRO 10/5/3/3%; MASTER 10/5/3/3/5%; ELITE 12/5/3/3/5/10%. PDF 10 заявляет отсутствие ограничения суммы Matching, но глубина и ставки ограничены таблицей. Для ELITE на уровнях 3 и 4 в оригинале по 3%, не по 5%.",
+      "id": "partner-matching",
+      "text": "Matching Bonus от Binary Bonus команды, в USDT, без общего лимита: START 5%; BUILDER 8/5; LEADER 8/5/3; PRO 10/5/3/3; MASTER 10/5/3/3/5; ELITE 12/5/3/3/5/10 по уровням.",
       "kind": "owner_approved_presentation_summary",
-      "source_id": "yovi-partner-2026-10",
-      "section": "PDF pages 10, 11",
-      "source": "YOVI_PARTNER.pdf, стр. PDF 10, 11"
+      "source_id": "yovi-partner-2026-11",
+      "section": "PDF pages 10-11",
+      "source": "YOVI-partner.pdf, PDF pages 10-11"
     },
     {
-      "id": "partner-token-bonus",
-      "text": "Partner Bonus описан как начисление с покупок лицензий в структуре в YOVI TOKEN. Уровни 1–7: 10/10/10/10/10/20/20%. Первый уровень — без квалификации при лицензии от $100; последующие требуют START, BUILDER, LEADER, PRO, MASTER, ELITE. Открытая однажды по рангу глубина сохраняется при снижении месячного объёма при действующей лицензии. Сначала определяется долларовый эквивалент, затем перевод в YOVI TOKEN по расчётной цене сайта на момент начисления; это не выплата той же суммы USDT.",
+      "id": "partner-partner-bonus",
+      "text": "Partner Bonus с покупок лицензий в структуре, в YOVI TOKEN: уровни 1–5 по 10%, 6–7 по 20%; уровень 1 без ранга при лицензии от $100, далее открываются рангами START…ELITE. Сумма считается в долларах и конвертируется по расчётной цене сайта в момент начисления.",
       "kind": "owner_approved_presentation_summary",
-      "source_id": "yovi-partner-2026-10",
-      "section": "PDF pages 12, 13, 14",
-      "source": "YOVI_PARTNER.pdf, стр. PDF 12, 13, 14"
+      "source_id": "yovi-partner-2026-11",
+      "section": "PDF pages 12-14",
+      "source": "YOVI-partner.pdf, PDF pages 12-14"
     },
     {
-      "id": "partner-large-branch-bonus",
-      "text": "YOVI Bonus описан как начисление в YOVI TOKEN с глубины большой ветки. Лицензия от $100 — 4 уровня по 1%; START — 5 по 1%; BUILDER — 6 по 1%; LEADER — 7 по 1%; PRO — 8 по 1,5%; MASTER — 9 по 1,5%; ELITE — 10 уровней, первые девять по 1%, десятый — 2%. Глубина по однажды достигнутому рангу сохраняется при активной лицензии. Не выводить из этой таблицы денежную стоимость токенов или фактический доход.",
+      "id": "partner-yovi-bonus",
+      "text": "YOVI Bonus с глубины большей ветки, в YOVI TOKEN: лицензия от $100 — 4 уровня по 1%; START 5; BUILDER 6; LEADER 7 уровней по 1%; PRO 8 и MASTER 9 уровней по 1,5%; ELITE 10 уровней (1–9 по 1%, 10-й 2%). В токен-презентации похожий бонус назван Power Bonus.",
       "kind": "owner_approved_presentation_summary",
-      "source_id": "yovi-partner-2026-10",
-      "section": "PDF pages 15, 16, 17",
-      "source": "YOVI_PARTNER.pdf, стр. PDF 15, 16, 17"
+      "source_id": "yovi-partner-2026-11",
+      "section": "PDF pages 15-16",
+      "source": "YOVI-partner.pdf, PDF pages 15-16"
     },
     {
-      "id": "partner-denominations",
-      "text": "PDF 18 явно разделяет виды начислений: Binary, Matching и Rank — USDT; Partner и YOVI Bonus — YOVI TOKEN. Для токеновых бонусов долларовый эквивалент используется для пересчёта по расчётной цене. Расчётная цена не устанавливает рыночную цену продажи и не доказывает возможность получить тот же эквивалент деньгами.",
+      "id": "partner-usdt-withholding",
+      "text": "Из USDT-дохода удерживается 10%: сначала копится на купон YOVI TRADE до его цены ($750 — промо-цена для первых 10 000 человек, потом выше), после покрытия купона эти 10% идут на развитие компании.",
       "kind": "owner_approved_presentation_summary",
-      "source_id": "yovi-partner-2026-10",
-      "section": "PDF pages 18, 19",
-      "source": "YOVI_PARTNER.pdf, стр. PDF 18, 19"
+      "source_id": "yovi-partner-2026-11",
+      "section": "PDF page 19",
+      "source": "YOVI-partner.pdf, PDF page 19"
     },
     {
-      "id": "partner-staking-displayed-terms",
-      "text": "Презентация описывает staking на 6 или 12 месяцев с ежедневными начислениями в YOVI TOKEN. Таблица PDF 22 (колонки 6 мес. / 12 мес.): лицензия $50 — 24% / 60%; $100 — 30% / 72%; $250 — 36% / 96%; $500 — 48% / 120%. Не уточнены годовая или суммарная трактовка процентов, база и простое/сложное начисление. PDF 23 призывает компенсировать стоимость лицензии стейкингом без расчёта или гарантии. Не превращать эти заявления в обещание денежного дохода или окупаемости.",
+      "id": "token-initial-supply",
+      "text": "Заявлено: стартовый выпуск 100 000 YOVI × $3 для продажи на сайте, стейкинга и начальной ликвидности. Покупка доступна с лицензией $100/$250/$500 (с $50 — нет), с активной лицензией и балансом USDT, максимум 1 000 YOVI на участника.",
       "kind": "owner_approved_presentation_summary",
-      "source_id": "yovi-partner-2026-10",
-      "section": "PDF pages 21, 22, 23",
-      "source": "YOVI_PARTNER.pdf, стр. PDF 21, 22, 23"
+      "source_id": "yovi-token-2026-11",
+      "section": "PDF pages 9-10",
+      "source": "YOVI-token.pdf, PDF pages 9-10"
     },
     {
-      "id": "trade-product-and-partner-role",
-      "text": "Trade-презентация описывает marketplace отобранных трейдеров/алгоритмов, где пользователю показывают результаты, историю, риск и статистику; отдельно описывает роль партнёра как продвижение технологического продукта и развитие пользовательской сети за вознаграждение. Эти страницы не задают цену Trade, ставку партнёрской комиссии за торговый продукт и не подтверждают текущую доступность сервиса. Не подменять цену лицензии Partner ценой Trade.",
+      "id": "token-issuance",
+      "text": "Заявлено: после стартовых 100 000 новые токены выпускаются только через бонусы маркетинга YOVI Partner, связанные с покупкой лицензий; бонус считается в $ и конвертируется по расчётной цене (пример: $5 / $1 = 5 YOVI).",
       "kind": "owner_approved_presentation_summary",
-      "source_id": "yovi-trade-2026-10",
-      "section": "PDF pages 17, 20",
-      "source": "YOVI-TRADE-presentation (2).pdf, стр. PDF 17, 20"
+      "source_id": "yovi-token-2026-11",
+      "section": "PDF pages 11-12, 15",
+      "source": "YOVI-token.pdf, PDF pages 11-12, 15"
+    },
+    {
+      "id": "token-reference-price-schedule",
+      "text": "Заявлено: расчётная цена стартует с $1, месяцы 1–12 растут на 1% в день, месяцы 13–24 на 0,5% в день, дальше медленнее; к концу первого года ≈ $35,95. Это расходится с ≈ $37,78 через 365 дней в презентации PROMO (стр. 6).",
+      "kind": "owner_approved_presentation_summary",
+      "source_id": "yovi-token-2026-11",
+      "section": "PDF page 13",
+      "source": "YOVI-token.pdf, PDF page 13"
+    },
+    {
+      "id": "token-two-prices",
+      "text": "Заявлены две цены: расчётная (на сайте) и рыночная (на бирже). Компания заявляет, что использует инструменты поддержки, чтобы держать рыночную цену на целевом уровне; биржа, листинг и механизм в материале не подтверждены.",
+      "kind": "owner_approved_presentation_summary",
+      "source_id": "yovi-token-2026-11",
+      "section": "PDF page 14",
+      "source": "YOVI-token.pdf, PDF page 14"
+    },
+    {
+      "id": "token-utility-buyback",
+      "text": "Заявлено: компания может временно требовать оплату токеном в YOVI Trade (до 50% стоимости лицензии алгоритма, пополнение баланса комиссий, временный доступ к рангу); выкуп финансируется частью покупок лицензий, долей прибыли пользователей YOVI Trade и собственными пулами; часть выкупленного сжигается.",
+      "kind": "owner_approved_presentation_summary",
+      "source_id": "yovi-token-2026-11",
+      "section": "PDF pages 16-18",
+      "source": "YOVI-token.pdf, PDF pages 16-18"
+    },
+    {
+      "id": "token-staking-limits",
+      "text": "Стейкинг 6 или 12 месяцев, начисление ежедневно в YOVI. Лимит в $ по лицензии: $50 → $100; $100 → $250; $250 → $750; $500 → $2 000; количество токенов = лимит / текущая расчётная цена (пример $750: при $1 — 750, при $3 — 250, при $6 — 125).",
+      "kind": "owner_approved_presentation_summary",
+      "source_id": "yovi-token-2026-11",
+      "section": "PDF pages 19-21",
+      "source": "YOVI-token.pdf, PDF pages 19-21"
+    },
+    {
+      "id": "token-staking-rates",
+      "text": "Заявленная доходность стейкинга за 6/12 месяцев: $50 — 24%/60%; $100 — 30%/72%; $250 — 36%/96%; $500 — 48%/120% (та же таблица в YOVI-partner.pdf, стр. 23). Порядок расчёта (простой или сложный процент, база) не указан.",
+      "kind": "owner_approved_presentation_summary",
+      "source_id": "yovi-token-2026-11",
+      "section": "PDF page 22",
+      "source": "YOVI-token.pdf, PDF page 22"
+    },
+    {
+      "id": "token-staking-example",
+      "text": "Пример из презентации: лицензия $250, лимит $750 при цене $3 = 250 YOVI, за 12 месяцев +96% = 490 YOVI, × $35,95 = $17 615,50 «по расчётной цене; рыночная может отличаться». Это иллюстрация, не обещание.",
+      "kind": "owner_approved_presentation_summary",
+      "source_id": "yovi-token-2026-11",
+      "section": "PDF pages 23-25",
+      "source": "YOVI-token.pdf, PDF pages 23-25"
+    },
+    {
+      "id": "token-staking-rules",
+      "text": "Заявлено: лимит в токенах пересчитывается ежемесячно и падает с ростом цены (при $35,95 лимит $750 = 21 YOVI); уже застейканное сохраняется; стейкинг единый, и любое пополнение перезапускает срок блокировки для всей суммы.",
+      "kind": "owner_approved_presentation_summary",
+      "source_id": "yovi-token-2026-11",
+      "section": "PDF pages 26-28",
+      "source": "YOVI-token.pdf, PDF pages 26-28"
     }
   ],
   "missing": [
-    "Официальный сайт, оператор и юридическое лицо YOVI не установлены этим материалом.",
-    "Презентация PARTNER задаёт таблицы бонусов, квалификации, номиналы и лимиты. Фактическое начисление, полные действующие договорные условия, комиссии сервиса, доступность вывода и порядок продажи токенов этими таблицами не подтверждены.",
-    "Отдельная договорная комиссия внешнему издателю, цена Trade, брокер/биржа и фактические результаты не установлены этими страницами. Это не означает отсутствия описанного продукта.",
-    "Текущая доступность и окончательные даты промо-окна требуют подтверждения владельцем или официальным опубликованным документом."
+    "Официальный сайт, оператор и юридическое лицо YOVI не установлены этими материалами.",
+    "Фактическое начисление бонусов, комиссии, доступность вывода, биржа и порядок продажи токенов презентациями не подтверждены.",
+    "Рост расчётной цены, доходность стейкинга и поддержка рыночной цены — заявления компании, а не проверенные факты; две презентации дают разную цену через год ($37,78 и $35,95).",
+    "Часовой пояс окончания промо 28 ноября 2026 не указан; YOVI-presentation.pdf, YOVI TRADE и YOVI TRADE for partners в этой версии не разобраны."
   ],
   "boundaries": [
     "Это одобренная владельцем основа для подготовки к предпродажному этапу, а не независимая проверка заявлений презентаций.",
     "Не обещать доходность, прибыль, рост цены, вывод средств или доступность продажи; неизвестные условия оставлять неизвестными.",
     "Одобрение материала для подготовки не является разрешением на внешний контакт, регистрацию, покупку, отправку сообщения или включение runtime.",
     "Сохранять различие между бесплатной регистрацией и лицензией, требуемой для разблокировки PROMO-токенов.",
-    "Не приписывать YOVI какое-либо одноимённое юридическое лицо или официальный сайт без отдельного подтверждения."
+    "Не приписывать YOVI какое-либо одноимённое юридическое лицо или официальный сайт без отдельного подтверждения.",
+    "Не подавать токен, пресейл или стейкинг как инвестицию или источник дохода; цифры доходности и цены приводить только как заявления презентации со ссылкой на источник."
   ]
 }

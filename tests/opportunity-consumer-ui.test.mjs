@@ -255,7 +255,10 @@ test('frozen components match base blobs; runtime matches the tested no-tool ext
     "partner/identity.md": "5d66ae3eb7eb2a5b39e0f8409f93b949a7672f83",
     // Source-attributed Germany research catalogue; no country terms in global model context.
     "partner/knowledge/pm-international.json": "c7b7910a175932c143af96a13717e0f6a8d3e277",
-    "partner/profile.json": "4a66a8207b4227be2f688701d0f0b67cbd9b544b",
+    // Active offer (owner goal: the partner promotes YOVI). `activeOffer` now names the
+    // owner-approved YOVI pre-launch pack instead of PM-International; nothing else in the profile
+    // changes. The pack keeps its own expiry and audience limits: tests/owner-offer-knowledge.test.mjs.
+    "partner/profile.json": "9896dbc8d24cb2d3b81c79e04b3bbdc37a148c04",
     "partner/skills/planning/SKILL.md": "9ae06bf66c941713d476b00aefcba3e69d9361fd",
     "partner/skills/recruiting/SKILL.md": "d114f10c86f4deddfcf83d18ca5c3afde3cf0b2f",
     "scripts/conversation-benchmark.mjs": "e5cfb920f67623e0a990d70642c4ec156703ed3a",
