@@ -1,79 +1,179 @@
-// Owner chat: the owner talks to his partner through a private Telegram bot of his own.
+// Owner chat: the owner talks to his partner in Hermes' own Telegram gateway
+// (adapters/hermes/owner_gateway). Hermes carries the conversation, its sessions and its long-term
+// memory; none of that is rebuilt here.
 //
-// It is a thin transport over the notebook, not a second brain. A message from the owner becomes
-// an owner note; the note wakes the partner the ordinary way; his answer is delivered back here.
-// The bot speaks to exactly one chat - the first private chat that sent /start - and to nobody
-// else: a stranger's message is neither stored nor answered. It never writes to contacts, so it
-// is independent of telegram.liveSending. It runs only when PARTNER_OWNER_BOT_TOKEN is set.
-import fs from 'node:fs';
+// This file is only the door from that conversation into the partner's durable work. One turn of
+// the chat is admitted as one run of the partner's own, so what he writes in his notebook or
+// schedules for himself while talking to the owner passes the same gates as his desk work - the
+// control plane, the stop-list, the daily allowance - and is kept as a run the owner can open.
+//
+// The gateway opens and closes a turn (a Hermes plugin calls /internal/chat/turn). A turn that only
+// talks admits nothing: the run and its ticket appear with the first write and are released when
+// the turn ends, when its writing window runs out, or when the gateway abandons it. An outcome
+// reported by the owner arrives as a new message, therefore in a new turn and a new run, which is
+// what keeps "a result cannot be recorded in the run that opened the expectation" true in chat.
 import path from 'node:path';
+import { ROOT, readJson } from './config.mjs';
+import { loadPartnerKnowledge } from './knowledge.mjs';
+import { AppError, ensure, now, requiredText } from './errors.mjs';
+import { hash, id } from './store.mjs';
 
+export const OWNER_CHAT_RUNTIME = 'owner-chat';
+// What the chat may do without a run: look. Everything else is a write and needs the turn's run.
+const READS = new Set(['partner_get_context', 'partner_list_work', 'partner_search_experience']);
+const DESK = "partner_id=? AND conversation_id IS NULL AND kind NOT IN ('opportunity_review','discovery_review','owner_action')";
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+const refuse = (message, status, code) => { throw new AppError(message, status, code); };
+const flat = (value, max) => String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+// A section carries a marker with the hash of its text. The gateway repeats a section only when
+// that marker is no longer in the conversation: after a change, a new session or a compaction.
+const section = (key, text) => {
+  const sha256 = hash(text), marker = `[рабочий стол · ${key} · ${sha256.slice(0, 12)}]`;
+  return { key, sha256, marker, text: `${marker}\n${text}` };
+};
+
 export class OwnerChat {
-  constructor(service, { token = process.env.PARTNER_OWNER_BOT_TOKEN, api, pollSeconds = 10 } = {}) {
-    this.service = service; this.token = token; this.pollSeconds = pollSeconds; this.stopped = false;
-    this.file = path.join(service.store.directory, 'owner-chat.json');
-    this.state = { chat_id: null, offset: 0, notes: [], delivered: [] };
-    try { Object.assign(this.state, JSON.parse(fs.readFileSync(this.file, 'utf8'))); } catch { /* first start */ }
-    this.api = api ?? (async (method, body) => {
-      const response = await fetch(`https://api.telegram.org/bot${this.token}/${method}`, { method: 'POST',
-        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout((this.pollSeconds + 20) * 1000) });
-      const answer = await response.json();
-      if (!answer.ok) throw new Error('OWNER_CHAT_API'); // never the provider text: it can echo the token
-      return answer.result;
+  constructor(service, { turnMs = 15 * 60000, waitMs = 45000, pollMs = 1500, windowMs = null } = {}) {
+    this.service = service; this.turnMs = turnMs; this.waitMs = waitMs; this.pollMs = pollMs; this.maxWindowMs = windowMs;
+    this.turn = null; this.stopped = false;
+  }
+  isRead(name) { return READS.has(name); }
+  status() { return { turn_open: Boolean(this.turn), writing: Boolean(this.turn?.run), run_id: this.turn?.run?.id ?? null }; }
+  // How long a turn may keep writing once it started: never longer than its control ticket lives.
+  windowMs() {
+    const byTicket = this.service.control.enabled ? Math.max(1000, this.service.control.ttl - 15000) : this.turnMs;
+    return this.maxWindowMs === null ? byTicket : Math.min(byTicket, this.maxWindowMs);
+  }
+
+  // What the partner needs in front of him when the owner writes: his own notebook, and where
+  // the work stands. Facts of the offer are not copied here; he reads them with partner_get_context.
+  sections() {
+    const out = [], notebook = this.service.notebook.digest({ conversation: false });
+    if (notebook) out.push(section('тетрадь', notebook.content));
+    out.push(section('обстановка', this.situation()));
+    return out;
+  }
+  situation() {
+    const store = this.service.store, partnerId = this.service.config.partnerId;
+    const profile = readJson(path.join(ROOT, 'partner/profile.json'));
+    const pack = loadPartnerKnowledge({ audience: 'planning' }).find(item => item.id === profile.activeOffer);
+    const lines = ['# Где мы сейчас', '', `Активное предложение: ${profile.activeOffer}${pack?.version ? `, версия материалов ${pack.version}` : ''}.`];
+    const spec = pack?.owner_specification;
+    if (spec?.status === 'available_for_planning') lines.push(`Материалы владельца по нему действуют до ${spec.review_after}. После этого срока условий у тебя не будет, пока владелец не даст актуальные: напомни ему заранее.`);
+    else if (spec) lines.push(`Материалы владельца по нему сейчас недоступны (${spec.reason}). Условий у тебя нет: не называй их по памяти и попроси у владельца актуальные.`);
+    const open = store.all(`SELECT title FROM tasks WHERE ${DESK} AND status IN ('pending','running','interrupted') ORDER BY due_at LIMIT 8`, partnerId);
+    const waiting = store.get(`SELECT COUNT(*) AS n FROM tasks WHERE ${DESK} AND status='proposed'`, partnerId).n;
+    lines.push(open.length ? `За столом в работе: ${open.map(task => `«${flat(task.title, 90)}»`).join('; ')}.` : 'За столом сейчас нет задач в работе.');
+    if (waiting) lines.push(`Ждут решения владельца: ${waiting}.`);
+    // What the desk finished lately, in the partner's own words, so that in chat he can say what
+    // came of the work he set himself instead of guessing.
+    const done = store.all(`SELECT t.title,r.status,r.result_json FROM runs r JOIN tasks t ON t.id=r.task_id
+      WHERE r.partner_id=? AND r.conversation_id IS NULL AND r.runtime='hermes' AND r.status IN ('completed','failed') AND r.finished_at>=?
+      ORDER BY r.finished_at DESC LIMIT 3`, partnerId, new Date(Date.now() - 3 * 86400000).toISOString());
+    if (done.length) lines.push('', 'Недавно сделано за столом:', ...done.map(run => {
+      let note = '';
+      try { note = flat(JSON.parse(run.result_json ?? '{}').final_response, 280); } catch { /* an unreadable result is shown as no note */ }
+      return `- «${flat(run.title, 90)}» — ${run.status === 'completed' ? (note || 'готово, заметки нет') : 'запуск не удался'}`;
+    }));
+    lines.push('', 'Подробности смотри сам: partner_get_context (материалы, контакты, уроки) и partner_list_work (задачи).');
+    return lines.join('\n');
+  }
+
+  async begin(p = {}) {
+    ensure(!this.stopped, 'Приложение завершает работу', 503);
+    const turnId = requiredText(p.turn_id, 'turn_id', 150);
+    // A turn that was never closed is over the moment the next one begins.
+    if (this.turn && this.turn.id !== turnId) await this.finish(this.turn, 'interrupted');
+    if (!this.turn) {
+      const turn = { id: turnId, sessionId: typeof p.session_id === 'string' ? p.session_id.slice(0, 200) : '', openedAt: now(),
+        deadline: Date.now() + this.turnMs, run: null, admitting: null, held: null, release: null, closed: false, windowClosed: false, outcome: null };
+      turn.timer = setTimeout(() => { void this.finish(turn, 'interrupted'); }, this.turnMs); turn.timer.unref?.();
+      this.turn = turn;
+    }
+    return { turn_id: turnId, sections: this.sections() };
+  }
+  async end(p = {}) {
+    const turnId = requiredText(p.turn_id, 'turn_id', 150);
+    const turn = this.turn?.id === turnId ? this.turn : null, runId = turn?.run?.id ?? null;
+    if (turn) await this.finish(turn, 'completed');
+    return { turn_id: turnId, closed: Boolean(turn), run_id: runId };
+  }
+  async finish(turn, outcome) {
+    if (!turn.closed) {
+      turn.closed = true; turn.outcome = outcome; clearTimeout(turn.timer);
+      if (this.turn === turn) this.turn = null;
+      turn.release?.(outcome);
+    }
+    try { await turn.admitting; } catch { /* the write that asked for the run already has the error */ }
+    await turn.held;
+  }
+  async close() { this.stopped = true; if (this.turn) await this.finish(this.turn, 'interrupted'); }
+
+  // The scope a write runs under. The first write of a turn admits the run; the rest share it.
+  async writeScope() {
+    const turn = this.turn;
+    if (!turn || turn.closed || Date.now() >= turn.deadline) refuse('Записывать в тетрадь и ставить себе задачи можно только во время хода в чате с владельцем. Сейчас ход не открыт.', 403, 'OWNER_CHAT_TURN_REQUIRED');
+    if (!turn.run && !turn.windowClosed) {
+      // A refused admission is forgotten, so a later write of the same turn may try again.
+      turn.admitting ??= this.admit(turn).catch(error => { turn.admitting = null; throw error; });
+      await turn.admitting;
+    }
+    if (turn.windowClosed) refuse('Время на записи в этом ходе вышло. Скажи владельцу, что запишешь это в ответ на его следующее сообщение.', 409, 'OWNER_CHAT_WINDOW_CLOSED');
+    if (!turn.run || turn.closed) refuse('Ход в чате уже закрыт.', 409, 'OWNER_CHAT_TURN_CLOSED');
+    return turn.run.scope;
+  }
+  // Desk runs and chat turns share the private plane, one at a time. A desk run is short, so the
+  // chat waits for it a little rather than telling the owner "later".
+  async admit(turn) {
+    const cfg = this.service.config, until = Date.now() + this.waitMs;
+    // Without the control plane nothing else counts the day's runs for a chat turn.
+    if (!this.service.control.enabled) {
+      const today = this.service.store.get('SELECT COUNT(*) AS n FROM runs WHERE partner_id=? AND created_at>=?', cfg.partnerId, now().slice(0, 10)).n;
+      if (today >= cfg.runtime.maxRunsPerDay) refuse('Дневной лимит запусков исчерпан: запись сегодня недоступна. Скажи об этом владельцу и не называй запись сделанной.', 409, 'OWNER_CHAT_RUN_BUDGET');
+    }
+    for (;;) {
+      let bind; const bound = new Promise(resolve => { bind = resolve; });
+      const held = this.service.control.run('private', 'owner_chat', () => this.hold(turn, bind));
+      const first = await Promise.race([bound, held.then(result => ({ refused: result?.disposition ?? 'OWNER_CHAT_TURN_CLOSED' }))]);
+      if (!first.refused) { turn.held = held.catch(() => {}); return; }
+      if (turn.closed) refuse('Ход в чате уже закрыт.', 409, 'OWNER_CHAT_TURN_CLOSED');
+      if (first.refused !== 'CONTROL_CAPACITY') refuse(`Запись сейчас недоступна (${first.refused}). Скажи об этом владельцу и не называй запись сделанной.`, 409, first.refused);
+      if (Date.now() + this.pollMs >= until) refuse('Сейчас идёт твой рабочий запуск за столом, и он ещё не закончился. Повтори запись чуть позже в этом же ходе или скажи владельцу, что запишешь следующим сообщением.', 409, 'OWNER_CHAT_BUSY');
+      await wait(this.pollMs);
+    }
+  }
+  async hold(turn, bind) {
+    const store = this.service.store, cfg = this.service.config;
+    const scope = await this.service.exclusive(() => store.transaction(() => {
+      if (turn.closed) return null;
+      const runId = id();
+      // The model call of a chat turn is made by the gateway, not by this service. What it cost is
+      // not known here and is not this service's spending, so the run is marked `external`: it is
+      // never shown as a known zero, and it does not stand in the desk's way as an unpaid bill.
+      store.run('INSERT INTO runs(id,partner_id,task_id,conversation_id,status,runtime,model,context_json,cost_status,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)',
+        runId, cfg.partnerId, null, null, 'running', OWNER_CHAT_RUNTIME, cfg.runtime.model || 'hermes-gateway',
+        JSON.stringify({ schema_version: 1, origin: 'owner_chat', turn_id: turn.id, session_id: turn.sessionId, opened_at: turn.openedAt }), 'external', now());
+      this.service.control.bindRun(runId);
+      store.event(cfg.partnerId, null, 'run.started', 'system', { run_id: runId, origin: 'owner_chat' });
+      const ticket = this.service.control.ticket(runId);
+      return { kind: 'agent', runId, conversationId: null, ...(ticket ? { controlTicketId: ticket.id } : {}) };
+    }));
+    if (!scope) return;
+    turn.run = { id: scope.runId, scope };
+    const outcome = turn.closed ? turn.outcome : await new Promise(resolve => {
+      turn.release = resolve;
+      turn.window = setTimeout(() => { turn.windowClosed = true; resolve('completed'); }, this.windowMs()); turn.window.unref?.();
+      bind(scope);
     });
+    clearTimeout(turn.window);
+    await this.service.exclusive(() => store.transaction(() => {
+      const status = outcome === 'completed' ? 'completed' : 'interrupted';
+      const writes = store.get('SELECT COUNT(*) AS n FROM tool_calls WHERE run_id=?', scope.runId).n;
+      const changed = store.run("UPDATE runs SET status=?,result_json=?,error=?,finished_at=? WHERE id=? AND status='running'", status,
+        JSON.stringify({ completed: status === 'completed', origin: 'owner_chat', turn_id: turn.id, tool_calls: writes,
+          final_response: `Ход в чате с владельцем. Записей в тетрадь и своих задач за ход: ${writes}. Сам разговор хранит Hermes, здесь только то, что партнёр записал.` }),
+        status === 'completed' ? null : 'Ход в чате не был закрыт шлюзом', now(), scope.runId);
+      if (changed.changes) store.event(cfg.partnerId, null, `run.${status}`, 'system', { run_id: scope.runId, origin: 'owner_chat', cost_status: 'external' });
+    }));
   }
-  get enabled() { return Boolean(this.token) && this.service.notebook.enabled; }
-  status() { return { enabled: this.enabled, bound: this.state.chat_id !== null, waiting_answers: this.state.notes.filter(id => !this.state.delivered.includes(id)).length }; }
-  save() {
-    this.state.notes = this.state.notes.slice(-200); this.state.delivered = this.state.delivered.slice(-200);
-    const temporary = `${this.file}.${process.pid}.tmp`;
-    fs.writeFileSync(temporary, JSON.stringify(this.state), { flush: true }); fs.renameSync(temporary, this.file);
-  }
-  say(text) { return this.api('sendMessage', { chat_id: this.state.chat_id, text: String(text).slice(0, 4000) }); }
-  async receive(update) {
-    // The cursor moves first: a message is handled at most once, and the note command is keyed by
-    // the update, so even a replayed update cannot file the same words twice.
-    this.state.offset = update.update_id + 1; this.save();
-    const message = update.message;
-    if (message?.chat?.type !== 'private' || typeof message.text !== 'string') return;
-    if (this.state.chat_id === null) {
-      if (message.text.trim() !== '/start') return;
-      this.state.chat_id = message.chat.id; this.save();
-      await this.say('Привет. Это прямой чат с твоим партнёром. Пиши сюда как человеку — отвечу, как дойду до сообщения, обычно в пределах минуты-двух.');
-      return;
-    }
-    if (message.chat.id !== this.state.chat_id || message.text.startsWith('/')) return;
-    try {
-      const made = await this.service.command('notebook.owner_note', { text: message.text }, `owner-chat:${update.update_id}`);
-      this.state.notes.push(made.note_id); this.save();
-    } catch (error) {
-      await this.say(`Не смог передать партнёру: ${error.status ? error.message : 'внутренняя ошибка, смотри панель'}`);
-    }
-  }
-  // An answer is marked delivered before it is sent: if the send fails it stays readable in the
-  // dashboard, and the owner is never sent the same answer twice.
-  async deliver() {
-    if (this.state.chat_id === null) return;
-    const entries = this.service.notebook.snapshot().sections.notes.entries;
-    for (const noteId of this.state.notes) {
-      if (this.state.delivered.includes(noteId)) continue;
-      const note = entries.find(entry => entry.id === noteId);
-      if (note?.meta.status !== 'answered') continue;
-      this.state.delivered.push(noteId); this.save();
-      await this.say(note.fields.answer);
-    }
-  }
-  async step() {
-    const updates = await this.api('getUpdates', { offset: this.state.offset, timeout: this.pollSeconds, allowed_updates: ['message'] });
-    if (this.stopped) return; // shutting down: the cursor has not moved, so nothing is lost
-    for (const update of updates) await this.receive(update);
-    await this.deliver();
-  }
-  start() {
-    this.loop = (async () => {
-      while (!this.stopped) { try { await this.step(); } catch { if (!this.stopped) await wait(5000); } }
-    })();
-  }
-  stop() { this.stopped = true; }
 }

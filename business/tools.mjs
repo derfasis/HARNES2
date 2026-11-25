@@ -22,6 +22,9 @@ export async function callTool(service, scope, name, args, requestId) {
   ensure(toolDefinitions(scope).some(d => d.name === name), 'Инструмент недоступен в этой области', 403);
   const valid = validators.get(name);
   if (!valid || !valid(args)) throw new AppError(`Tool arguments invalid at ${validationSummary(valid?.errors)}`,400,'invalid_tool_arguments');
+  // The owner's chat gateway reads freely; a write is admitted as a run of the partner's own for
+  // the chat turn in progress (business/owner-chat.mjs) and then passes the same checks as any run.
+  if (scope.ownerChat && !scope.runId && !service.ownerChat.isRead(name)) scope = { ...scope, ...(await service.ownerChat.writeScope()) };
   if (scope.runId) {
     const run = service.store.get('SELECT * FROM runs WHERE id=? AND partner_id=?', scope.runId, service.config.partnerId);
     ensure(run?.status === 'running', 'Запуск завершён', 409);
@@ -37,7 +40,12 @@ export async function callTool(service, scope, name, args, requestId) {
     ensure(false, 'Control-plane ticket required for agent writes', 403, 'CONTROL_TICKET_REQUIRED');
   }
   let result;
-  if (name === 'partner_get_context') result = compactPromptContext(contextFor(service, scope.conversationId ?? null));
+  if (name === 'partner_get_context') {
+    result = compactPromptContext(contextFor(service, scope.conversationId ?? null));
+    // A desk run is told its final text is an internal note. In the owner's chat the answer is
+    // read by the owner, so that instruction is replaced rather than left to mislead.
+    if (scope.ownerChat) result.instructions = 'Это справка о деле для разговора с владельцем, а не задание. Материалы предложения — заявления из материалов владельца, не проверенные факты. Отвечай владельцу сам, своими словами.';
+  }
   else if (name === 'partner_list_work') result = scope.conversationId
     ? service.store.all("SELECT * FROM tasks WHERE conversation_id=? AND kind NOT IN ('opportunity_review','discovery_review','owner_action') AND status IN ('pending','proposed','running') ORDER BY due_at LIMIT 50", scope.conversationId)
     : service.store.all("SELECT * FROM tasks WHERE partner_id=? AND kind NOT IN ('opportunity_review','discovery_review','owner_action') AND status IN ('pending','proposed','running') ORDER BY due_at LIMIT 100", service.config.partnerId);

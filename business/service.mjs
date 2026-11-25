@@ -23,6 +23,7 @@ import { outcomeCommand } from './outcome-feedback.mjs';
 import { WorkCore } from './work.mjs';
 import { WORK_COMMANDS } from './work-tables.mjs';
 import { ControlPlane } from './control-plane.mjs';
+import { OwnerChat } from './owner-chat.mjs';
 import { SourceScout, SCOUT_COMMANDS } from './scout.mjs';
 import { AudienceLoop } from './audience.mjs';
 import { AudienceAttention } from './audience-attention.mjs';
@@ -38,7 +39,7 @@ import { discoveryCommand, discoveryDecisionQueue, discoveryDetail, discoveryPre
 // manual path would also have accepted, or promotion becomes a way around that refusal.
 const OUTCOMES = new Set(OUTCOME_KINDS);
 export class BusinessService {
-  constructor(store, config) { this.store = store; this.config = config; this.tail = Promise.resolve(); this.telegramAccountId = null; this.engagement = new EngagementLoop(this); this.continuity = new ContinuityLoop(this); this.executive = new ExecutiveLoop(this); this.actions = new ActionLoop(this); this.outcomes = new OutcomeLoop(this); this.control = new ControlPlane(this); this.work = new WorkCore(this); this.references = new EngagementReferences(this); this.scout = new SourceScout(this); this.audience = new AudienceLoop(this); this.modelProfiles = new ModelProfiles(this); this.attention = new AudienceAttention(this); this.followup = new AudienceFollowup(this); this.notebook = new PartnerNotebook(this); this.discoveryApply = ensureDiscoveryApplied; this.reconcileDiscovery = () => reconcileDiscoveryPending(this, 50); }
+  constructor(store, config) { this.store = store; this.config = config; this.tail = Promise.resolve(); this.telegramAccountId = null; this.engagement = new EngagementLoop(this); this.continuity = new ContinuityLoop(this); this.executive = new ExecutiveLoop(this); this.actions = new ActionLoop(this); this.outcomes = new OutcomeLoop(this); this.control = new ControlPlane(this); this.work = new WorkCore(this); this.references = new EngagementReferences(this); this.scout = new SourceScout(this); this.audience = new AudienceLoop(this); this.modelProfiles = new ModelProfiles(this); this.attention = new AudienceAttention(this); this.followup = new AudienceFollowup(this); this.notebook = new PartnerNotebook(this); this.ownerChat = new OwnerChat(this); this.discoveryApply = ensureDiscoveryApplied; this.reconcileDiscovery = () => reconcileDiscoveryPending(this, 50); }
   exclusive(fn) { const job = this.tail.then(fn); this.tail = job.catch(() => {}); return job; }
   partner() { return this.store.get('SELECT * FROM partners WHERE id=?', this.config.partnerId); }
   person(personId) {

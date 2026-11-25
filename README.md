@@ -99,6 +99,10 @@ npm start
 Node 139/139, Python 5/5, build green; один настоящий no-tool Luna smoke прошёл.
 [Архитектура, подключение и ограничения](docs/AUTO_OPPORTUNITY_PIPELINE_V0.md).
 
+## Чат владельца с партнёром
+
+Владелец говорит с партнёром в Telegram через родной шлюз Hermes с долгой памятью Hindsight. В `.env` нужны `PARTNER_OWNER_BOT_TOKEN` и `PARTNER_OWNER_TELEGRAM_ID`; затем `npm run chat:setup` один раз и `START-PARTNER-CHAT.bat` (или `npm run chat:start`) для запуска. Из чата партнёр читает и ведёт свою тетрадь и ставит себе работу; людям он из чата не пишет. [Устройство, установка и ограничения](docs/OWNER_CHAT_V1.md).
+
 ## Telegram
 
 Поддерживаются два транспорта: `telegram.transport: "bot_api"` и `telegram.transport: "mtproto"`. Bot API использует `PARTNER_TELEGRAM_BOT_TOKEN`. MTProto использует GramJS (`telegram`/`TelegramClient`) и `PARTNER_TELEGRAM_API_ID`, `PARTNER_TELEGRAM_API_HASH` плюс `PARTNER_TELEGRAM_SESSION` или `PARTNER_TELEGRAM_SESSION_FILE`. В обоих режимах нужны числовые chat ID в `telegram.allowedChatIds` и `telegram.enabled: true`.
@@ -116,6 +120,7 @@ MTProto принимает только входящие личные текст
 | `business/` | SQLite, команды и события, задачи, контекст, версии черновиков, расходы |
 | `business/migrations/` | Версионированная схема с контрольными суммами |
 | `adapters/hermes/` | Запуск закреплённой версии Hermes через отдельный Python-процесс |
+| `adapters/hermes/owner_gateway/` | Чат владельца: запуск родного шлюза Hermes, плагин «стол партнёра», подготовка дома Hermes и памяти Hindsight |
 | `adapters/mcp/` | MCP stdio, доступ к планированию и предложениям |
 | `contracts/` | JSON Schema команд и инструментов |
 | `partner/` | Профиль, идентичность, знания, исходные навыки и каталог способностей |
