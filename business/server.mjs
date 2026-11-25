@@ -15,6 +15,7 @@ import { MtprotoTelegramChannel } from './channels/telegram-mtproto.mjs';
 import { BrowserSourceReader, browserPolicy } from './sources/browser-readonly.mjs';
 import { toolDefinitions, callTool } from './tools.mjs';
 import { exportPartner } from './export.mjs';
+import { OwnerChat } from './owner-chat.mjs';
 import { loadPartnerKnowledge } from './knowledge.mjs';
 import { listCandidates } from './executive-donors.mjs';
 import { AppError, ensure, requiredText } from './errors.mjs';
@@ -147,6 +148,8 @@ export async function start({ config = loadConfig(), directory = DATA, deploymen
   let telegramReaders = [];
   const composeReaders = () => { scheduler.sourceReaders = [...telegramReaders, ...browserReaders]; };
   const scheduler = new Scheduler(service,runtime,telegram,[]);
+  // The owner's private bot. It talks to one chat only and never to contacts.
+  const ownerChat = new OwnerChat(service);
   telegram.onSourcesReady = readers => { telegramReaders = readers ?? []; composeReaders(); };
   composeReaders();
   let shuttingDown = false, servicePort = config.server.port;
@@ -289,7 +292,7 @@ export async function start({ config = loadConfig(), directory = DATA, deploymen
           audience_enabled:config.audience?.enabled===true,scout_enabled:config.scout?.enabled===true,control_plane_enabled:config.controlPlane?.enabled===true,
           model_endpoint_allowlisted:(config.modelProfiles?.allowedBaseUrls?.length ?? 0)>0,
           public_source_configured:(config.opportunity.telegramSources.length + config.opportunity.browserSources.length + service.scout.monitorAuthorityPolicies().length)>0},
-        release,activation:service.deployment?.summary() ?? null });
+        release,activation:service.deployment?.summary() ?? null,owner_chat:ownerChat.status() });
       // Outside the discovery block on purpose: a route nested inside another route's prefix
       // is unreachable, and these two paths are not discovery routes at all.
       if (url.pathname === '/api/outcomes') {
@@ -406,7 +409,7 @@ export async function start({ config = loadConfig(), directory = DATA, deploymen
   let closing = null, activationTimer = null;
   const close = (reason = 'operator_stop') => {
     if (closing) return closing;
-    shuttingDown=true; scheduler.stop();
+    shuttingDown=true; scheduler.stop(); ownerChat.stop();
     if (activationTimer) clearTimeout(activationTimer);
     service.deployment?.stop(reason);
     service.control.close();
@@ -440,6 +443,7 @@ export async function start({ config = loadConfig(), directory = DATA, deploymen
     activationTimer.unref();
   }
   scheduler.start(); telegram.start();
+  if (ownerChat.enabled) ownerChat.start();
   console.log(`Digital AI Partner: http://127.0.0.1:${servicePort}`);
   console.log(`Hermes ${runtimeReadiness(config).ready ? 'enabled' : 'waiting for model configuration'}; Telegram ${config.telegram.enabled ? 'enabled' : 'disabled'}.`);
   // The scheduler and the channel are returned so the wiring itself can be tested: a test that
