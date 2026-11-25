@@ -29,12 +29,16 @@ MEMORY_VERSION, MEMORY_NOT_NEWER_THAN = "1.2.1", "2026-11-18T00:00:00Z"
 MEMORY_PROFILE, MEMORY_PORT = "harnes2", 8890
 # Memory extraction is many small calls: a fast model, two at a time, on the same local route.
 MEMORY_MODEL = "gemini-3-flash"
+# The partner's own browser (owner decision, 2026-11-25: a browser with full access and his own
+# YOVI account, no technical locks). Hermes attaches to a dedicated Chrome window with its own
+# profile, started by scripts/partner-chat.ps1; the owner signs in there himself.
+BROWSER_PORT = 9222
 # The same Hermes switches the partner's desk runs use (adapters/hermes/runner.py): he has no
-# terminal and no files, so Hermes' guidance for coding agents is off. Memory stays on here.
+# terminal and no files, so Hermes' guidance for coding agents is off. Memory and his browser stay on.
 AGENT = {"tool_use_enforcement": False, "execution_guidance": False, "task_completion_guidance": False,
          "parallel_tool_call_guidance": False, "environment_probe": False, "bot_mode_protocol": False, "coding_context": "off",
-         "disabled_toolsets": ["terminal", "file", "code_execution", "browser", "computer_use", "delegation", "cronjob", "coding"]}
-TOOLSETS = ["memory", "session_search", "todo", "clarify"]
+         "disabled_toolsets": ["terminal", "file", "code_execution", "computer_use", "delegation", "cronjob", "coding"]}
+TOOLSETS = ["memory", "session_search", "todo", "clarify", "browser"]
 
 
 def say(text: str) -> None:
@@ -108,6 +112,9 @@ def write_config(model: dict) -> None:
         "platform_toolsets": {"telegram": TOOLSETS},
         "agent": AGENT,
         "tools": {"tool_search": {"enabled": "off"}},
+        # backend "off" selects Hermes' built-in browser tools. Its default driver runs model-written
+        # Python on this machine and is only offered together with a terminal, which he does not have.
+        "browser": {"backend": "off", "cdp_url": f"http://127.0.0.1:{BROWSER_PORT}"},
         "checkpoints": {"enabled": False},
         "memory": {"provider": "hindsight"},
         # Hermes' first-message offer to "build a profile" of the user: the owner is not a new user.

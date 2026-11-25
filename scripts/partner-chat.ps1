@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('Setup', 'Start', 'Stop', 'Status')]
+    [ValidateSet('Setup', 'Start', 'Stop', 'Status', 'Browser')]
     [string]$Action = 'Status'
 )
 # The owner's chat with the partner: Hermes' own Telegram gateway plus its Hindsight memory server.
@@ -18,6 +18,11 @@ $hindsight = Join-Path $projectRoot 'data\hindsight\venv\Scripts\hindsight-embed
 $memoryProfile = 'harnes2'
 $memoryUrl = 'http://127.0.0.1:8890/health'
 $launchPattern = 'owner_gateway.launch\.py'
+# The partner's own browser: a dedicated Chrome profile he drives through Hermes' browser tools.
+# The owner signs in to the partner's accounts in this window himself.
+$browserPort = 9222
+$browserProfile = Join-Path $projectRoot 'data\partner-browser\profile'
+$browserHome = 'https://yovi.biz/ru/panel'
 
 function Test-Listening([int]$port) {
     return [bool](Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue)
@@ -32,6 +37,16 @@ function Test-Service {
     try { $recorded = Get-Content -Raw -LiteralPath $serviceFile | ConvertFrom-Json } catch { return $false }
     $process = Get-CimInstance Win32_Process -Filter "ProcessId = $([int]$recorded.pid)" -ErrorAction SilentlyContinue
     return [bool]($process -and $process.Name -eq 'node.exe')
+}
+
+function Start-PartnerBrowser {
+    if (Test-Listening $browserPort) { return }
+    $chrome = @("$env:ProgramFiles\Google\Chrome\Application\chrome.exe", "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
+        "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe") | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
+    if (-not $chrome) { Write-Host "Google Chrome was not found: the partner's browser is not started."; return }
+    New-Item -ItemType Directory -Force -Path $browserProfile | Out-Null
+    Start-Process -FilePath $chrome -ArgumentList @("--remote-debugging-port=$browserPort", ('--user-data-dir="' + $browserProfile + '"'), '--no-first-run', '--no-default-browser-check', $browserHome) | Out-Null
+    for ($attempt = 0; $attempt -lt 40 -and -not (Test-Listening $browserPort); $attempt++) { Start-Sleep -Milliseconds 250 }
 }
 
 function Get-GatewayProcess {
@@ -55,9 +70,12 @@ function Show-Status {
     Write-Host ("Model proxy (8318):   " + $(if (Test-Listening 8318) { 'running' } else { 'NOT running' }))
     Write-Host ("Memory (Hindsight):   " + $(if (Test-Memory) { 'running' } else { 'NOT running' }))
     Write-Host ("Telegram chat:        " + $(if ($gateway) { "running, Telegram $telegram" } else { 'NOT running' }))
+    Write-Host ("Partner's browser:    " + $(if (Test-Listening $browserPort) { 'open' } else { 'NOT open (the partner cannot browse)' }))
 }
 
 if ($Action -eq 'Status') { Show-Status; exit 0 }
+
+if ($Action -eq 'Browser') { Start-PartnerBrowser; Show-Status; exit 0 }
 
 if ($Action -eq 'Setup') {
     if (-not (Test-Path -LiteralPath $python)) { throw 'The Hermes environment is missing. Run: npm run setup' }
@@ -101,6 +119,7 @@ if (-not (Test-Memory)) {
     [void]$starter.WaitForExit(660000)
     if (-not (Test-Memory)) { throw "The memory server did not start. See $env:USERPROFILE\.hindsight\profiles\$memoryProfile.log" }
 }
+Start-PartnerBrowser
 if (Get-GatewayProcess) { Write-Host 'Telegram chat is already running.'; Show-Status; exit 0 }
 $env:PYTHONUTF8 = '1'; $env:PYTHONIOENCODING = 'utf-8'
 $started = Get-Date
