@@ -136,10 +136,13 @@ class GatewaySetup(unittest.TestCase):
             self.assertIs(self.setup.AGENT[key], False, key)
         self.assertIn("coding_context: off", runner)
         self.assertEqual(self.setup.AGENT["coding_context"], "off")
-        # The partner has no terminal, files, code, browser, cron or sub-agents in the chat.
-        for toolset in ("terminal", "file", "code_execution", "browser", "computer_use", "delegation", "cronjob", "coding"):
+        # The partner has no terminal, files, code, cron or sub-agents in the chat.
+        for toolset in ("terminal", "file", "code_execution", "computer_use", "delegation", "cronjob", "coding"):
             self.assertIn(toolset, self.setup.AGENT["disabled_toolsets"])
             self.assertNotIn(toolset, self.setup.TOOLSETS)
+        # The browser is his by the owner's decision of 25 November 2026: on, and not locked down.
+        self.assertIn("browser", self.setup.TOOLSETS)
+        self.assertNotIn("browser", self.setup.AGENT["disabled_toolsets"])
 
     def test_config_keeps_the_owners_additions_and_never_holds_the_key(self):
         import yaml
@@ -157,6 +160,8 @@ class GatewaySetup(unittest.TestCase):
         self.assertEqual(config["memory"]["provider"], "hindsight")
         self.assertEqual(config["onboarding"]["profile_build"], "off")
         self.assertEqual(config["tools"]["tool_search"]["enabled"], "off")
+        # He drives his own Chrome window on this machine: no cloud browser, not the owner's profile.
+        self.assertEqual(config["browser"], {"backend": "off", "cdp_url": "http://127.0.0.1:9222"})
         desk = config["mcp_servers"]["desk"]
         self.assertEqual(Path(desk["args"][0]), ROOT / "adapters" / "mcp" / "server.py")
 
