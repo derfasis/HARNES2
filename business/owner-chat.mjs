@@ -79,6 +79,23 @@ export class OwnerChat {
     return lines.join('\n');
   }
 
+  // What the machine around him can do and what is switched on, so that in chat he plans with
+  // the real tools instead of guessing. Read through partner_get_context; nothing here is a secret.
+  system() {
+    const cfg = this.service.config, store = this.service.store;
+    return {
+      capabilities: readJson(path.join(ROOT, 'partner/capabilities.json')).map(({ id, name, status, effect }) => ({ id, name, status, effect })),
+      switches: { desk_runs: cfg.runtime.enabled === true, own_tasks_per_day: cfg.autonomy?.maxOwnTasksPerDay ?? 0,
+        telegram_account_reading: cfg.telegram.enabled === true, telegram_sending_from_service: cfg.telegram.liveSending === true,
+        public_sources_read: (cfg.opportunity.telegramSources?.length ?? 0) + (cfg.opportunity.browserSources?.length ?? 0),
+        inbound_review: cfg.opportunity.automatic === true, discovery: cfg.discovery?.enabled === true,
+        audience_research: cfg.audience?.enabled === true, source_scout: cfg.scout?.enabled === true },
+      counts: { people: store.get('SELECT COUNT(*) AS n FROM persons WHERE partner_id=?', cfg.partnerId).n,
+        tasks_waiting_for_owner: store.get(`SELECT COUNT(*) AS n FROM tasks WHERE partner_id=? AND status='proposed'`, cfg.partnerId).n },
+      note: 'Сервис читает разрешённые чаты и готовит черновики; сам он людям не отправляет (telegram_sending_from_service). Твои руки вовне — твой браузер и аккаунты, в которые владелец в нём вошёл. Выключенное включает владелец: скажи ему, что нужно и зачем.',
+    };
+  }
+
   async begin(p = {}) {
     ensure(!this.stopped, 'Приложение завершает работу', 503);
     const turnId = requiredText(p.turn_id, 'turn_id', 150);

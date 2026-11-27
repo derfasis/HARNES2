@@ -49,6 +49,9 @@ test('outside a chat turn the gateway may look at the desk but cannot write', as
   assert.equal(context.partner.activeOffer, 'yovi-prelaunch');
   // A desk run is told that its final text is an internal note; in chat the owner reads the answer.
   assert.match(context.instructions, /для разговора с владельцем/); assert.doesNotMatch(context.instructions, /internal note/);
+  // In chat he is also told what the system around him can do and what is switched on.
+  assert.ok(context.system.capabilities.length > 0 && context.system.capabilities.every(item => item.id && item.name && item.status));
+  assert.deepEqual([context.system.switches.telegram_sending_from_service, context.system.switches.own_tasks_per_day, context.system.counts.people], [false, h.config.autonomy.maxOwnTasksPerDay, 0]);
   assert.deepEqual(await h.tool('partner_list_work', {}), []);
   await assert.rejects(h.expect(), { status: 403, code: 'OWNER_CHAT_TURN_REQUIRED' });
   await assert.rejects(h.tool('partner_propose_task', { kind: 'research', title: 'Найти каналы', instructions: 'Посмотреть, где спрашивают сами.', due_at: inDays(1) }), { status: 403, code: 'OWNER_CHAT_TURN_REQUIRED' });
