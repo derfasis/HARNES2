@@ -44,6 +44,7 @@ export async function callTool(service, scope, name, args, requestId) {
     result = compactPromptContext(contextFor(service, scope.conversationId ?? null));
     // A desk run is told its final text is an internal note. In the owner's chat the answer is
     // read by the owner, so that instruction is replaced rather than left to mislead.
+    if (scope.ownerChat) result.system = service.ownerChat.system();
     if (scope.ownerChat) result.instructions = 'Это справка о деле для разговора с владельцем, а не задание. Материалы предложения — заявления из материалов владельца, не проверенные факты. Отвечай владельцу сам, своими словами.';
   }
   else if (name === 'partner_list_work') result = scope.conversationId
